@@ -57,9 +57,15 @@ python -m app.main &
 BOT_PID=$!
 
 END=$((SECONDS + RUN_SECONDS))
+CHAINED=""
+STARTED=$SECONDS
 while [ $SECONDS -lt $END ] && kill -0 $BOT_PID 2>/dev/null; do
   sleep "$BACKUP_EVERY"
   [ -f "$DATA_DIR/bot.db" ] && backup
+  # Бот живёт 2 минуты — ставим в очередь следующий запуск (он дождётся окончания этого)
+  if [ -z "$CHAINED" ] && [ $((SECONDS - STARTED)) -ge 120 ] && [ -n "${CHAIN_WORKFLOW:-}" ]; then
+    gh workflow run "$CHAIN_WORKFLOW" -R "$GITHUB_REPOSITORY" --ref main && CHAINED=1 && echo "Следующий запуск в очереди"
+  fi
 done
 
 # 4. Корректная остановка: следующий запуск уже ждёт в очереди
