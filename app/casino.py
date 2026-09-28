@@ -62,6 +62,15 @@ class Casino:
                 balance = (await q.fetchone())["balance"]
         return balance
 
+    async def register(self, user_id: int, username: str | None, first_name: str | None) -> dict:
+        """Создаёт или обновляет игрока; новичку начисляет стартовый бонус, если он включён."""
+        user, created = await self.db.touch_user(user_id, username, first_name)
+        if created and self.cfg.start_bonus > 0:
+            async with self.db.tx() as c:
+                await self.db.change_balance(c, user_id, self.cfg.start_bonus, "bonus", "start")
+            user = await self.db.get_user(user_id)
+        return user
+
     # ---------- чеки ----------
 
     async def create_check(self, admin_id: int, amount: int, activations: int) -> str:
