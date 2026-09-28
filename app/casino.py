@@ -165,8 +165,8 @@ class Casino:
         if bet_type not in g.ROULETTE_BETS:
             raise GameError("Неизвестный тип ставки")
         if bet_type == "number":
-            if not isinstance(value, int) or not 0 <= value <= 36:
-                raise GameError("Число — от 0 до 36")
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= g.DOUBLE_ZERO:
+                raise GameError("Число — от 0 до 36 или 00")
         else:
             value = None
         number = g.roulette_spin()
@@ -177,7 +177,7 @@ class Casino:
             balance = await self._settle(
                 c, user_id, "roulette", bet, win, {"number": number, "type": bet_type, "value": value}
             )
-        return {"number": number, "color": g.roulette_color(number), "multiplier": mult,
+        return {"number": number, "label": g.roulette_label(number), "color": g.roulette_color(number), "multiplier": mult,
                 "win": win, "balance": balance}
 
     # ---------- кейсы ----------
@@ -219,8 +219,8 @@ class Casino:
 
     async def mines_start(self, user_id: int, bet: Any, mines: Any) -> dict:
         bet = self._check_bet(bet)
-        if not isinstance(mines, int) or not 1 <= mines <= 24:
-            raise GameError("Мин — от 1 до 24")
+        if not isinstance(mines, int) or isinstance(mines, bool) or not g.MINES_MIN <= mines <= 24:
+            raise GameError(f"Мин — от {g.MINES_MIN} до 24")
         layout = g.mines_place(mines)
         async with self.db.tx() as c:
             async with c.execute("SELECT 1 FROM mines_games WHERE user_id=?", (user_id,)) as q:

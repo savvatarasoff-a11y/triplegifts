@@ -12,18 +12,18 @@ from typing import Sequence
 
 RNG = secrets.SystemRandom()
 
-HOUSE_EDGE = 0.01  # 1% — как на крупных площадках: кости, мины, краш
+HOUSE_EDGE = 0.05  # комиссия казино в костях, минах и краше
 
 
 # ---------------- Слоты ----------------
 
 SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "⭐", "7️⃣", "💎"]
-SLOT_WEIGHTS = [28, 22, 18, 13, 9, 6, 4]
+SLOT_WEIGHTS = [22, 22, 19, 15, 11, 7, 4]
 # Три одинаковых символа -> множитель. 💎💎💎 — джекпот ×1000 (примерно 1 раз на 15 600 спинов)
-SLOT_TRIPLE = {"🍒": 4, "🍋": 8, "🍇": 15, "🔔": 30, "⭐": 60, "7️⃣": 250, "💎": 1000}
+SLOT_TRIPLE = {"🍒": 5, "🍋": 10, "🍇": 20, "🔔": 30, "⭐": 60, "7️⃣": 250, "💎": 1000}
 SLOT_TWO_DIAMONDS = 10   # два 💎 в любом месте
-SLOT_TWO_CHERRIES = 2.5  # две 🍒 в любом месте
-# RTP ≈ 95.8%, выигрышных спинов ≈ 21.6%
+SLOT_TWO_CHERRIES = 2    # две 🍒 в любом месте
+# RTP ≈ 90%, выигрышных спинов ≈ 15%
 
 
 def slots_multiplier(reels: Sequence[str]) -> float:
@@ -56,7 +56,7 @@ def slots_rtp() -> float:
 # ---------------- Кости (Dice) ----------------
 
 DICE_MIN_CHANCE = 0.01
-DICE_MAX_CHANCE = 98.0
+DICE_MAX_CHANCE = 90.0
 
 
 def dice_valid_chance(chance: float) -> bool:
@@ -64,7 +64,7 @@ def dice_valid_chance(chance: float) -> bool:
 
 
 def dice_multiplier(chance: float) -> float:
-    """Шанс 50% -> ×1.98, 1% -> ×99, 0.01% -> ×9900."""
+    """Шанс 50% -> ×1.9, 1% -> ×95, 0.01% -> ×9500."""
     return math.floor((1 - HOUSE_EDGE) * 100 / chance * 10000) / 10000
 
 
@@ -77,23 +77,29 @@ def dice_roll(chance: float, over: bool = False, rng: random.Random = RNG) -> tu
     return roll, win, dice_multiplier(chance) if win else 0.0
 
 
-# ---------------- Рулетка (европейская, один ноль) ----------------
+# ---------------- Рулетка (американская: 0 и 00) ----------------
 
 RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 ROULETTE_BETS = {"red", "black", "even", "odd", "low", "high", "dozen1", "dozen2", "dozen3", "number"}
+DOUBLE_ZERO = 37   # «00» хранится как 37
+ROULETTE_POCKETS = 38
+
+
+def roulette_label(n: int) -> str:
+    return "00" if n == DOUBLE_ZERO else str(n)
 
 
 def roulette_color(n: int) -> str:
-    if n == 0:
+    if n in (0, DOUBLE_ZERO):
         return "green"
     return "red" if n in RED_NUMBERS else "black"
 
 
 def roulette_multiplier(bet_type: str, value: int | None, n: int) -> float:
-    """Множитель выплаты (включая ставку) или 0."""
+    """Множитель выплаты (включая ставку) или 0. На 0 и 00 проигрывают все ставки, кроме ставки на это число."""
     if bet_type == "number":
         return 36.0 if value == n else 0.0
-    if n == 0:
+    if n in (0, DOUBLE_ZERO):
         return 0.0
     wins = {
         "red": n in RED_NUMBERS,
@@ -114,7 +120,7 @@ def roulette_multiplier(bet_type: str, value: int | None, n: int) -> float:
 
 
 def roulette_spin(rng: random.Random = RNG) -> int:
-    return rng.randrange(37)
+    return rng.randrange(ROULETTE_POCKETS)
 
 
 # ---------------- Мины ----------------
@@ -132,8 +138,11 @@ def mines_multiplier(mines: int, opened: int) -> float:
     return round((1 - HOUSE_EDGE) * fair, 4)
 
 
+MINES_MIN = 2   # с одной миной первый клик давал бы множитель меньше ×1
+
+
 def mines_place(mines: int, rng: random.Random = RNG) -> list[int]:
-    if not 1 <= mines <= MINES_CELLS - 1:
+    if not MINES_MIN <= mines <= MINES_CELLS - 1:
         raise ValueError("mines")
     return sorted(rng.sample(range(MINES_CELLS), mines))
 
@@ -145,7 +154,7 @@ CRASH_MAX = 10000.0
 
 
 def crash_point(rng: random.Random = RNG) -> float:
-    """Точка краша: P(краш ≥ x) = 0.99 / x. Около 1% раундов падают сразу на 1.00."""
+    """Точка краша: P(краш ≥ x) = 0.95 / x. Около 6% раундов (1 − 0.95/1.01) падают сразу на 1.00."""
     u = rng.random()
     point = (1 - HOUSE_EDGE) / (1 - u)
     point = math.floor(point * 100) / 100
@@ -162,14 +171,14 @@ def crash_time_of(multiplier: float) -> float:
 
 # ---------------- Кейсы ----------------
 
-# Подарки в кейсах: (множитель от цены кейса, вес, подарок). RTP ≈ 90.6%, джекпот ×100
+# Подарки в кейсах: (множитель от цены кейса, вес, подарок). RTP ≈ 87%, джекпот ×100
 CASE_TIERS = (
-    (0.2, 960, "🌹"),
+    (0.2, 1000, "🌹"),
     (0.5, 560, "🧸"),
-    (1, 280, "🎁"),
-    (2, 130, "💝"),
-    (5, 56, "🍾"),
-    (20, 11, "🏆"),
+    (1, 270, "🎁"),
+    (2, 120, "💝"),
+    (5, 52, "🍾"),
+    (20, 10, "🏆"),
     (100, 3, "💍"),
 )
 

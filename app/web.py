@@ -118,6 +118,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
                     for c in g.CASES
                 ],
                 "red": sorted(g.RED_NUMBERS),
+                "mines_min": g.MINES_MIN,
                 "crash_growth": g.CRASH_GROWTH,
                 "pvp_commission": g.PVP_COMMISSION,
             },
