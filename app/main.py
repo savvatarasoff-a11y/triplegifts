@@ -8,6 +8,7 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.types import BotCommand, BotCommandScopeChat, MenuButtonWebApp, WebAppInfo
 from aiohttp import web
 
@@ -103,10 +104,19 @@ async def run() -> None:
     await setup_bot_ui(bot, cfg)
     bg = asyncio.create_task(background(casino, bot))
 
-    me = await bot.get_me()
-    log.info("Бот @%s запущен, мини-приложение %s, порт %s", me.username, cfg.webapp_url or "—", cfg.port)
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        me = await bot.get_me()
+        log.info("Бот @%s запущен, мини-приложение %s, порт %s", me.username, cfg.webapp_url or "—", cfg.port)
+    except Exception as e:
+        log.error("Нет связи с Telegram при запуске (%s), продолжаю попытки", type(e).__name__)
+    try:
+        while True:
+            try:
+                await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+                break
+            except TelegramNetworkError as e:
+                log.error("Нет связи с Telegram (%s), повтор через 5 секунд", type(e).__name__)
+                await asyncio.sleep(5)
     finally:
         bg.cancel()
         await runner.cleanup()
