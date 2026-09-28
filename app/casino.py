@@ -15,7 +15,8 @@ from .games import logic as g
 
 CRASH_BETTING_SECONDS = 7   # приём ставок перед стартом ракеты
 CRASH_PAUSE_SECONDS = 3     # пауза после краша
-PVP_ROUND_SECONDS = 30      # сколько длится раунд после второго игрока
+PVP_ROUND_SECONDS = 30
+PVP_GAMES = ("roulette", "hockey")      # сколько длится раунд после второго игрока
 PVP_IDLE_REFUND = 600       # одиночную ставку возвращаем через 10 минут
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 
@@ -488,23 +489,32 @@ class Casino:
 
     # ---------- PvP-рулетка ----------
 
-    async def _open_round(self, c: aiosqlite.Connection) -> dict:
-        async with c.execute("SELECT * FROM pvp_rounds WHERE status='open' ORDER BY id DESC LIMIT 1") as q:
+    @staticmethod
+    def _pvp_game(game: Any) -> str:
+        if game not in PVP_GAMES:
+            raise GameError("Неизвестная игра")
+        return game
+
+    async def _open_round(self, c: aiosqlite.Connection, game: str) -> dict:
+        async with c.execute(
+            "SELECT * FROM pvp_rounds WHERE status='open' AND game=? ORDER BY id DESC LIMIT 1", (game,)
+        ) as q:
             row = await q.fetchone()
         if row:
             return dict(row)
-        cur = await c.execute("INSERT INTO pvp_rounds(created_at) VALUES (?)", (time.time(),))
+        cur = await c.execute("INSERT INTO pvp_rounds(game, created_at) VALUES (?, ?)", (game, time.time()))
         async with c.execute("SELECT * FROM pvp_rounds WHERE id=?", (cur.lastrowid,)) as q:
             return dict(await q.fetchone())
 
-    async def pvp_bet(self, user_id: int, amount: Any) -> dict:
+    async def pvp_bet(self, user_id: int, amount: Any, game: Any = "roulette") -> dict:
+        game = self._pvp_game(game)
         amount = self._check_bet(amount)
         now = time.time()
         async with self.db.tx() as c:
-            rnd = await self._open_round(c)
+            rnd = await self._open_round(c, game)
             if rnd["ends_at"] and now >= rnd["ends_at"] - 1:
                 raise GameError("Раунд уже крутится, подождите следующий")
-            await self._take(c, user_id, amount, "pvp")
+            await self._take(c, user_id, amount, game)
             await c.execute(
                 "INSERT INTO pvp_bets(round_id, user_id, amount, joined) VALUES (?,?,?,?) "
                 "ON CONFLICT(round_id, user_id) DO UPDATE SET amount = amount + excluded.amount",
@@ -515,7 +525,7 @@ class Casino:
                 players = (await q.fetchone())["n"]
             if players >= 2 and not rnd["ends_at"]:
                 await c.execute("UPDATE pvp_rounds SET ends_at=? WHERE id=?", (now + PVP_ROUND_SECONDS, rnd["id"]))
-        return await self.pvp_state(user_id)
+        return await self.pvp_state(user_id, game)
 
     async def pvp_tick(self) -> list[dict]:
         """Завершает раунды, у которых вышло время. Возвращает итоги для уведомлений."""
@@ -533,16 +543,23 @@ class Casino:
                     winner, ticket = g.pvp_pick_winner([(b["user_id"], b["amount"]) for b in bets])
                     pot = sum(b["amount"] for b in bets)
                     prize = g.pvp_payout(pot)
+                    detail = None
+                    if rnd["game"] == "hockey":
+                        zones = g.hockey_zones([b["amount"] for b in bets])
+                        winner_idx = next(i for i, b in enumerate(bets) if b["user_id"] == winner)
+                        detail = {"zones": [list(z) for z in zones], **g.hockey_shot(zones[winner_idx])}
                     await self.db.change_balance(c, winner, prize, "pvp_win", str(rnd["id"]))
                     for b in bets:
                         win = prize if b["user_id"] == winner else 0
-                        await self.db.log_bet(c, b["user_id"], "pvp", b["amount"], win, json.dumps({"round": rnd["id"]}))
+                        game_name = "hockey" if rnd["game"] == "hockey" else "pvp"
+                        await self.db.log_bet(c, b["user_id"], game_name, b["amount"], win, json.dumps({"round": rnd["id"]}))
                     await c.execute(
-                        "UPDATE pvp_rounds SET status='done', winner_id=?, pot=?, payout=?, ticket=?, finished_at=? WHERE id=?",
-                        (winner, pot, prize, ticket, now, rnd["id"]),
+                        "UPDATE pvp_rounds SET status='done', winner_id=?, pot=?, payout=?, ticket=?, finished_at=?, "
+                        "detail=? WHERE id=?",
+                        (winner, pot, prize, ticket, now, json.dumps(detail) if detail else None, rnd["id"]),
                     )
-                    results.append({"round": rnd["id"], "winner": winner, "pot": pot, "payout": prize,
-                                    "players": [b["user_id"] for b in bets]})
+                    results.append({"round": rnd["id"], "game": rnd["game"], "winner": winner, "pot": pot,
+                                    "payout": prize, "players": [b["user_id"] for b in bets]})
                 elif len(bets) == 1 and not rnd["ends_at"] and now - bets[0]["joined"] > PVP_IDLE_REFUND:
                     await self.db.change_balance(c, bets[0]["user_id"], bets[0]["amount"], "pvp_refund", str(rnd["id"]))
                     await c.execute(
@@ -563,9 +580,12 @@ class Casino:
             for r in rows
         ]
 
-    async def pvp_state(self, user_id: int | None = None) -> dict:
+    async def pvp_state(self, user_id: int | None = None, game: Any = "roulette") -> dict:
+        game = self._pvp_game(game)
         now = time.time()
-        rnd = await self.db.one("SELECT * FROM pvp_rounds WHERE status='open' ORDER BY id DESC LIMIT 1")
+        rnd = await self.db.one(
+            "SELECT * FROM pvp_rounds WHERE status='open' AND game=? ORDER BY id DESC LIMIT 1", game
+        )
         current = None
         if rnd:
             players = await self._round_players(rnd["id"])
@@ -576,7 +596,9 @@ class Casino:
                 "players": players,
                 "my_bet": next((p["amount"] for p in players if p["id"] == user_id), 0),
             }
-        last = await self.db.one("SELECT * FROM pvp_rounds WHERE status='done' ORDER BY id DESC LIMIT 1")
+        last = await self.db.one(
+            "SELECT * FROM pvp_rounds WHERE status='done' AND game=? ORDER BY id DESC LIMIT 1", game
+        )
         last_view = None
         if last:
             players = await self._round_players(last["id"])
@@ -584,6 +606,7 @@ class Casino:
             last_view = {
                 "id": last["id"], "pot": last["pot"], "payout": last["payout"], "ticket": last["ticket"],
                 "winner": winner, "players": players, "finished_ago": now - (last["finished_at"] or now),
+                "detail": json.loads(last["detail"]) if last["detail"] else None,
             }
-        return {"round": current, "last": last_view, "commission": g.PVP_COMMISSION,
+        return {"game": game, "round": current, "last": last_view, "commission": g.PVP_COMMISSION,
                 "round_seconds": PVP_ROUND_SECONDS}

@@ -90,3 +90,33 @@ def test_payout_floors():
     assert g.payout(10, 1.9) == 19
     assert g.payout(3, 2.5) == 7
     assert g.payout(5, 0.0) == 0
+
+
+def test_hockey_zones_proportional():
+    zones = g.hockey_zones([30, 10, 60])
+    sizes = [y1 - y0 for y0, y1 in zones]
+    assert sizes == pytest.approx([48, 16, 96])
+    assert zones[0][0] == 0 and zones[-1][1] == g.HOCKEY_H
+
+
+def test_hockey_shot_is_valid_path():
+    for seed in range(300):
+        rng = random.Random(seed)
+        zone = (20.0, 45.0)
+        shot = g.hockey_shot(zone, rng)
+        pts = shot["points"]
+        assert pts[0] == list(g.HOCKEY_START)
+        tx, ty = pts[-1]
+        assert 20 <= ty <= 45 and 0 <= tx <= g.HOCKEY_W        # останавливается в зоне победителя
+        # сильный удар: путь не короче 1.5 длины поля, и длина ломаной совпадает с заявленной
+        length = sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
+        assert length == pytest.approx(shot["length"], abs=0.05)
+        assert length >= g.HOCKEY_MIN_PATH - 0.01
+        for x, y in pts[1:-1]:                                  # каждая промежуточная точка — на борту
+            on_wall = min(abs(x), abs(x - g.HOCKEY_W)) < 1e-6 or min(abs(y), abs(y - g.HOCKEY_H)) < 1e-6
+            assert on_wall and -1e-6 <= x <= g.HOCKEY_W + 1e-6 and -1e-6 <= y <= g.HOCKEY_H + 1e-6
+
+
+def test_hockey_directions_vary():
+    angles = {round(g.hockey_shot((0, 160), random.Random(s))["angle"] / 45) for s in range(200)}
+    assert len(angles) >= 6

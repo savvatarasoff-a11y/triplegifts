@@ -196,3 +196,69 @@ def pvp_payout(pot: int) -> int:
 def payout(bet: int, multiplier: float) -> int:
     """Выплата в целых звёздах, всегда округляется вниз."""
     return int(math.floor(bet * multiplier + 1e-9))
+
+
+# ---------------- PvP-хоккей ----------------
+# Поле 100×160 делится на горизонтальные зоны игроков пропорционально ставкам.
+# Победитель выбирается так же, как в PvP-рулетке (шанс = доля ставки), затем строится
+# честная траектория удара: шайба летит из центра по прямой, отражаясь от бортов,
+# и останавливается в случайной точке зоны победителя. Длина пути — не меньше 1.5 длины поля.
+
+HOCKEY_W = 100.0
+HOCKEY_H = 160.0
+HOCKEY_START = (50.0, 80.0)
+HOCKEY_MIN_PATH = 1.5 * HOCKEY_H
+HOCKEY_MAX_PATH = 3.5 * HOCKEY_H
+
+
+def hockey_zones(amounts: Sequence[int]) -> list[tuple[float, float]]:
+    """Границы зон по вертикали (y0, y1) в порядке ставок."""
+    total = sum(amounts)
+    zones, y = [], 0.0
+    for i, amount in enumerate(amounts):
+        y1 = HOCKEY_H if i == len(amounts) - 1 else y + HOCKEY_H * amount / total
+        zones.append((y, y1))
+        y = y1
+    return zones
+
+
+def _fold(v: float, size: float) -> float:
+    m = math.floor(v / size)
+    r = v - m * size
+    return r if m % 2 == 0 else size - r
+
+
+def _image(t: float, k: int, size: float) -> float:
+    """Координата k-го зеркального отражения точки t (метод развёртки)."""
+    return k * size + (t if k % 2 == 0 else size - t)
+
+
+def hockey_shot(zone: tuple[float, float], rng: random.Random = RNG) -> dict:
+    y0, y1 = zone
+    margin = min(3.0, (y1 - y0) / 4)
+    tx = rng.uniform(6.0, HOCKEY_W - 6.0)
+    ty = rng.uniform(y0 + margin, y1 - margin)
+    sx, sy = HOCKEY_START
+    candidates = []
+    for i in range(-6, 7):
+        for j in range(-5, 6):
+            ix, iy = _image(tx, i, HOCKEY_W), _image(ty, j, HOCKEY_H)
+            dist = math.hypot(ix - sx, iy - sy)
+            if HOCKEY_MIN_PATH <= dist <= HOCKEY_MAX_PATH:
+                candidates.append((ix, iy, dist))
+    ix, iy, dist = rng.choice(candidates)
+    # Точки отскока: пересечения прямой с линиями бортов развёрнутого поля
+    ts = []
+    for size, a, b, axis in ((HOCKEY_W, sx, ix, 0), (HOCKEY_H, sy, iy, 1)):
+        lo, hi = sorted((a, b))
+        k = math.floor(lo / size) + 1
+        while k * size < hi:
+            ts.append(((k * size) - a) / (b - a))
+            k += 1
+    points = [[sx, sy]]
+    for t in sorted(ts):
+        px, py = sx + (ix - sx) * t, sy + (iy - sy) * t
+        points.append([round(_fold(px, HOCKEY_W), 3), round(_fold(py, HOCKEY_H), 3)])
+    points.append([round(tx, 3), round(ty, 3)])
+    return {"field": [HOCKEY_W, HOCKEY_H], "points": points, "length": round(dist, 3),
+            "angle": round(math.degrees(math.atan2(iy - sy, ix - sx)), 1)}

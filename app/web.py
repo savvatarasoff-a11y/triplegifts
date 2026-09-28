@@ -256,12 +256,13 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
 
     @routes.get("/api/pvp")
     async def pvp_state(request: web.Request) -> web.Response:
-        return web.json_response(await casino.pvp_state(request[USER_ID]))
+        game = request.query.get("game", "roulette")
+        return web.json_response(await casino.pvp_state(request[USER_ID], game))
 
     @routes.post("/api/pvp/bet")
     async def pvp_bet(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.pvp_bet(request[USER_ID], data.get("amount")))
+        return web.json_response(await casino.pvp_bet(request[USER_ID], data.get("amount"), data.get("game", "roulette")))
 
     app = web.Application(middlewares=[errors, auth], client_max_size=64 * 1024)
     app.add_routes(routes)

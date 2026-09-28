@@ -111,6 +111,8 @@ CREATE TABLE IF NOT EXISTS crash_bets (
 );
 CREATE TABLE IF NOT EXISTS pvp_rounds (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game        TEXT NOT NULL DEFAULT 'roulette', -- roulette | hockey
+    detail      TEXT,                             -- для хоккея: траектория шайбы и зоны
     status      TEXT NOT NULL DEFAULT 'open',   -- open | done | refunded
     created_at  REAL NOT NULL,
     ends_at     REAL,
@@ -149,6 +151,16 @@ class Database:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA busy_timeout=5000")
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
+
+    async def _migrate(self) -> None:
+        """Добавляет новые столбцы в базу, созданную старой версией бота."""
+        async with self.conn.execute("PRAGMA table_info(pvp_rounds)") as cur:
+            cols = {r["name"] for r in await cur.fetchall()}
+        if "game" not in cols:
+            await self.conn.execute("ALTER TABLE pvp_rounds ADD COLUMN game TEXT NOT NULL DEFAULT 'roulette'")
+        if "detail" not in cols:
+            await self.conn.execute("ALTER TABLE pvp_rounds ADD COLUMN detail TEXT")
 
     async def close(self) -> None:
         if self._conn:

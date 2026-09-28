@@ -292,3 +292,41 @@ async def test_withdraw_requires_wagering_free_stars(casino):
     assert wd["status"] == "pending"
     with pytest.raises(GameError, match="Недостаточно"):
         await casino.withdraw_request(2, "g1", 50, "🧸")
+
+
+async def test_pvp_hockey_round(casino, monkeypatch):
+    await fund(casino, 1, 100)
+    await fund(casino, 2, 100)
+    await casino.pvp_bet(1, 30, "hockey")
+    await casino.pvp_bet(2, 10, "roulette")              # раунды разных игр не смешиваются
+    s = await casino.pvp_bet(2, 50, "hockey")
+    assert s["game"] == "hockey" and s["round"]["pot"] == 80
+    assert (await casino.pvp_state(1, "roulette"))["round"]["pot"] == 10
+    await casino.db.conn.execute("UPDATE pvp_rounds SET ends_at=? WHERE game='hockey'", (time.time() - 1,))
+    monkeypatch.setattr(g, "pvp_pick_winner", lambda bets, rng=None: (2, 40))
+    res = await casino.pvp_tick()
+    assert [r["game"] for r in res] == ["hockey"]
+    last = (await casino.pvp_state(1, "hockey"))["last"]
+    zones = last["detail"]["zones"]
+    assert zones == [[0.0, 60.0], [60.0, 160.0]]          # 30 и 50 из 80
+    tx, ty = last["detail"]["points"][-1]
+    assert 60 <= ty <= 160                                 # шайба в зоне победителя
+    assert await balance(casino, 2) == 100 - 10 - 50 + 76
+    with pytest.raises(GameError):
+        await casino.pvp_bet(1, 5, "chess")
+
+
+async def test_migration_adds_pvp_columns(tmp_path):
+    import aiosqlite
+    path = str(tmp_path / "old.db")
+    async with aiosqlite.connect(path) as c:
+        await c.execute("CREATE TABLE pvp_rounds (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL DEFAULT 'open', "
+                        "created_at REAL NOT NULL, ends_at REAL, winner_id INTEGER, pot INTEGER NOT NULL DEFAULT 0, "
+                        "payout INTEGER NOT NULL DEFAULT 0, ticket INTEGER, finished_at REAL)")
+        await c.execute("INSERT INTO pvp_rounds(created_at, status) VALUES (1, 'done')")
+        await c.commit()
+    db = Database(path)
+    await db.connect()
+    row = await db.one("SELECT game, detail FROM pvp_rounds")
+    assert row == {"game": "roulette", "detail": None}
+    await db.close()

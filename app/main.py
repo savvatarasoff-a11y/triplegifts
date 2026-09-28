@@ -58,7 +58,8 @@ async def background(casino: Casino, bot: Bot) -> None:
                 try:
                     await bot.send_message(
                         result["winner"],
-                        f"🏆 Вы выиграли раунд PvP-рулетки №{result['round']}: <b>+{result['payout']} ⭐</b>",
+                        f"🏆 Вы выиграли раунд {'PvP-хоккея' if result['game'] == 'hockey' else 'PvP-рулетки'} "
+                        f"№{result['round']}: <b>+{result['payout']} ⭐</b>",
                     )
                 except Exception:
                     pass
