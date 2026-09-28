@@ -65,7 +65,7 @@ async def test_slots_balance_consistent(casino):
     assert ledger_sum == await balance(casino, 1)
 
 
-async def test_dice_and_roulette(casino):
+async def test_dice(casino):
     await fund(casino, 1, 1000)
     r = await casino.dice(1, 10, 50)
     assert r["win"] in (0, 19)
@@ -74,16 +74,8 @@ async def test_dice_and_roulette(casino):
     for bad in (91, 0, 1.234, "50", True):
         with pytest.raises(GameError):
             await casino.dice(1, 10, bad)
-    r = await casino.roulette(1, 10, "number", 7)
-    assert r["win"] in (0, 360)
-    r = await casino.roulette(1, 10, "number", 37)  # ставка на 00
-    assert r["win"] in (0, 360) and r["label"] in {str(n) for n in range(37)} | {"00"}
-    with pytest.raises(GameError):
-        await casino.roulette(1, 10, "number", 38)
     with pytest.raises(GameError):
         await casino.mines_start(1, 10, 1)
-    with pytest.raises(GameError):
-        await casino.roulette(1, 10, "banana")
 
 
 async def test_checks(casino):

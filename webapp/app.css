@@ -222,13 +222,6 @@ main { padding: 0 16px; max-width: 520px; margin: 0 auto; }
   box-shadow: 0 0 16px var(--accent); border-radius: 2px; }
 .roller-pointer::before { content: ""; position: absolute; top: -2px; left: -7px; border: 9px solid transparent; border-top-color: #fff; }
 
-.rbets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 10px 0; }
-.rb { display: flex; justify-content: space-between; align-items: center; background: var(--surface-2); border-radius: 14px;
-  padding: 12px 14px; font-weight: 800; border: 1px solid var(--line); }
-.rb i { font-style: normal; color: var(--muted); font-size: 13px; }
-.rb.sel { background: var(--accent); border-color: var(--accent); }
-.rb.sel i { color: #fff; }
-
 /* ---------- кейсы ---------- */
 .cases-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .case-card { position: relative; border-radius: var(--radius); padding: 18px 10px 14px; text-align: center; overflow: hidden;

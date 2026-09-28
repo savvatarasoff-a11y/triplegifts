@@ -7,10 +7,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const STAR = "★";
 const state = { me: null, config: null, screen: "home", busy: false };
-const GAME_NAMES = { slots: "Слоты", dice: "Кости", roulette: "Рулетка", mines: "Мины",
+const GAME_NAMES = { slots: "Слоты", dice: "Кости", mines: "Мины",
   crash: "Краш", case: "Кейс", pvp: "PvP" };
 const TITLES = { wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины",
-  dice: "Кости", roulette: "Рулетка", cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка" };
+  dice: "Кости", cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка" };
 // Оттенки фирменного фиолетового и белый: [фон, цвет текста]
 const PVP_COLORS = [["#8B5CF6", "#FFFFFF"], ["#FFFFFF", "#0B0A10"], ["#6D28D9", "#FFFFFF"], ["#C4B5FD", "#0B0A10"],
   ["#4C1D95", "#FFFFFF"], ["#EDE9FE", "#0B0A10"], ["#7C3AED", "#FFFFFF"], ["#A78BFA", "#0B0A10"]];
@@ -478,73 +478,6 @@ async function roll(rollerSel, items, targetIndex, duration) {
   track.style.transition = duration ? `transform ${duration}ms cubic-bezier(.08,.75,.12,1)` : "none";
   track.style.transform = `translateX(${offset}px)`;
   if (duration) await sleep(duration + 100);
-}
-
-// ---------- рулетка (американская) ----------
-
-let rouletteType = "red";
-const DOUBLE_ZERO = 37;
-
-function rouletteLabel(n) {
-  return n === DOUBLE_ZERO ? "00" : String(n);
-}
-
-function rouletteColor(n) {
-  if (n === 0 || n === DOUBLE_ZERO) return "green";
-  const red = (state.config && state.config.red) || [];
-  return red.includes(n) ? "red" : "black";
-}
-
-function rouletteItem(n) {
-  return { text: rouletteLabel(n), cls: rouletteColor(n) };
-}
-
-function rouletteIdle() {
-  const items = [];
-  for (let i = 0; i < 12; i++) items.push(rouletteItem(Math.floor(Math.random() * 38)));
-  roll("#roulette-roller", items, 5, 0);
-}
-
-function parseRouletteNumber() {
-  const raw = $("#rnum").value.trim();
-  if (raw === "00") return DOUBLE_ZERO;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0 || n > 36) throw new Error("Число — от 0 до 36 или 00");
-  return n;
-}
-
-async function rouletteSpin() {
-  await guard(async () => {
-    const bet = getBet("roulette");
-    const body = { bet, type: rouletteType };
-    if (rouletteType === "number") body.value = parseRouletteNumber();
-    $("#roulette-btn").disabled = true;
-    try {
-      const r = await api("/api/roulette", body, { deferBalance: true });
-      showBetTaken(bet);
-      haptic();
-      const items = [];
-      for (let i = 0; i < 60; i++) items.push(rouletteItem(i === 50 ? r.number : Math.floor(Math.random() * 38)));
-      $("#roulette-result").className = "result";
-      $("#roulette-result").textContent = "Крутим…";
-      await roll("#roulette-roller", items, 50, 3800);
-      setBalance(r.balance);
-      const res = $("#roulette-result");
-      const label = r.label || rouletteLabel(r.number);
-      if (r.win > 0) {
-        res.className = "result win";
-        res.textContent = `Выпало ${label} · +${stars(r.win)}`;
-        haptic("win");
-        celebrate(bet, r.win);
-      } else {
-        res.className = "result lose";
-        res.textContent = `Выпало ${label}`;
-        haptic("lose");
-      }
-    } finally {
-      $("#roulette-btn").disabled = false;
-    }
-  });
 }
 
 // ---------- кости ----------
@@ -1127,14 +1060,6 @@ function bind() {
     haptic();
   }));
   $("#dice-btn").addEventListener("click", diceRoll);
-  $("#roulette-btn").addEventListener("click", rouletteSpin);
-  $$("#rbets .rb").forEach((b) => b.addEventListener("click", () => {
-    rouletteType = b.dataset.type;
-    $$("#rbets .rb").forEach((x) => x.classList.toggle("sel", x === b));
-    $("#rnum-row").classList.toggle("hidden", rouletteType !== "number");
-    haptic();
-  }));
-  $("#rbets .rb").classList.add("sel");
   $$("#mines-seg button").forEach((b) => b.addEventListener("click", () => {
     minesCount = parseInt(b.dataset.m, 10);
     $$("#mines-seg button").forEach((x) => x.classList.toggle("sel", x === b));
@@ -1160,7 +1085,6 @@ async function init() {
   diceUpdate(false);
   minesRender(null);
   crashDraw(1);
-  rouletteIdle();
   if (!tg || !tg.initData) {
     toast("Откройте Svag Gifts через кнопку в Telegram-боте", true);
     return;

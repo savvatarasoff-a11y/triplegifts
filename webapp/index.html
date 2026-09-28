@@ -19,7 +19,6 @@
     <symbol id="i-crash" viewBox="0 0 48 48"><path d="M6 40h36"/><path d="M8 36c10-2 18-8 24-20"/><path d="M25 13l8 2 1 8"/></symbol>
     <symbol id="i-mines" viewBox="0 0 48 48"><circle cx="21" cy="27" r="13"/><path d="M30 18l4-4"/><path d="M36 8l1 3M41 12l-3 1M39 6l-2 2"/><circle cx="16" cy="22" r="2.5"/></symbol>
     <symbol id="i-dice" viewBox="0 0 48 48"><rect x="8" y="8" width="32" height="32" rx="8"/><circle cx="17" cy="17" r="2.5"/><circle cx="31" cy="17" r="2.5"/><circle cx="24" cy="24" r="2.5"/><circle cx="17" cy="31" r="2.5"/><circle cx="31" cy="31" r="2.5"/></symbol>
-    <symbol id="i-roulette" viewBox="0 0 48 48"><circle cx="24" cy="24" r="17"/><circle cx="24" cy="24" r="7"/><path d="M24 7v10M24 31v10M7 24h10M31 24h10M12 12l7 7M29 29l7 7M36 12l-7 7M19 29l-7 7"/></symbol>
     <symbol id="i-cases" viewBox="0 0 48 48"><rect x="7" y="20" width="34" height="21" rx="4"/><rect x="5" y="13" width="38" height="8" rx="3"/><path d="M24 13v28"/><path d="M24 13c-4-7-12-6-10-1 1 2 6 2 10 1zM24 13c4-7 12-6 10-1-1 2-6 2-10 1z"/></symbol>
     <symbol id="i-pvp" viewBox="0 0 48 48"><path d="M8 8l22 22M40 8L18 30"/><path d="M26 34l8-8M22 34l-8-8"/><path d="M31 37l6 4 4-4-4-6M17 37l-6 4-4-4 4-6"/></symbol>
     <symbol id="i-out" viewBox="0 0 48 48"><path d="M24 30V8M15 17l9-9 9 9"/><path d="M8 28v8a4 4 0 004 4h24a4 4 0 004-4v-8"/></symbol>
@@ -58,7 +57,6 @@
         <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10000</span><span class="gn">Краш</span></button>
         <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×2000+</span><span class="gn">Мины</span></button>
         <button class="game" data-go="dice"><svg class="gi"><use href="#i-dice"/></svg><span class="gx">до ×9500</span><span class="gn">Кости</span></button>
-        <button class="game" data-go="roulette"><svg class="gi"><use href="#i-roulette"/></svg><span class="gx">×36</span><span class="gn">Рулетка</span></button>
         <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">до ×100</span><span class="gn">Кейсы</span></button>
         <button class="game wide accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">игрок против игрока</span><span class="gn">PvP-рулетка</span></button>
       </div>
@@ -180,33 +178,6 @@
         <div class="betbox" data-bet="dice"></div>
         <button class="btn big" id="dice-btn">Бросить</button>
       </div>
-    </section>
-
-    <!-- Рулетка -->
-    <section class="screen" id="roulette">
-      <div class="roller" id="roulette-roller"><div class="roller-track"></div><div class="roller-pointer"></div></div>
-      <div class="result" id="roulette-result">Выберите ставку</div>
-      <div class="rbets" id="rbets">
-        <button data-type="red" class="rb">● Красное <i>×2</i></button>
-        <button data-type="black" class="rb">○ Чёрное <i>×2</i></button>
-        <button data-type="even" class="rb">Чёт <i>×2</i></button>
-        <button data-type="odd" class="rb">Нечет <i>×2</i></button>
-        <button data-type="low" class="rb">1–18 <i>×2</i></button>
-        <button data-type="high" class="rb">19–36 <i>×2</i></button>
-        <button data-type="dozen1" class="rb">1–12 <i>×3</i></button>
-        <button data-type="dozen2" class="rb">13–24 <i>×3</i></button>
-        <button data-type="dozen3" class="rb">25–36 <i>×3</i></button>
-        <button data-type="number" class="rb">Число <i>×36</i></button>
-      </div>
-      <div class="row hidden" id="rnum-row">
-        <label class="lbl">0–36 или 00</label>
-        <input id="rnum" value="7" inputmode="numeric" autocomplete="off">
-      </div>
-      <div class="panel controls">
-        <div class="betbox" data-bet="roulette"></div>
-        <button class="btn big" id="roulette-btn">Крутить</button>
-      </div>
-      <p class="note">Американская рулетка: 0 и 00.</p>
     </section>
 
     <!-- Кейсы -->

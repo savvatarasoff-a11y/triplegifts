@@ -77,52 +77,6 @@ def dice_roll(chance: float, over: bool = False, rng: random.Random = RNG) -> tu
     return roll, win, dice_multiplier(chance) if win else 0.0
 
 
-# ---------------- Рулетка (американская: 0 и 00) ----------------
-
-RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
-ROULETTE_BETS = {"red", "black", "even", "odd", "low", "high", "dozen1", "dozen2", "dozen3", "number"}
-DOUBLE_ZERO = 37   # «00» хранится как 37
-ROULETTE_POCKETS = 38
-
-
-def roulette_label(n: int) -> str:
-    return "00" if n == DOUBLE_ZERO else str(n)
-
-
-def roulette_color(n: int) -> str:
-    if n in (0, DOUBLE_ZERO):
-        return "green"
-    return "red" if n in RED_NUMBERS else "black"
-
-
-def roulette_multiplier(bet_type: str, value: int | None, n: int) -> float:
-    """Множитель выплаты (включая ставку) или 0. На 0 и 00 проигрывают все ставки, кроме ставки на это число."""
-    if bet_type == "number":
-        return 36.0 if value == n else 0.0
-    if n in (0, DOUBLE_ZERO):
-        return 0.0
-    wins = {
-        "red": n in RED_NUMBERS,
-        "black": n not in RED_NUMBERS,
-        "even": n % 2 == 0,
-        "odd": n % 2 == 1,
-        "low": n <= 18,
-        "high": n >= 19,
-        "dozen1": n <= 12,
-        "dozen2": 13 <= n <= 24,
-        "dozen3": n >= 25,
-    }
-    if bet_type not in wins:
-        raise ValueError("bet_type")
-    if not wins[bet_type]:
-        return 0.0
-    return 3.0 if bet_type.startswith("dozen") else 2.0
-
-
-def roulette_spin(rng: random.Random = RNG) -> int:
-    return rng.randrange(ROULETTE_POCKETS)
-
-
 # ---------------- Мины ----------------
 
 MINES_CELLS = 25

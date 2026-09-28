@@ -41,20 +41,6 @@ def test_dice_roll_under_and_over():
     assert sum(g.dice_roll(0.01, True, random.Random(i))[1] for i in range(3000)) < 5
 
 
-def test_roulette_rtp_american():
-    for bet_type in ["red", "black", "even", "odd", "low", "high", "dozen1", "dozen2", "dozen3"]:
-        ev = sum(g.roulette_multiplier(bet_type, None, n) for n in range(38)) / 38
-        assert ev == pytest.approx(36 / 38)
-    for value in (17, 0, g.DOUBLE_ZERO):
-        ev = sum(g.roulette_multiplier("number", value, n) for n in range(38)) / 38
-        assert ev == pytest.approx(36 / 38)
-    assert g.roulette_multiplier("red", None, 0) == 0 and g.roulette_multiplier("even", None, g.DOUBLE_ZERO) == 0
-    assert g.roulette_color(0) == "green" and g.roulette_color(37) == "green"
-    assert g.roulette_color(1) == "red" and g.roulette_color(2) == "black"
-    assert g.roulette_label(37) == "00" and g.roulette_label(5) == "5"
-    assert {g.roulette_spin(random.Random(i)) for i in range(2000)} == set(range(38))
-
-
 def test_mines_multiplier_expected_value():
     # EV любого стоп-правила = 0.95: вероятность пройти k клеток × множитель
     for mines in (2, 3, 10, 24):

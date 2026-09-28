@@ -61,7 +61,7 @@ def build_router(cfg: Config, casino: Casino) -> Router:
             user = await casino.db.get_user(user["id"])
         await message.answer(
             f"🎁 <b>Добро пожаловать в Svag Gifts!</b>\n\n"
-            f"Слоты, краш, мины, кости, рулетка, кейсы и PvP-рулетка — в мини-приложении.\n"
+            f"Слоты, краш, мины, кости, кейсы, PvP-рулетка и PvP-хоккей — в мини-приложении.\n"
             f"Вывод — подарками Telegram.\n"
             f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
             f"/deposit — пополнить звёздами\n/balance — баланс\n/help — правила",

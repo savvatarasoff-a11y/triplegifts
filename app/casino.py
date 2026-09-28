@@ -241,28 +241,6 @@ class Casino:
         return {"roll": roll, "chance": chance, "over": over, "won": won,
                 "multiplier": g.dice_multiplier(chance), "win": win, "balance": balance}
 
-    # ---------- рулетка ----------
-
-    async def roulette(self, user_id: int, bet: Any, bet_type: Any, value: Any = None) -> dict:
-        bet = self._check_bet(bet)
-        if bet_type not in g.ROULETTE_BETS:
-            raise GameError("Неизвестный тип ставки")
-        if bet_type == "number":
-            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= g.DOUBLE_ZERO:
-                raise GameError("Число — от 0 до 36 или 00")
-        else:
-            value = None
-        number = g.roulette_spin()
-        mult = g.roulette_multiplier(bet_type, value, number)
-        win = g.payout(bet, mult)
-        async with self.db.tx() as c:
-            await self._take(c, user_id, bet, "roulette")
-            balance = await self._settle(
-                c, user_id, "roulette", bet, win, {"number": number, "type": bet_type, "value": value}
-            )
-        return {"number": number, "label": g.roulette_label(number), "color": g.roulette_color(number), "multiplier": mult,
-                "win": win, "balance": balance}
-
     # ---------- кейсы ----------
 
     async def open_case(self, user_id: int, case_id: Any) -> dict:

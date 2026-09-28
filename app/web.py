@@ -153,7 +153,6 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
                                 for p, w, gift in c.prizes]}
                     for c in g.CASES
                 ],
-                "red": sorted(g.RED_NUMBERS),
                 "mines_min": g.MINES_MIN,
                 "crash_growth": g.CRASH_GROWTH,
                 "pvp_commission": g.PVP_COMMISSION,
@@ -218,13 +217,6 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
     async def dice(request: web.Request) -> web.Response:
         data = await body(request)
         return web.json_response(await casino.dice(request[USER_ID], data.get("bet"), data.get("chance"), data.get("over", False)))
-
-    @routes.post("/api/roulette")
-    async def roulette(request: web.Request) -> web.Response:
-        data = await body(request)
-        return web.json_response(
-            await casino.roulette(request[USER_ID], data.get("bet"), data.get("type"), data.get("value"))
-        )
 
     @routes.post("/api/case")
     async def open_case(request: web.Request) -> web.Response:
