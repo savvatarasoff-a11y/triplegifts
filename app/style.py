@@ -170,7 +170,7 @@ def _pct(x: float) -> str:
 
 def profile_to_text(p: dict[str, Any]) -> str:
     """Описание профиля человеческим языком — для промта и для /profile."""
-    if not p:
+    if not p or not p.get("messages"):
         return "Пока нет данных: добавь примеры через /examples."
     lines = [
         f"Проанализировано сообщений: {p['messages']} (ответов: {p['replies']}).",

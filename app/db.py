@@ -233,9 +233,21 @@ class Database:
 
     # --- примеры ---
     async def add_example(self, reply: str, incoming: str | None, source: str) -> None:
-        await self.conn.execute(
+        await self.add_example_id(reply, incoming, source)
+
+    async def add_example_id(self, reply: str, incoming: str | None, source: str) -> int:
+        cur = await self.conn.execute(
             "INSERT INTO examples(incoming, reply, source, ts) VALUES (?, ?, ?, ?)",
             (incoming, reply, source, time.time()),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid)
+
+    async def append_to_example(self, example_id: int, text: str) -> None:
+        """Дописывает следующее сообщение той же «пачки» с новой строки."""
+        await self.conn.execute(
+            "UPDATE examples SET reply = reply || char(10) || ?, ts=? WHERE id=?",
+            (text, time.time(), example_id),
         )
         await self.conn.commit()
 
