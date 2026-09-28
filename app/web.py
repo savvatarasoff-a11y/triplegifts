@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 WEBAPP_DIR = Path(__file__).resolve().parent.parent / "webapp"
 INIT_DATA_TTL = 24 * 3600
+AVATAR_TTL = 6 * 3600
+AVATAR_CACHE_MAX = 1000
 DEPOSIT_PRESETS = [50, 100, 250, 500, 1000, 2500]
 DEPOSIT_MIN, DEPOSIT_MAX = 1, 10000
 
@@ -88,10 +90,42 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
 
     routes = web.RouteTableDef()
     catalog = GiftCatalog(bot)
+    avatars: dict[int, tuple[float, bytes | None]] = {}
+
+    async def load_avatar(user_id: int) -> bytes | None:
+        cached = avatars.get(user_id)
+        if cached and time.time() - cached[0] < AVATAR_TTL:
+            return cached[1]
+        data: bytes | None = None
+        try:
+            photos = await bot.get_user_profile_photos(user_id=user_id, limit=1)
+            if photos.total_count and photos.photos:
+                sizes = photos.photos[0]
+                # маленькая копия около 160 px — хватает для аватарки
+                size = next((p for p in sizes if p.width >= 150), sizes[-1])
+                buf = await bot.download(size.file_id)
+                data = buf.read() if buf else None
+        except Exception:
+            log.debug("Аватарка %s недоступна", user_id)
+        if len(avatars) >= AVATAR_CACHE_MAX:
+            avatars.pop(next(iter(avatars)))
+        avatars[user_id] = (time.time(), data)
+        return data
 
     @routes.get("/health")
     async def health(_: web.Request) -> web.Response:
         return web.json_response({"ok": True})
+
+    @routes.get(r"/avatar/{user_id:\d+}")
+    async def avatar(request: web.Request) -> web.Response:
+        user_id = int(request.match_info["user_id"])
+        # Отдаём только аватарки игроков казино
+        if not await casino.db.get_user(user_id):
+            raise web.HTTPNotFound()
+        data = await load_avatar(user_id)
+        if not data:
+            raise web.HTTPNotFound()
+        return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 
     @routes.get("/")
     async def index(_: web.Request) -> web.FileResponse:
@@ -219,10 +253,10 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
     async def crash_state(request: web.Request) -> web.Response:
         return web.json_response(await casino.crash_state(request[USER_ID]))
 
-    @routes.post("/api/crash/start")
-    async def crash_start(request: web.Request) -> web.Response:
+    @routes.post("/api/crash/bet")
+    async def crash_bet(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.crash_start(request[USER_ID], data.get("bet"), data.get("auto")))
+        return web.json_response(await casino.crash_bet(request[USER_ID], data.get("bet"), data.get("auto")))
 
     @routes.post("/api/crash/cashout")
     async def crash_cashout(request: web.Request) -> web.Response:

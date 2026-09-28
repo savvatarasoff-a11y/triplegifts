@@ -90,6 +90,25 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     processed_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id, id);
+CREATE TABLE IF NOT EXISTS crash_rounds (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    point         REAL NOT NULL,
+    status        TEXT NOT NULL,            -- betting | running | crashed
+    betting_until REAL NOT NULL,
+    started_at    REAL,
+    crashed_at    REAL,
+    created_at    REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS crash_bets (
+    round_id  INTEGER NOT NULL,
+    user_id   INTEGER NOT NULL,
+    bet       INTEGER NOT NULL,
+    auto      REAL,
+    cashout   REAL,
+    win       INTEGER,
+    placed_at REAL NOT NULL,
+    PRIMARY KEY (round_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS pvp_rounds (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     status      TEXT NOT NULL DEFAULT 'open',   -- open | done | refunded

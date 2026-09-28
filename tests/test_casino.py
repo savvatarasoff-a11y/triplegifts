@@ -124,33 +124,78 @@ async def test_mines_win_and_lose(casino, monkeypatch):
     assert await casino.mines_state(1) is None
 
 
-async def test_crash_cashout_and_crash(casino, monkeypatch):
+async def crash_round(casino, point, monkeypatch, t0=1000.0):
+    """Создаёт раунд с заданной точкой краша; возвращает функцию-«часы» для crash_tick."""
+    monkeypatch.setattr(g, "crash_point", lambda rng=None: point)
+    monkeypatch.setattr(casino_mod.time, "time", lambda: t0)
+    await casino.crash_tick(t0)
+
+
+async def test_crash_shared_round(casino, monkeypatch):
     await fund(casino, 1, 100)
-    monkeypatch.setattr(g, "crash_point", lambda rng=None: 2.0)
-    await casino.crash_start(1, 10)
-    r = await casino.crash_cashout(1)
-    assert r["status"] == "cashed" and r["win"] == 10  # множитель ~1.00 сразу после старта
+    await fund(casino, 2, 100)
+    await fund(casino, 3, 100)
+    await crash_round(casino, 2.0, monkeypatch)
+    await casino.crash_bet(1, 10)
+    await casino.crash_bet(2, 20, auto=1.5)
+    await casino.crash_bet(3, 30)
+    with pytest.raises(GameError, match="уже сделали"):
+        await casino.crash_bet(1, 10)
+    st = await casino.crash_state(1)
+    assert st["round"]["phase"] == "betting" and [p["id"] for p in st["players"]] == [3, 2, 1]
 
-    # Игра, начатая 20 секунд назад, уже упала на 2.0
-    await casino.crash_start(1, 10)
-    await casino.db.conn.execute("UPDATE crash_games SET started_at=? WHERE user_id=1", (time.time() - 20,))
-    r = await casino.crash_cashout(1)
-    assert r["status"] == "crashed" and r["win"] == 0 and r["point"] == 2.0
+    t_start = 1000.0 + casino_mod.CRASH_BETTING_SECONDS
+    await casino.crash_tick(t_start)                          # старт полёта
+    with pytest.raises(GameError, match="перед стартом"):
+        monkeypatch.setattr(casino_mod.time, "time", lambda: t_start + 1)
+        await casino.crash_bet(1, 5)
 
-    # Автовывод на 1.5 срабатывает, даже если игрок закрыл приложение
-    await casino.crash_start(1, 10, auto=1.5)
-    await casino.db.conn.execute("UPDATE crash_games SET started_at=? WHERE user_id=1", (time.time() - 20,))
-    assert await casino.crash_sweep() == 1
-    assert await casino.crash_state(1) == {"status": "idle"}
-    assert await balance(casino, 1) == 100 - 10 + 10 - 10 - 10 + 15
+    t_12 = t_start + g.crash_time_of(1.2) + 0.01              # игрок 1 забирает на ×1.2
+    monkeypatch.setattr(casino_mod.time, "time", lambda: t_12)
+    r = await casino.crash_cashout(1)
+    assert r["cashout"] == 1.2 and r["win"] == 12
+
+    t_16 = t_start + g.crash_time_of(1.6)                     # автовывод игрока 2 на ×1.5
+    await casino.crash_tick(t_16)
+    await casino.crash_tick(t_start + g.crash_time_of(2.0) + 0.01)  # краш на ×2
+    st = await casino.crash_state(1)
+    assert st["round"]["phase"] == "crashed" and st["round"]["point"] == 2.0
+    by_id = {p["id"]: p for p in st["players"]}
+    assert by_id[1]["win"] == 12 and by_id[2]["cashout"] == 1.5 and by_id[2]["win"] == 30 and by_id[3]["win"] == 0
+    assert st["my"]["cashout"] == 1.2 and st["history"] == [2.0]
+    assert await balance(casino, 1) == 102 and await balance(casino, 2) == 110 and await balance(casino, 3) == 70
+    with pytest.raises(GameError):
+        await casino.crash_cashout(3)
+
+    # после паузы — новый раунд
+    await casino.crash_tick(t_start + g.crash_time_of(2.0) + casino_mod.CRASH_PAUSE_SECONDS + 1)
+    assert (await casino.crash_state())["round"]["phase"] == "betting"
+
+
+async def test_crash_late_cashout_and_restart(casino, monkeypatch):
+    await fund(casino, 1, 100)
+    await crash_round(casino, 1.3, monkeypatch)
+    await casino.crash_bet(1, 10, auto=5)
+    t_start = 1000.0 + casino_mod.CRASH_BETTING_SECONDS
+    await casino.crash_tick(t_start)
+    # бот «лежал» 60 секунд: следующий тик сразу видит краш, автовывод выше точки не срабатывает
+    monkeypatch.setattr(casino_mod.time, "time", lambda: t_start + 60)
+    with pytest.raises(GameError, match="Не успели"):
+        await casino.crash_cashout(1)
+    await casino.crash_tick(t_start + 60)
+    assert await balance(casino, 1) == 90
+    assert (await casino.crash_state(1))["my"]["win"] == 0
 
 
 async def test_crash_instant(casino, monkeypatch):
     await fund(casino, 1, 10)
-    monkeypatch.setattr(g, "crash_point", lambda rng=None: 1.0)
-    await casino.crash_start(1, 10)
-    r = await casino.crash_cashout(1)
-    assert r["status"] == "crashed" and r["win"] == 0
+    await crash_round(casino, 1.0, monkeypatch)
+    await casino.crash_bet(1, 10)
+    t_start = 1000.0 + casino_mod.CRASH_BETTING_SECONDS
+    await casino.crash_tick(t_start)
+    await casino.crash_tick(t_start + 0.05)
+    assert (await casino.crash_state(1))["round"]["point"] == 1.0
+    assert await balance(casino, 1) == 0
 
 
 async def test_cases(casino):

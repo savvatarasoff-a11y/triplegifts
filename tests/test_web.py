@@ -56,6 +56,14 @@ class FakeBot:
     async def send_message(self, chat_id, text, **kwargs):
         self.messages.append((chat_id, text))
 
+    async def get_user_profile_photos(self, user_id, limit=1):
+        size = type("P", (), {"file_id": "f1", "width": 160})()
+        return type("Ph", (), {"total_count": 1, "photos": [[size]]})()
+
+    async def download(self, file_id):
+        import io
+        return io.BytesIO(b"\xff\xd8jpeg")
+
 
 @pytest.fixture
 async def client(tmp_path):
@@ -115,8 +123,11 @@ async def test_play_and_errors(client):
     assert r.status == 200
     r = await client.get("/api/mines", headers=auth())
     assert (await r.json())["game"]["mines"] == 3
-    r = await client.post("/api/crash/start", headers=auth(), json={"bet": 1, "auto": 2})
+    await client.app[CASINO].crash_tick()
+    r = await client.post("/api/crash/bet", headers=auth(), json={"bet": 1, "auto": 2})
     assert r.status == 200
+    st = await (await client.get("/api/crash", headers=auth())).json()
+    assert st["round"]["phase"] == "betting" and st["players"][0]["bet"] == 1
     r = await client.get("/api/pvp", headers=auth())
     assert r.status == 200
     r = await client.post("/api/dice", headers=auth(), json={"bet": 1, "chance": 12.5, "over": True})
@@ -162,3 +173,10 @@ async def test_withdraw_api(client):
     assert r.status == 400
     hist = (await (await client.get("/api/withdraw", headers=auth(3))).json())["history"]
     assert hist[0]["status"] == "pending"
+
+
+async def test_avatar(client):
+    assert (await client.get("/avatar/424242")).status == 404       # не игрок казино
+    await client.get("/api/me", headers=auth(5))
+    assert (await client.get("/avatar/5")).status == 200
+    assert (await client.get("/avatar/abc")).status == 404

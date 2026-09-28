@@ -40,9 +40,18 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
 ]
 
 
+async def crash_loop(casino: Casino) -> None:
+    """Двигает общие раунды краша: 10 раз в секунду."""
+    while True:
+        try:
+            await casino.crash_tick()
+        except Exception:
+            log.exception("Ошибка раунда краша")
+        await asyncio.sleep(0.1)
+
+
 async def background(casino: Casino, bot: Bot) -> None:
-    """Раз в секунду завершает раунды PvP и рассчитывает брошенные игры в краш."""
-    tick = 0
+    """Раз в секунду завершает раунды PvP."""
     while True:
         try:
             for result in await casino.pvp_tick():
@@ -53,11 +62,8 @@ async def background(casino: Casino, bot: Bot) -> None:
                     )
                 except Exception:
                     pass
-            if tick % 5 == 0:
-                await casino.crash_sweep()
         except Exception:
             log.exception("Ошибка фоновой задачи")
-        tick += 1
         await asyncio.sleep(1)
 
 
@@ -105,6 +111,7 @@ async def run() -> None:
     dp.include_router(build_router(cfg, casino))
     await setup_bot_ui(bot, cfg)
     bg = asyncio.create_task(background(casino, bot))
+    crash_task = asyncio.create_task(crash_loop(casino))
 
     try:
         me = await bot.get_me()
@@ -121,6 +128,7 @@ async def run() -> None:
                 await asyncio.sleep(5)
     finally:
         bg.cancel()
+        crash_task.cancel()
         await runner.cleanup()
         await db.close()
         await bot.session.close()

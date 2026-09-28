@@ -13,6 +13,8 @@ from .config import Config
 from .db import Database, InsufficientFunds
 from .games import logic as g
 
+CRASH_BETTING_SECONDS = 7   # приём ставок перед стартом ракеты
+CRASH_PAUSE_SECONDS = 3     # пауза после краша
 PVP_ROUND_SECONDS = 30      # сколько длится раунд после второго игрока
 PVP_IDLE_REFUND = 600       # одиночную ставку возвращаем через 10 минут
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
@@ -364,96 +366,147 @@ class Casino:
         )
         return {**view, "win": win, "balance": balance}
 
-    # ---------- краш ----------
+    # ---------- краш (общие раунды для всех игроков) ----------
 
-    async def crash_start(self, user_id: int, bet: Any, auto: Any = None) -> dict:
+    async def _crash_current(self, c: aiosqlite.Connection) -> dict | None:
+        async with c.execute("SELECT * FROM crash_rounds ORDER BY id DESC LIMIT 1") as q:
+            row = await q.fetchone()
+        return dict(row) if row else None
+
+    async def crash_tick(self, now: float | None = None) -> None:
+        """Двигает раунд: приём ставок -> полёт -> краш -> пауза -> новый раунд. Вызывается ~10 раз в секунду."""
+        now = time.time() if now is None else now
+        async with self.db.tx() as c:
+            rnd = await self._crash_current(c)
+            if rnd is None or (rnd["status"] == "crashed" and now >= rnd["crashed_at"] + CRASH_PAUSE_SECONDS):
+                await c.execute(
+                    "INSERT INTO crash_rounds(point, status, betting_until, created_at) VALUES (?,?,?,?)",
+                    (g.crash_point(), "betting", now + CRASH_BETTING_SECONDS, now),
+                )
+                return
+            if rnd["status"] == "betting" and now >= rnd["betting_until"]:
+                await c.execute(
+                    "UPDATE crash_rounds SET status='running', started_at=? WHERE id=?", (rnd["betting_until"], rnd["id"])
+                )
+                return
+            if rnd["status"] != "running":
+                return
+            point = rnd["point"]
+            current = g.crash_multiplier_at(now - rnd["started_at"])
+            # Автовыводы, которые сработали до краша
+            async with c.execute(
+                "SELECT * FROM crash_bets WHERE round_id=? AND cashout IS NULL AND auto IS NOT NULL "
+                "AND auto < ? AND auto <= ?", (rnd["id"], point, current),
+            ) as q:
+                autos = [dict(r) for r in await q.fetchall()]
+            for bet in autos:
+                await self._crash_pay(c, rnd, bet, bet["auto"])
+            if current >= point:
+                crashed_at = rnd["started_at"] + g.crash_time_of(point)
+                await c.execute(
+                    "UPDATE crash_rounds SET status='crashed', crashed_at=? WHERE id=?", (min(now, crashed_at), rnd["id"])
+                )
+                async with c.execute(
+                    "SELECT * FROM crash_bets WHERE round_id=? AND cashout IS NULL", (rnd["id"],)
+                ) as q:
+                    losers = [dict(r) for r in await q.fetchall()]
+                for bet in losers:
+                    await c.execute(
+                        "UPDATE crash_bets SET win=0 WHERE round_id=? AND user_id=?", (rnd["id"], bet["user_id"])
+                    )
+                    await self.db.log_bet(
+                        c, bet["user_id"], "crash", bet["bet"], 0,
+                        json.dumps({"round": rnd["id"], "point": point, "cashout": None}),
+                    )
+
+    async def _crash_pay(self, c: aiosqlite.Connection, rnd: dict, bet: dict, multiplier: float) -> int:
+        win = g.payout(bet["bet"], multiplier)
+        await c.execute(
+            "UPDATE crash_bets SET cashout=?, win=? WHERE round_id=? AND user_id=?",
+            (multiplier, win, rnd["id"], bet["user_id"]),
+        )
+        balance = await self._settle(
+            c, bet["user_id"], "crash", bet["bet"], win,
+            {"round": rnd["id"], "point": rnd["point"], "cashout": multiplier},
+        )
+        return balance
+
+    async def crash_bet(self, user_id: int, bet: Any, auto: Any = None) -> dict:
         bet = self._check_bet(bet)
         if auto is not None:
             if not isinstance(auto, (int, float)) or isinstance(auto, bool) or not 1.01 <= auto <= g.CRASH_MAX:
                 raise GameError("Автовывод — от 1.01×")
             auto = round(float(auto), 2)
-        point = g.crash_point()
         now = time.time()
         async with self.db.tx() as c:
-            async with c.execute("SELECT * FROM crash_games WHERE user_id=?", (user_id,)) as q:
-                existing = await q.fetchone()
-            if existing:
-                result = await self._crash_resolve(c, dict(existing), now)
-                if result["status"] == "running":
-                    raise GameError("Сначала закончите текущую игру")
+            rnd = await self._crash_current(c)
+            if not rnd or rnd["status"] != "betting" or now >= rnd["betting_until"]:
+                raise GameError("Ставки принимаются перед стартом раунда — дождитесь следующего")
+            async with c.execute(
+                "SELECT 1 FROM crash_bets WHERE round_id=? AND user_id=?", (rnd["id"], user_id)
+            ) as q:
+                if await q.fetchone():
+                    raise GameError("Вы уже сделали ставку в этом раунде")
             balance = await self._take(c, user_id, bet, "crash")
             await c.execute(
-                "INSERT INTO crash_games(user_id, bet, point, auto, started_at) VALUES (?,?,?,?,?)",
-                (user_id, bet, point, auto, now),
+                "INSERT INTO crash_bets(round_id, user_id, bet, auto, placed_at) VALUES (?,?,?,?,?)",
+                (rnd["id"], user_id, bet, auto, now),
             )
-        return {"status": "running", "bet": bet, "auto": auto, "multiplier": 1.0, "elapsed": 0.0,
-                "growth": g.CRASH_GROWTH, "balance": balance}
-
-    async def _crash_resolve(self, c: aiosqlite.Connection, game: dict, now: float, cashout: bool = False) -> dict:
-        """Определяет исход игры на момент now; завершённую игру удаляет и рассчитывает."""
-        elapsed = now - game["started_at"]
-        current = g.crash_multiplier_at(elapsed)
-        point = game["point"]
-        auto = game["auto"]
-        base = {"bet": game["bet"], "auto": auto, "elapsed": elapsed, "growth": g.CRASH_GROWTH}
-
-        win_at = None
-        if auto is not None and auto < point and current >= auto:
-            win_at = auto
-        elif current >= point:
-            win_at = None
-            status = "crashed"
-        elif cashout:
-            win_at = current
-        else:
-            return {**base, "status": "running", "multiplier": current}
-
-        if win_at is not None:
-            win = g.payout(game["bet"], win_at)
-            status = "cashed"
-        else:
-            win = 0
-        await c.execute("DELETE FROM crash_games WHERE user_id=?", (game["user_id"],))
-        balance = await self._settle(
-            c, game["user_id"], "crash", game["bet"], win, {"point": point, "cashout": win_at}
-        )
-        return {**base, "status": status, "multiplier": win_at or point, "point": point,
-                "win": win, "balance": balance}
-
-    async def crash_state(self, user_id: int) -> dict:
-        async with self.db.tx() as c:
-            async with c.execute("SELECT * FROM crash_games WHERE user_id=?", (user_id,)) as q:
-                row = await q.fetchone()
-            if not row:
-                return {"status": "idle"}
-            return await self._crash_resolve(c, dict(row), time.time())
+        return {"round": rnd["id"], "bet": bet, "auto": auto, "balance": balance}
 
     async def crash_cashout(self, user_id: int) -> dict:
+        now = time.time()
         async with self.db.tx() as c:
-            async with c.execute("SELECT * FROM crash_games WHERE user_id=?", (user_id,)) as q:
+            rnd = await self._crash_current(c)
+            if not rnd or rnd["status"] != "running":
+                raise GameError("Раунд не идёт")
+            async with c.execute(
+                "SELECT * FROM crash_bets WHERE round_id=? AND user_id=? AND cashout IS NULL", (rnd["id"], user_id)
+            ) as q:
                 row = await q.fetchone()
             if not row:
-                raise GameError("Нет активной игры")
-            return await self._crash_resolve(c, dict(row), time.time(), cashout=True)
+                raise GameError("Нет активной ставки")
+            current = g.crash_multiplier_at(now - rnd["started_at"])
+            if current >= rnd["point"]:
+                raise GameError("Не успели — ракета уже взорвалась")
+            balance = await self._crash_pay(c, rnd, dict(row), current)
+        return {"cashout": current, "win": g.payout(row["bet"], current), "bet": row["bet"], "balance": balance}
 
-    async def crash_sweep(self) -> int:
-        """Рассчитывает брошенные игры (игрок закрыл приложение)."""
+    async def crash_state(self, user_id: int | None = None) -> dict:
         now = time.time()
-        rows = await self.db.all("SELECT * FROM crash_games")
-        done = 0
-        for game in rows:
-            target = game["point"]
-            if game["auto"] is not None and game["auto"] < game["point"]:
-                target = game["auto"]
-            if now - game["started_at"] < g.crash_time_of(target) + 2:
-                continue
-            async with self.db.tx() as c:
-                async with c.execute("SELECT * FROM crash_games WHERE user_id=?", (game["user_id"],)) as q:
-                    row = await q.fetchone()
-                if row:
-                    await self._crash_resolve(c, dict(row), now)
-                    done += 1
-        return done
+        rnd = await self.db.one("SELECT * FROM crash_rounds ORDER BY id DESC LIMIT 1")
+        history = [r["point"] for r in await self.db.all(
+            "SELECT point FROM crash_rounds WHERE status='crashed' ORDER BY id DESC LIMIT 20")]
+        if not rnd:
+            return {"round": None, "history": history, "growth": g.CRASH_GROWTH}
+        rows = await self.db.all(
+            "SELECT b.user_id, b.bet, b.auto, b.cashout, b.win, u.first_name, u.username FROM crash_bets b "
+            "LEFT JOIN users u ON u.id=b.user_id WHERE b.round_id=? ORDER BY b.bet DESC",
+            rnd["id"],
+        )
+        players = [
+            {"id": r["user_id"], "name": display_name({"id": r["user_id"], **r}), "bet": r["bet"],
+             "cashout": r["cashout"], "win": r["win"]}
+            for r in rows
+        ]
+        mine = next((dict(r) for r in rows if r["user_id"] == user_id), None)
+        view = {"id": rnd["id"], "phase": rnd["status"]}
+        if rnd["status"] == "betting":
+            view["betting_left"] = max(0.0, rnd["betting_until"] - now)
+        elif rnd["status"] == "running":
+            view["elapsed"] = now - rnd["started_at"]
+            view["multiplier"] = g.crash_multiplier_at(view["elapsed"])
+        else:
+            view["point"] = rnd["point"]
+            view["next_in"] = max(0.0, rnd["crashed_at"] + CRASH_PAUSE_SECONDS - now)
+        return {
+            "round": view,
+            "players": players,
+            "my": {"bet": mine["bet"], "auto": mine["auto"], "cashout": mine["cashout"], "win": mine["win"]}
+            if mine else None,
+            "history": history,
+            "growth": g.CRASH_GROWTH,
+        }
 
     # ---------- PvP-рулетка ----------
 
