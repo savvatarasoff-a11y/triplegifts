@@ -1,107 +1,122 @@
-"""SQLite: история, настройки чатов, примеры и профиль стиля."""
+"""SQLite: пользователи, баланс с журналом операций, платежи, чеки, игры."""
 from __future__ import annotations
 
-import json
+import asyncio
 import os
 import time
-from dataclasses import dataclass
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
 import aiosqlite
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS users (
+    id         INTEGER PRIMARY KEY,
+    username   TEXT,
+    first_name TEXT,
+    balance    INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    deposited  INTEGER NOT NULL DEFAULT 0,
+    wagered    INTEGER NOT NULL DEFAULT 0,
+    won        INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    last_seen  REAL NOT NULL
 );
-CREATE TABLE IF NOT EXISTS connections (
-    id         TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL,
-    can_reply  INTEGER NOT NULL,
-    is_enabled INTEGER NOT NULL,
-    updated_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS chats (
-    chat_id      INTEGER PRIMARY KEY,
-    title        TEXT,
-    username     TEXT,
-    status       TEXT NOT NULL DEFAULT 'new',   -- new | allow | block
-    paused_until REAL NOT NULL DEFAULT 0,
-    connection_id TEXT,
-    notified     INTEGER NOT NULL DEFAULT 0,
-    updated_at   REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id    INTEGER NOT NULL,
-    from_owner INTEGER NOT NULL,
-    text       TEXT NOT NULL,
-    ts         REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
-CREATE TABLE IF NOT EXISTS examples (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    incoming TEXT,               -- что написали мне (может быть пусто)
-    reply    TEXT NOT NULL,      -- что ответил я
-    source   TEXT NOT NULL,      -- manual | forward | screenshot | live
-    ts       REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS style (
-    id          INTEGER PRIMARY KEY CHECK (id = 1),
-    description TEXT NOT NULL DEFAULT '',
-    profile     TEXT NOT NULL DEFAULT '{}',
-    summary     TEXT NOT NULL DEFAULT '',
-    updated_at  REAL NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS drafts (
+CREATE TABLE IF NOT EXISTS ledger (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id       INTEGER NOT NULL,
-    connection_id TEXT NOT NULL,
-    parts         TEXT NOT NULL,          -- JSON-список сообщений
-    status        TEXT NOT NULL DEFAULT 'pending',  -- pending | sent | skipped | editing
-    created_at    REAL NOT NULL
+    user_id       INTEGER NOT NULL,
+    delta         INTEGER NOT NULL,
+    kind          TEXT NOT NULL,
+    ref           TEXT,
+    balance_after INTEGER NOT NULL,
+    ts            REAL NOT NULL
 );
-CREATE TABLE IF NOT EXISTS replies_log (
+CREATE INDEX IF NOT EXISTS idx_ledger_user ON ledger(user_id, id);
+CREATE TABLE IF NOT EXISTS payments (
+    charge_id TEXT PRIMARY KEY,
+    user_id   INTEGER NOT NULL,
+    amount    INTEGER NOT NULL,
+    ts        REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS checks (
+    code       TEXT PRIMARY KEY,
+    amount     INTEGER NOT NULL,
+    total      INTEGER NOT NULL,
+    left       INTEGER NOT NULL,
+    created_by INTEGER NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS check_uses (
+    code    TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    ts      REAL NOT NULL,
+    PRIMARY KEY (code, user_id)
+);
+CREATE TABLE IF NOT EXISTS bets (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER NOT NULL,
-    mode    TEXT NOT NULL,   -- auto | draft | evasive
+    user_id INTEGER NOT NULL,
+    game    TEXT NOT NULL,
+    bet     INTEGER NOT NULL,
+    win     INTEGER NOT NULL,
+    detail  TEXT,
     ts      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bets_user ON bets(user_id, id);
+CREATE TABLE IF NOT EXISTS mines_games (
+    user_id    INTEGER PRIMARY KEY,
+    bet        INTEGER NOT NULL,
+    mines      INTEGER NOT NULL,
+    layout     TEXT NOT NULL,
+    opened     TEXT NOT NULL DEFAULT '[]',
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS crash_games (
+    user_id    INTEGER PRIMARY KEY,
+    bet        INTEGER NOT NULL,
+    point      REAL NOT NULL,
+    auto       REAL,
+    started_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pvp_rounds (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    status      TEXT NOT NULL DEFAULT 'open',   -- open | done | refunded
+    created_at  REAL NOT NULL,
+    ends_at     REAL,
+    winner_id   INTEGER,
+    pot         INTEGER NOT NULL DEFAULT 0,
+    payout      INTEGER NOT NULL DEFAULT 0,
+    ticket      INTEGER,
+    finished_at REAL
+);
+CREATE TABLE IF NOT EXISTS pvp_bets (
+    round_id INTEGER NOT NULL,
+    user_id  INTEGER NOT NULL,
+    amount   INTEGER NOT NULL,
+    joined   REAL NOT NULL,
+    PRIMARY KEY (round_id, user_id)
 );
 """
 
-DEFAULT_SETTINGS = {"enabled": "1", "draft_mode": "1", "collecting": "0"}
 
-
-@dataclass
-class Chat:
-    chat_id: int
-    title: str | None
-    username: str | None
-    status: str
-    paused_until: float
-    connection_id: str | None
-    notified: bool
+class InsufficientFunds(Exception):
+    pass
 
 
 class Database:
     def __init__(self, path: str):
         self.path = path
         self._conn: aiosqlite.Connection | None = None
+        self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
         directory = os.path.dirname(self.path)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        self._conn = await aiosqlite.connect(self.path)
+        self._conn = await aiosqlite.connect(self.path, isolation_level=None)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA journal_mode=WAL")
+        await self._conn.execute("PRAGMA busy_timeout=5000")
         await self._conn.executescript(SCHEMA)
-        for key, value in DEFAULT_SETTINGS.items():
-            await self._conn.execute(
-                "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value)
-            )
-        await self._conn.execute("INSERT OR IGNORE INTO style(id) VALUES (1)")
-        await self._conn.commit()
 
     async def close(self) -> None:
         if self._conn:
@@ -113,255 +128,131 @@ class Database:
         assert self._conn is not None, "База не подключена"
         return self._conn
 
-    # --- настройки ---
-    async def get_setting(self, key: str) -> str:
-        async with self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)) as cur:
-            row = await cur.fetchone()
-        return row["value"] if row else DEFAULT_SETTINGS.get(key, "")
+    @asynccontextmanager
+    async def tx(self) -> AsyncIterator[aiosqlite.Connection]:
+        """Транзакция записи. Все денежные операции идут только внутри неё."""
+        async with self._lock:
+            await self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield self.conn
+            except BaseException:
+                await self.conn.execute("ROLLBACK")
+                raise
+            else:
+                await self.conn.execute("COMMIT")
 
-    async def set_setting(self, key: str, value: str) -> None:
-        await self.conn.execute(
-            "INSERT INTO settings(key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, value),
-        )
-        await self.conn.commit()
-
-    async def get_flag(self, key: str) -> bool:
-        return await self.get_setting(key) == "1"
-
-    async def set_flag(self, key: str, value: bool) -> None:
-        await self.set_setting(key, "1" if value else "0")
-
-    # --- бизнес-подключения ---
-    async def save_connection(self, conn_id: str, user_id: int, can_reply: bool, enabled: bool) -> None:
-        await self.conn.execute(
-            "INSERT INTO connections(id, user_id, can_reply, is_enabled, updated_at) "
-            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id, "
-            "can_reply=excluded.can_reply, is_enabled=excluded.is_enabled, updated_at=excluded.updated_at",
-            (conn_id, user_id, int(can_reply), int(enabled), time.time()),
-        )
-        await self.conn.commit()
-
-    async def get_connection(self, conn_id: str) -> dict[str, Any] | None:
-        async with self.conn.execute("SELECT * FROM connections WHERE id=?", (conn_id,)) as cur:
+    async def one(self, sql: str, *args: Any) -> dict[str, Any] | None:
+        async with self.conn.execute(sql, args) as cur:
             row = await cur.fetchone()
         return dict(row) if row else None
 
-    # --- чаты ---
-    async def upsert_chat(
-        self, chat_id: int, title: str | None, username: str | None, connection_id: str | None
-    ) -> Chat:
-        await self.conn.execute(
-            "INSERT INTO chats(chat_id, title, username, connection_id, updated_at) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(chat_id) DO UPDATE SET title=excluded.title, username=excluded.username, "
-            "connection_id=COALESCE(excluded.connection_id, chats.connection_id), updated_at=excluded.updated_at",
-            (chat_id, title, username, connection_id, time.time()),
-        )
-        await self.conn.commit()
-        chat = await self.get_chat(chat_id)
-        assert chat is not None
-        return chat
-
-    async def get_chat(self, chat_id: int) -> Chat | None:
-        async with self.conn.execute("SELECT * FROM chats WHERE chat_id=?", (chat_id,)) as cur:
-            row = await cur.fetchone()
-        return _chat(row) if row else None
-
-    async def find_chat_by_username(self, username: str) -> Chat | None:
-        async with self.conn.execute(
-            "SELECT * FROM chats WHERE lower(username)=lower(?)", (username.lstrip("@"),)
-        ) as cur:
-            row = await cur.fetchone()
-        return _chat(row) if row else None
-
-    async def set_chat_status(self, chat_id: int, status: str) -> None:
-        await self.conn.execute(
-            "INSERT INTO chats(chat_id, status, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(chat_id) DO UPDATE SET status=excluded.status",
-            (chat_id, status, time.time()),
-        )
-        await self.conn.commit()
-
-    async def mark_notified(self, chat_id: int) -> None:
-        await self.conn.execute("UPDATE chats SET notified=1 WHERE chat_id=?", (chat_id,))
-        await self.conn.commit()
-
-    async def pause_chat(self, chat_id: int, until: float) -> None:
-        await self.conn.execute("UPDATE chats SET paused_until=? WHERE chat_id=?", (until, chat_id))
-        await self.conn.commit()
-
-    async def recent_chats(self, limit: int = 10) -> list[Chat]:
-        async with self.conn.execute(
-            "SELECT * FROM chats ORDER BY updated_at DESC LIMIT ?", (limit,)
-        ) as cur:
-            rows = await cur.fetchall()
-        return [_chat(r) for r in rows]
-
-    async def chats_by_status(self, status: str) -> list[Chat]:
-        async with self.conn.execute(
-            "SELECT * FROM chats WHERE status=? ORDER BY updated_at DESC", (status,)
-        ) as cur:
-            rows = await cur.fetchall()
-        return [_chat(r) for r in rows]
-
-    # --- история ---
-    async def add_message(self, chat_id: int, from_owner: bool, text: str) -> None:
-        await self.conn.execute(
-            "INSERT INTO messages(chat_id, from_owner, text, ts) VALUES (?, ?, ?, ?)",
-            (chat_id, int(from_owner), text, time.time()),
-        )
-        await self.conn.commit()
-
-    async def history(self, chat_id: int, limit: int = 20) -> list[dict[str, Any]]:
-        async with self.conn.execute(
-            "SELECT from_owner, text, ts FROM messages WHERE chat_id=? ORDER BY id DESC LIMIT ?",
-            (chat_id, limit),
-        ) as cur:
-            rows = await cur.fetchall()
-        return [dict(r) for r in reversed(rows)]
-
-    async def last_incoming(self, chat_id: int) -> str | None:
-        """Последние подряд идущие сообщения собеседника (после моего последнего ответа)."""
-        rows = await self.history(chat_id, limit=20)
-        tail: list[str] = []
-        for row in reversed(rows):
-            if row["from_owner"]:
-                break
-            tail.append(row["text"])
-        return "\n".join(reversed(tail)) or None
-
-    # --- примеры ---
-    async def add_example(self, reply: str, incoming: str | None, source: str) -> None:
-        await self.add_example_id(reply, incoming, source)
-
-    async def add_example_id(self, reply: str, incoming: str | None, source: str) -> int:
-        cur = await self.conn.execute(
-            "INSERT INTO examples(incoming, reply, source, ts) VALUES (?, ?, ?, ?)",
-            (incoming, reply, source, time.time()),
-        )
-        await self.conn.commit()
-        return int(cur.lastrowid)
-
-    async def append_to_example(self, example_id: int, text: str) -> None:
-        """Дописывает следующее сообщение той же «пачки» с новой строки."""
-        await self.conn.execute(
-            "UPDATE examples SET reply = reply || char(10) || ?, ts=? WHERE id=?",
-            (text, time.time(), example_id),
-        )
-        await self.conn.commit()
-
-    async def examples(self) -> list[dict[str, Any]]:
-        async with self.conn.execute("SELECT id, incoming, reply, source FROM examples ORDER BY id") as cur:
+    async def all(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+        async with self.conn.execute(sql, args) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
-    async def examples_count(self) -> int:
-        async with self.conn.execute("SELECT COUNT(*) AS n FROM examples") as cur:
-            row = await cur.fetchone()
-        return int(row["n"])
+    # ---------- пользователи ----------
 
-    # --- стиль ---
-    async def get_style(self) -> dict[str, Any]:
-        async with self.conn.execute("SELECT * FROM style WHERE id=1") as cur:
-            row = await cur.fetchone()
-        data = dict(row)
-        data["profile"] = json.loads(data["profile"] or "{}")
-        return data
-
-    async def set_style_description(self, text: str) -> None:
-        await self.conn.execute("UPDATE style SET description=?, updated_at=? WHERE id=1", (text, time.time()))
-        await self.conn.commit()
-
-    async def set_style_profile(self, profile: dict[str, Any], summary: str) -> None:
-        await self.conn.execute(
-            "UPDATE style SET profile=?, summary=?, updated_at=? WHERE id=1",
-            (json.dumps(profile, ensure_ascii=False), summary, time.time()),
-        )
-        await self.conn.commit()
-
-    async def reset_style(self) -> None:
-        await self.conn.execute("DELETE FROM examples")
-        await self.conn.execute(
-            "UPDATE style SET description='', profile='{}', summary='', updated_at=? WHERE id=1",
-            (time.time(),),
-        )
-        await self.conn.commit()
-
-    # --- черновики ---
-    async def create_draft(self, chat_id: int, connection_id: str, parts: list[str]) -> int:
-        cur = await self.conn.execute(
-            "INSERT INTO drafts(chat_id, connection_id, parts, created_at) VALUES (?, ?, ?, ?)",
-            (chat_id, connection_id, json.dumps(parts, ensure_ascii=False), time.time()),
-        )
-        await self.conn.commit()
-        return int(cur.lastrowid)
-
-    async def get_draft(self, draft_id: int) -> dict[str, Any] | None:
-        async with self.conn.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)) as cur:
-            row = await cur.fetchone()
-        if not row:
-            return None
-        data = dict(row)
-        data["parts"] = json.loads(data["parts"])
-        return data
-
-    async def set_draft_status(self, draft_id: int, status: str) -> None:
-        await self.conn.execute("UPDATE drafts SET status=? WHERE id=?", (status, draft_id))
-        await self.conn.commit()
-
-    async def claim_draft(self, draft_id: int, from_status: str, to_status: str) -> bool:
-        """Атомарно меняет статус. False, если черновик уже обработан."""
-        cur = await self.conn.execute(
-            "UPDATE drafts SET status=? WHERE id=? AND status=?", (to_status, draft_id, from_status)
-        )
-        await self.conn.commit()
-        return cur.rowcount == 1
-
-    async def editing_draft(self) -> dict[str, Any] | None:
-        async with self.conn.execute(
-            "SELECT id FROM drafts WHERE status='editing' ORDER BY id DESC LIMIT 1"
-        ) as cur:
-            row = await cur.fetchone()
-        return await self.get_draft(row["id"]) if row else None
-
-    async def expire_pending_drafts(self, chat_id: int) -> list[int]:
-        """Старые черновики чата больше не актуальны, когда пришло новое сообщение или ответил я сам."""
-        async with self.conn.execute(
-            "SELECT id FROM drafts WHERE chat_id=? AND status='pending'", (chat_id,)
-        ) as cur:
-            ids = [r["id"] for r in await cur.fetchall()]
-        if ids:
-            await self.conn.execute(
-                "UPDATE drafts SET status='expired' WHERE chat_id=? AND status='pending'", (chat_id,)
+    async def touch_user(self, user_id: int, username: str | None, first_name: str | None) -> tuple[dict, bool]:
+        """Создаёт или обновляет пользователя. Возвращает (пользователь, создан_ли)."""
+        now = time.time()
+        async with self.tx() as c:
+            cur = await c.execute(
+                "INSERT OR IGNORE INTO users(id, username, first_name, created_at, last_seen) VALUES (?,?,?,?,?)",
+                (user_id, username, first_name, now, now),
             )
-            await self.conn.commit()
-        return ids
+            created = cur.rowcount == 1
+            if not created:
+                await c.execute(
+                    "UPDATE users SET username=?, first_name=?, last_seen=? WHERE id=?",
+                    (username, first_name, now, user_id),
+                )
+        user = await self.get_user(user_id)
+        assert user is not None
+        return user, created
 
-    # --- статистика ---
-    async def log_reply(self, chat_id: int, mode: str) -> None:
-        await self.conn.execute(
-            "INSERT INTO replies_log(chat_id, mode, ts) VALUES (?, ?, ?)", (chat_id, mode, time.time())
+    async def get_user(self, user_id: int) -> dict | None:
+        return await self.one("SELECT * FROM users WHERE id=?", user_id)
+
+    async def find_user(self, query: str) -> dict | None:
+        q = query.strip().lstrip("@")
+        if q.isdigit():
+            return await self.get_user(int(q))
+        return await self.one("SELECT * FROM users WHERE lower(username)=lower(?)", q)
+
+    # ---------- деньги (вызывать внутри tx) ----------
+
+    @staticmethod
+    async def change_balance(
+        c: aiosqlite.Connection, user_id: int, delta: int, kind: str, ref: str | None = None
+    ) -> int:
+        cur = await c.execute(
+            "UPDATE users SET balance = balance + ? WHERE id=? AND balance + ? >= 0",
+            (delta, user_id, delta),
         )
-        await self.conn.commit()
+        if cur.rowcount != 1:
+            raise InsufficientFunds()
+        async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
+            balance = (await q.fetchone())["balance"]
+        await c.execute(
+            "INSERT INTO ledger(user_id, delta, kind, ref, balance_after, ts) VALUES (?,?,?,?,?,?)",
+            (user_id, delta, kind, ref, balance, time.time()),
+        )
+        return balance
 
-    async def stats(self) -> list[dict[str, Any]]:
-        async with self.conn.execute(
-            "SELECT r.chat_id, c.title, c.username, COUNT(*) AS n, MAX(r.ts) AS last_ts "
-            "FROM replies_log r LEFT JOIN chats c ON c.chat_id = r.chat_id "
-            "GROUP BY r.chat_id ORDER BY n DESC"
-        ) as cur:
-            rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+    @staticmethod
+    async def log_bet(c: aiosqlite.Connection, user_id: int, game: str, bet: int, win: int, detail: str = "") -> None:
+        await c.execute(
+            "INSERT INTO bets(user_id, game, bet, win, detail, ts) VALUES (?,?,?,?,?,?)",
+            (user_id, game, bet, win, detail, time.time()),
+        )
+        await c.execute(
+            "UPDATE users SET wagered = wagered + ?, won = won + ? WHERE id=?", (bet, win, user_id)
+        )
 
+    # ---------- платежи ----------
 
-def _chat(row: aiosqlite.Row) -> Chat:
-    return Chat(
-        chat_id=row["chat_id"],
-        title=row["title"],
-        username=row["username"],
-        status=row["status"],
-        paused_until=row["paused_until"],
-        connection_id=row["connection_id"],
-        notified=bool(row["notified"]),
-    )
+    async def credit_payment(self, charge_id: str, user_id: int, amount: int) -> bool:
+        """Зачисляет оплату Stars. Повторный апдейт с тем же charge_id ничего не делает."""
+        async with self.tx() as c:
+            cur = await c.execute(
+                "INSERT OR IGNORE INTO payments(charge_id, user_id, amount, ts) VALUES (?,?,?,?)",
+                (charge_id, user_id, amount, time.time()),
+            )
+            if cur.rowcount != 1:
+                return False
+            await c.execute(
+                "INSERT OR IGNORE INTO users(id, created_at, last_seen) VALUES (?,?,?)",
+                (user_id, time.time(), time.time()),
+            )
+            await self.change_balance(c, user_id, amount, "deposit", charge_id)
+            await c.execute("UPDATE users SET deposited = deposited + ? WHERE id=?", (amount, user_id))
+        return True
+
+    # ---------- история ----------
+
+    async def recent_bets(self, user_id: int, limit: int = 20) -> list[dict]:
+        return await self.all(
+            "SELECT game, bet, win, ts FROM bets WHERE user_id=? ORDER BY id DESC LIMIT ?", user_id, limit
+        )
+
+    async def stats(self) -> dict[str, Any]:
+        users = await self.one("SELECT COUNT(*) n, COALESCE(SUM(balance),0) bal FROM users")
+        pay = await self.one("SELECT COUNT(*) n, COALESCE(SUM(amount),0) s FROM payments")
+        bets = await self.one("SELECT COUNT(*) n, COALESCE(SUM(bet),0) b, COALESCE(SUM(win),0) w FROM bets")
+        checks = await self.one(
+            "SELECT COALESCE(SUM(amount*left),0) liab, COUNT(*) n FROM checks WHERE active=1 AND left>0"
+        )
+        issued = await self.one("SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE kind='check'")
+        return {
+            "users": users["n"],
+            "balances": users["bal"],
+            "payments": pay["n"],
+            "deposited": pay["s"],
+            "bets": bets["n"],
+            "wagered": bets["b"],
+            "won": bets["w"],
+            "active_checks": checks["n"],
+            "checks_liability": checks["liab"],
+            "checks_redeemed": issued["s"],
+        }

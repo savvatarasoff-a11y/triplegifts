@@ -5,10 +5,9 @@ import logging
 import re
 import sys
 
-# Токен бота: 123456789:AA...; ключ Anthropic: sk-ant-...
+# Токен бота вида 123456789:AA...
 _PATTERNS = [
     re.compile(r"(?<!\d)\d{6,12}:[A-Za-z0-9_-]{30,}"),
-    re.compile(r"sk-ant-[A-Za-z0-9_-]{10,}"),
 ]
 MASK = "***"
 
@@ -46,5 +45,5 @@ def setup_logging(level: str, secrets: list[str]) -> None:
     root.handlers[:] = [handler]
     root.setLevel(level)
     # Библиотеки HTTP пишут URL запросов, где может оказаться токен бота
-    for noisy in ("httpx", "httpcore", "aiohttp.access"):
+    for noisy in ("aiohttp.access",):
         logging.getLogger(noisy).setLevel(logging.WARNING)

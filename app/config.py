@@ -26,40 +26,48 @@ def _int(name: str, default: int) -> int:
         raise ConfigError(f"{name} должна быть числом, получено: {raw!r}") from e
 
 
+def _ids(name: str) -> frozenset[int]:
+    raw = os.getenv(name, "").replace(";", ",").replace(" ", ",")
+    ids = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.lstrip("-").isdigit():
+            raise ConfigError(f"{name}: «{part}» — не числовой ID (узнать через @userinfobot)")
+        ids.add(int(part))
+    return frozenset(ids)
+
+
 @dataclass(frozen=True)
 class Config:
     bot_token: str
-    anthropic_api_key: str
-    owner_id: int
-    claude_model: str
-    owner_name: str
+    admin_ids: frozenset[int]
+    webapp_url: str
     db_path: str
-    delay_min: int
-    delay_max: int
-    owner_pause_minutes: int
+    port: int
+    min_bet: int
+    max_bet: int
+    start_bonus: int
     log_level: str
 
     @classmethod
     def from_env(cls) -> "Config":
-        owner_raw = _required("OWNER_ID")
-        try:
-            owner_id = int(owner_raw)
-        except ValueError as e:
-            raise ConfigError("OWNER_ID должен быть числом (узнать у @userinfobot)") from e
-        delay_min = max(0, _int("REPLY_DELAY_MIN", 5))
-        delay_max = max(delay_min, _int("REPLY_DELAY_MAX", 60))
+        webapp_url = os.getenv("WEBAPP_URL", "").strip().rstrip("/")
+        if not webapp_url and os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+            webapp_url = f"https://{os.environ['RAILWAY_PUBLIC_DOMAIN'].strip()}"
+        min_bet = max(1, _int("MIN_BET", 1))
         return cls(
             bot_token=_required("BOT_TOKEN"),
-            anthropic_api_key=_required("ANTHROPIC_API_KEY"),
-            owner_id=owner_id,
-            claude_model=os.getenv("CLAUDE_MODEL", "").strip() or "claude-opus-5-5",
-            owner_name=os.getenv("OWNER_NAME", "").strip() or "Савва",
-            db_path=os.getenv("DB_PATH", "").strip() or "bot.db",
-            delay_min=delay_min,
-            delay_max=delay_max,
-            owner_pause_minutes=max(0, _int("OWNER_PAUSE_MINUTES", 30)),
+            admin_ids=_ids("ADMIN_IDS"),
+            webapp_url=webapp_url,
+            db_path=os.getenv("DB_PATH", "").strip() or "casino.db",
+            port=_int("PORT", 8080),
+            min_bet=min_bet,
+            max_bet=max(min_bet, _int("MAX_BET", 10000)),
+            start_bonus=max(0, _int("START_BONUS", 0)),
             log_level=(os.getenv("LOG_LEVEL", "").strip() or "INFO").upper(),
         )
 
-    def secrets(self) -> list[str]:
-        return [self.bot_token, self.anthropic_api_key]
+    def is_admin(self, user_id: int) -> bool:
+        return user_id in self.admin_ids
