@@ -2,6 +2,7 @@ name: tests
 
 on:
   push:
+    branches-ignore: [data]
   pull_request:
 
 jobs:
