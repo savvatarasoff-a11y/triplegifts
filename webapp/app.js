@@ -1082,7 +1082,7 @@ function openCaseScreen(c) {
       ttl.textContent = p.title;
       const model = document.createElement("small");
       model.textContent = `модель «${p.model || "—"}»` + (p.rarity != null ? ` · ${p.rarity}%` : "");
-      d.append(e, ttl, model, document.createTextNode("≈ " + stars(p.amount)), sm);
+      d.append(e, ttl, model, document.createTextNode("маркет от " + stars(p.amount)), sm);
     } else {
       d.append(e, document.createTextNode(stars(p.amount)), sm);
     }
@@ -1115,7 +1115,7 @@ async function openCase() {
       const good = r.prize >= currentCase.price;
       res.className = "result reveal " + (good ? "win" : "lose");
       res.textContent = r.kind === "nft"
-        ? `NFT ${r.nft.title}! Передаём вам в Telegram`
+        ? `NFT ${r.nft.title} · «${r.nft.model}»! Передаём вам в Telegram`
         : `${r.gift} ${stars(r.prize)}`;
       haptic(good ? "win" : "lose");
       celebrate(currentCase.price, r.prize, $("#case-roller"));

@@ -17,6 +17,8 @@ from .casino import Casino
 from .config import Config, ConfigError
 from .db import Database
 from .logging_setup import setup_logging
+from .nft import sync as sync_nfts
+from .relayer import Relayer
 from .web import build_app
 
 log = logging.getLogger("casino")
@@ -37,7 +39,8 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("user", "Инфо об игроке"),
     ("withdrawals", "Заявки на вывод"),
     ("stars", "Баланс звёзд бота"),
-    ("nfts", "NFT для NFT-кейса"),
+    ("nfts", "NFT-модели и цены"),
+    ("relayer", "Релейер NFT"),
 ]
 
 
@@ -67,6 +70,16 @@ async def background(casino: Casino, bot: Bot) -> None:
         except Exception:
             log.exception("Ошибка фоновой задачи")
         await asyncio.sleep(1)
+
+
+async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> None:
+    """Каждые 10 минут обновляет запас моделей у релейера и цены с маркета."""
+    while True:
+        try:
+            await sync_nfts(bot, casino.db, cfg, relayer)
+        except Exception:
+            log.warning("Не удалось обновить NFT-модели")
+        await asyncio.sleep(600)
 
 
 async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
@@ -109,11 +122,14 @@ async def run() -> None:
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", cfg.port).start()
 
+    relayer = Relayer(db, cfg.bot_token)
+    await relayer.start()
     dp = Dispatcher()
-    dp.include_router(build_router(cfg, casino))
+    dp.include_router(build_router(cfg, casino, relayer))
     await setup_bot_ui(bot, cfg)
     bg = asyncio.create_task(background(casino, bot))
     crash_task = asyncio.create_task(crash_loop(casino))
+    nft_task = asyncio.create_task(nft_loop(bot, cfg, casino, relayer))
 
     try:
         me = await bot.get_me()
@@ -131,6 +147,8 @@ async def run() -> None:
     finally:
         bg.cancel()
         crash_task.cancel()
+        nft_task.cancel()
+        await relayer.stop()
         await runner.cleanup()
         await db.close()
         await bot.session.close()

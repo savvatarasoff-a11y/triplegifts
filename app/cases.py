@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from .db import Database
 from .games import logic as g
+from .nft import PRICE_MAX_AGE
 from .withdraw import GiftCatalog
 
 log = logging.getLogger(__name__)
@@ -50,20 +52,23 @@ class CaseCatalog:
         return [c for c in cases if c is not None]
 
     async def _nft_case(self, prices: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
-        nfts = await self.db.all(
-            "SELECT * FROM nft_prizes WHERE status='available' AND price IS NOT NULL AND price > 0 ORDER BY price DESC"
+        """NFT-кейс из моделей, которые есть у релейера и чья цена проверена на маркете не позже часа назад."""
+        models = await self.db.all(
+            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
+            "ORDER BY price DESC",
+            time.time() - PRICE_MAX_AGE,
         )
-        if not nfts or not prices:
+        if not models or not prices:
             return None
         regular = sorted(prices.values(), key=lambda x: x["stars"])
-        probs = g.nft_case_weights(self.nft_case_price, [n["price"] for n in nfts], [x["stars"] for x in regular])
+        probs = g.nft_case_weights(self.nft_case_price, [m["price"] for m in models], [x["stars"] for x in regular])
         if probs is None:
             return None
         p_nft, p_gift = probs
         prizes = [
-            {"kind": "nft", "nft_id": n["id"], "emoji": n["emoji"] or "💎", "title": n["title"], "model": n["model"],
-             "rarity": n["rarity"], "amount": n["price"], "weight": p}
-            for n, p in zip(nfts, p_nft)
+            {"kind": "nft", "model_id": m["id"], "emoji": m["emoji"] or "💎", "title": m["collection_name"],
+             "model": m["model"], "rarity": m["rarity"], "amount": m["price"], "weight": p}
+            for m, p in zip(models, p_nft)
         ]
         prizes += [
             {"kind": "gift", "emoji": x["emoji"], "gift_id": x["id"], "amount": x["stars"], "weight": p}

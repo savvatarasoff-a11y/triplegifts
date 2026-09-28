@@ -97,20 +97,34 @@ CREATE TABLE IF NOT EXISTS business_connections (
     is_enabled INTEGER NOT NULL,
     updated_at REAL NOT NULL
 );
-CREATE TABLE IF NOT EXISTS nft_prizes (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    owned_gift_id  TEXT NOT NULL UNIQUE,
-    connection_id  TEXT NOT NULL,
-    title          TEXT NOT NULL,          -- «Plush Pepe #123»
-    model          TEXT,
-    rarity         REAL,                   -- редкость модели, %
-    emoji          TEXT,
-    price          INTEGER,                -- цена в звёздах, назначает админ после проверки на маркете
-    transfer_cost  INTEGER NOT NULL DEFAULT 0,
-    status         TEXT NOT NULL DEFAULT 'available',  -- available | won | sent | failed | gone
-    winner_id      INTEGER,
-    error          TEXT,
-    updated_at     REAL NOT NULL
+CREATE TABLE IF NOT EXISTS kv (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS nft_models (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id   TEXT NOT NULL,          -- id коллекции (исходного подарка)
+    collection_name TEXT NOT NULL,          -- «Plush Pepe»
+    model           TEXT NOT NULL,          -- «Frog Prince»
+    rarity          REAL,                   -- редкость модели, %
+    emoji           TEXT,
+    stock           INTEGER NOT NULL DEFAULT 0,  -- сколько подарков этой модели у релейера
+    reserved        INTEGER NOT NULL DEFAULT 0,  -- выиграно, но ещё не передано
+    price           INTEGER,                -- пол маркета Telegram в звёздах
+    price_at        REAL,                   -- когда цена проверена
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (collection_id, model)
+);
+CREATE TABLE IF NOT EXISTS nft_wins (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id      INTEGER NOT NULL,
+    user_id       INTEGER NOT NULL,
+    price         INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'won',   -- won | sending | sent | failed
+    owned_gift_id TEXT,                          -- какой конкретно подарок ушёл
+    error         TEXT,
+    created_at    REAL NOT NULL,
+    sent_at       REAL
 );
 CREATE TABLE IF NOT EXISTS crash_rounds (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -206,6 +220,20 @@ class Database:
                 raise
             else:
                 await self.conn.execute("COMMIT")
+
+    async def kv_get(self, key: str) -> str | None:
+        row = await self.one("SELECT value FROM kv WHERE key=?", key)
+        return row["value"] if row else None
+
+    async def kv_set(self, key: str, value: str | None) -> None:
+        async with self.tx() as c:
+            if value is None:
+                await c.execute("DELETE FROM kv WHERE key=?", (key,))
+            else:
+                await c.execute(
+                    "INSERT INTO kv(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (key, value),
+                )
 
     async def one(self, sql: str, *args: Any) -> dict[str, Any] | None:
         async with self.conn.execute(sql, args) as cur:

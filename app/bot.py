@@ -22,6 +22,7 @@ from .casino import Casino, GameError
 from .config import Config
 from .web import DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, parse_deposit_payload
 from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
+from .relayer import Relayer
 from .withdraw import admin_keyboard, approve, reject
 
 log = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def play_keyboard(cfg: Config) -> InlineKeyboardMarkup | None:
     ]])
 
 
-def build_router(cfg: Config, casino: Casino) -> Router:
+def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None) -> Router:
     router = Router(name="casino")
 
     async def register(message: Message) -> dict:
@@ -146,10 +147,10 @@ def build_router(cfg: Config, casino: Casino) -> Router:
             "<b>Команды администратора</b>\n"
             "/check <code>сумма [активаций]</code> — создать чек, например <code>/check 100 5</code>\n"
             "/withdrawals — заявки на вывод\n"
-            "/nfts — NFT на вашем аккаунте для NFT-кейса\n"
-            "/nftprice <code>номер цена</code> — назначить цену NFT (после проверки на маркете)\n"
-            "/nftoff <code>номер</code> — убрать NFT из кейса\n"
-            "/nftsend <code>номер</code> — повторить передачу выигранного NFT\n"
+            "/relayer — релейер NFT: подключение и вход\n"
+            "/nfts — модели NFT у релейера и их цены с маркета\n"
+            "/nftoff, /nfton <code>номер</code> — убрать/вернуть модель в NFT-кейс\n"
+            "/nftsend <code>номер выигрыша</code> — повторить передачу NFT\n"
             "/stars — баланс звёзд бота (из него отправляются подарки)\n"
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
@@ -257,74 +258,146 @@ def build_router(cfg: Config, casino: Casino) -> Router:
         if not cfg.is_admin(conn.user.id):
             return
         if not conn.is_enabled:
-            text = "🔌 Бот отключён от вашего аккаунта — NFT-кейс выключен."
+            text = "🔌 Релейер отключён от бота — NFT-кейс выключен."
         elif not can_gifts:
             text = ("⚠️ Бот подключён, но без прав на подарки. В настройках чат-бота включите "
                     "просмотр подарков и звёзд и передачу подарков.")
         else:
-            text = "🔌 Бот подключён к аккаунту с правами на подарки. Отправьте /nfts, чтобы увидеть NFT."
+            text = "🔌 Релейер подключён с правами на подарки. Отправьте /nfts, чтобы увидеть модели и цены."
         try:
             await conn.bot.send_message(conn.user.id, text)
         except Exception:
             pass
 
+    async def forget(message: Message) -> None:
+        """Удаляет из чата сообщение с кодом/паролем/ключом."""
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+    @admin.message(Command("relayer"))
+    async def relayer_status(message: Message) -> None:
+        conn = await casino.db.one(
+            "SELECT * FROM business_connections WHERE is_enabled=1 ORDER BY updated_at DESC LIMIT 1")
+        who = await relayer.me() if relayer and relayer.ready else None
+        lines = [
+            "🤖 <b>Релейер NFT</b> — аккаунт, на котором лежат NFT-подарки казино.",
+            "",
+            f"1. Бизнес-подключение (выдача подарков): {'✅' if conn and conn['can_gifts'] else '❌'}",
+            "   Telegram → Настройки → Telegram для бизнеса → Чат-боты → этот бот, права на подарки и звёзды.",
+            f"2. Вход через MTProto (цены с маркета): {'✅ ' + html.escape(who) if who else '❌'}",
+            "   • получите api_id и api_hash на my.telegram.org → API development tools;",
+            "   • <code>/relayer_api api_id api_hash</code>",
+            "   • <code>/relayer_phone +79990000000</code> — номер аккаунта-релейера;",
+            "   • код из Telegram отправьте <b>с пробелами</b>: <code>/relayer_code 1 2 3 4 5</code>",
+            "     (слитный код Telegram блокирует);",
+            "   • если есть облачный пароль: <code>/relayer_password пароль</code>.",
+            "   Сообщения с ключами, кодом и паролем бот сразу удаляет. Сессия хранится зашифрованной.",
+            "3. <code>/nfts</code> — модели у релейера и их пол на маркете.",
+        ]
+        await message.answer("\n".join(lines))
+
+    @admin.message(Command("relayer_api"))
+    async def relayer_api(message: Message, command: CommandObject) -> None:
+        await forget(message)
+        args = (command.args or "").split()
+        if len(args) != 2 or not args[0].isdigit():
+            await message.answer("Формат: <code>/relayer_api api_id api_hash</code>")
+            return
+        await relayer.set_api(int(args[0]), args[1])
+        await message.answer("✅ api_id и api_hash сохранены. Теперь: <code>/relayer_phone +79990000000</code>")
+
+    @admin.message(Command("relayer_phone"))
+    async def relayer_phone(message: Message, command: CommandObject) -> None:
+        phone = (command.args or "").replace(" ", "")
+        if not phone.lstrip("+").isdigit():
+            await message.answer("Формат: <code>/relayer_phone +79990000000</code>")
+            return
+        try:
+            await relayer.send_code(phone)
+        except Exception as e:
+            await message.answer(f"⚠️ {html.escape(str(e))}")
+            return
+        await message.answer("📨 Код отправлен в Telegram релейера. Пришлите его <b>с пробелами</b>: "
+                             "<code>/relayer_code 1 2 3 4 5</code>")
+
+    @admin.message(Command("relayer_code"))
+    async def relayer_code(message: Message, command: CommandObject) -> None:
+        await forget(message)
+        code = "".join(ch for ch in (command.args or "") if ch.isdigit())
+        if not code:
+            await message.answer("Формат: <code>/relayer_code 1 2 3 4 5</code>")
+            return
+        try:
+            done = await relayer.sign_in(code)
+        except Exception as e:
+            await message.answer(f"⚠️ {html.escape(str(e))}")
+            return
+        if not done:
+            await message.answer("🔐 Включён облачный пароль: <code>/relayer_password пароль</code>")
+            return
+        await message.answer(f"✅ Релейер подключён: {html.escape(await relayer.me() or '')}. Теперь /nfts")
+
+    @admin.message(Command("relayer_password"))
+    async def relayer_password(message: Message, command: CommandObject) -> None:
+        await forget(message)
+        try:
+            await relayer.sign_in_password((command.args or "").strip())
+        except Exception as e:
+            await message.answer(f"⚠️ {html.escape(str(e))}")
+            return
+        await message.answer(f"✅ Релейер подключён: {html.escape(await relayer.me() or '')}. Теперь /nfts")
+
+    @admin.message(Command("relayer_logout"))
+    async def relayer_logout(message: Message) -> None:
+        await relayer.logout()
+        await message.answer("Релейер отключён, сессия удалена.")
+
     @admin.message(Command("nfts"))
     async def nfts(message: Message, bot: Bot) -> None:
-        count, error = await sync_nfts(bot, casino.db, cfg)
-        if error:
-            await message.answer(f"⚠️ {html.escape(error)}")
+        status = await message.answer("🔄 Обновляю подарки релейера и цены с маркета…")
+        try:
+            count, error = await sync_nfts(bot, casino.db, cfg, relayer)
+        except Exception as e:
+            await status.edit_text(f"⚠️ Не удалось обновить: {html.escape(type(e).__name__)}")
             return
-        rows = await casino.db.all(
-            "SELECT * FROM nft_prizes WHERE status IN ('available','won','sending','failed') ORDER BY id"
-        )
+        rows = await casino.db.all("SELECT * FROM nft_models WHERE stock > 0 OR reserved > 0 ORDER BY price DESC")
         if not rows:
-            await message.answer("На аккаунте нет NFT-подарков, которые можно передать.")
+            text = f"⚠️ {html.escape(error)}" if error else "У релейера нет NFT-подарков, которые можно передать."
+            await status.edit_text(text)
             return
-        status_text = {"available": "", "won": " — выигран, передаётся", "sending": " — передаётся",
-                       "failed": " — ⚠️ не передан, /nftsend"}
-        lines = [f"<b>{r['id']}.</b> {describe_nft(r)}{status_text.get(r['status'], '')}" for r in rows]
-        priced = sum(1 for r in rows if r["status"] == "available" and r["price"])
-        await message.answer(
-            f"💎 <b>NFT на аккаунте: {count}</b>, в кейсе: {priced}\n\n" + "\n".join(lines) +
-            f"\n\nЦена NFT-кейса: {cfg.nft_case_price} ⭐. В кейс попадают только NFT с ценой. "
-            "Бот не видит рыночную цену через API — проверьте цену на маркете Telegram (профиль → подарок → "
-            "«Купить похожие» / маркетплейс) и назначьте: <code>/nftprice номер цена</code>."
+        lines = [f"<b>{r['id']}.</b> {describe_nft(r)}" for r in rows]
+        note = f"\n\n⚠️ {html.escape(error)}" if error else ""
+        await status.edit_text(
+            f"💎 <b>Модели у релейера: {count}</b>\n\n" + "\n".join(lines) +
+            f"\n\nNFT-кейс: {cfg.nft_case_price} ⭐. В кейс попадают модели с проверенной ценой и свободным запасом; "
+            "выигравшему релейер передаёт случайный подарок этой модели." + note
         )
 
-    @admin.message(Command("nftprice"))
-    async def nft_price(message: Message, command: CommandObject) -> None:
-        args = (command.args or "").split()
-        if len(args) != 2 or not all(a.isdigit() for a in args) or int(args[1]) < 1:
-            await message.answer("Формат: <code>/nftprice номер цена</code>, например <code>/nftprice 3 5000</code>")
+    async def toggle_model(message: Message, command: CommandObject, enabled: bool) -> None:
+        arg = (command.args or "").strip()
+        if not arg.isdigit():
+            await message.answer("Формат: номер модели из /nfts")
             return
         async with casino.db.tx() as c:
-            cur = await c.execute(
-                "UPDATE nft_prizes SET price=?, updated_at=? WHERE id=? AND status='available'",
-                (int(args[1]), time.time(), int(args[0])),
-            )
-        if cur.rowcount != 1:
-            await message.answer("NFT не найден или уже выигран. Список — /nfts")
-            return
-        n = await casino.db.one("SELECT * FROM nft_prizes WHERE id=?", int(args[0]))
-        await message.answer(f"✅ {describe_nft(n)}\nNFT в кейсе.")
+            cur = await c.execute("UPDATE nft_models SET enabled=? WHERE id=?", (int(enabled), int(arg)))
+        await message.answer(("Модель в кейсе." if enabled else "Модель убрана из кейса.") if cur.rowcount else
+                             "Модель не найдена.")
 
     @admin.message(Command("nftoff"))
     async def nft_off(message: Message, command: CommandObject) -> None:
-        arg = (command.args or "").strip()
-        if not arg.isdigit():
-            await message.answer("Формат: <code>/nftoff номер</code>")
-            return
-        async with casino.db.tx() as c:
-            cur = await c.execute(
-                "UPDATE nft_prizes SET price=NULL WHERE id=? AND status='available'", (int(arg),)
-            )
-        await message.answer("NFT убран из кейса." if cur.rowcount == 1 else "NFT не найден.")
+        await toggle_model(message, command, False)
+
+    @admin.message(Command("nfton"))
+    async def nft_on(message: Message, command: CommandObject) -> None:
+        await toggle_model(message, command, True)
 
     @admin.message(Command("nftsend"))
     async def nft_send(message: Message, command: CommandObject, bot: Bot) -> None:
         arg = (command.args or "").strip()
         if not arg.isdigit():
-            await message.answer("Формат: <code>/nftsend номер</code>")
+            await message.answer("Формат: <code>/nftsend номер_выигрыша</code>")
             return
         ok, text = await deliver_nft(bot, casino.db, cfg, int(arg))
         await message.answer(("✅ " if ok else "⚠️ ") + html.escape(text))

@@ -229,7 +229,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
             raise GameError("Кейс сейчас недоступен")
         result = await casino.open_case(request[USER_ID], case)
         if result["kind"] == "nft":
-            asyncio.create_task(deliver_nft(bot, casino.db, cfg, result["nft"]["id"]))
+            asyncio.create_task(deliver_nft(bot, casino.db, cfg, result["nft"]["win_id"]))
         return web.json_response(result)
 
     @routes.get("/api/mines")

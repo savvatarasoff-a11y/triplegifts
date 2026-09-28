@@ -251,13 +251,19 @@ class Casino:
         async with self.db.tx() as c:
             await self._take(c, user_id, case["price"], "case")
             if prize["kind"] == "nft":
+                # Резервируем подарок этой модели у релейера; конкретный NFT выберется при передаче
                 cur = await c.execute(
-                    "UPDATE nft_prizes SET status='won', winner_id=?, updated_at=? WHERE id=? AND status='available'",
-                    (user_id, time.time(), prize["nft_id"]),
+                    "UPDATE nft_models SET reserved=reserved+1 WHERE id=? AND enabled=1 AND stock > reserved",
+                    (prize["model_id"],),
                 )
                 if cur.rowcount != 1:
-                    raise GameError("Этот NFT только что выиграл другой игрок — откройте кейс ещё раз")
-                detail["nft_id"] = prize["nft_id"]
+                    raise GameError("Подарки этой модели только что закончились — откройте кейс ещё раз")
+                win = await c.execute(
+                    "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
+                    (prize["model_id"], user_id, prize["amount"], time.time()),
+                )
+                detail["nft_win"] = win.lastrowid
+                detail["model"] = prize["model"]
                 await self.db.log_bet(c, user_id, "case", case["price"], prize["amount"],
                                       json.dumps(detail, ensure_ascii=False))
                 async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
@@ -267,7 +273,7 @@ class Casino:
         result = {"case": case["id"], "kind": prize["kind"], "prize": prize["amount"], "gift": prize["emoji"],
                   "balance": balance}
         if prize["kind"] == "nft":
-            result["nft"] = {"id": prize["nft_id"], "title": prize["title"], "model": prize["model"]}
+            result["nft"] = {"win_id": detail["nft_win"], "title": prize["title"], "model": prize["model"]}
         return result
 
     # ---------- мины ----------

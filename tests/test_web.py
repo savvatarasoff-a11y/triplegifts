@@ -38,12 +38,31 @@ class FakeGift:
         self.sticker = type("S", (), {"emoji": emoji})()
 
 
+def unique_gift(owned_id, collection_id, base, number, model, transfer=25):
+    from aiogram.types import OwnedGiftUnique
+    sticker = {"file_id": "f", "file_unique_id": "u", "type": "custom_emoji", "width": 1, "height": 1,
+               "is_animated": False, "is_video": False, "emoji": "🐸"}
+    return OwnedGiftUnique.model_validate({
+        "type": "unique", "owned_gift_id": owned_id, "send_date": 0, "can_be_transferred": True,
+        "transfer_star_count": transfer,
+        "gift": {"gift_id": collection_id, "base_name": base, "name": f"{base}-{number}", "number": number,
+                 "model": {"name": model, "rarity_per_mille": 15, "sticker": sticker},
+                 "symbol": {"name": "s", "rarity_per_mille": 10, "sticker": sticker},
+                 "backdrop": {"name": "b", "rarity_per_mille": 10, "colors": {
+                     "center_color": 0, "edge_color": 0, "symbol_color": 0, "text_color": 0}}},
+    })
+
+
 class FakeBot:
     def __init__(self):
         self.invoices = []
         self.messages = []
         self.transfers = []
         self.prices = {}
+        self.inventory = []
+
+    async def get_business_account_gifts(self, **kwargs):
+        return type("O", (), {"gifts": self.inventory, "next_offset": None})()
 
     async def create_invoice_link(self, **kwargs):
         self.invoices.append(kwargs)
@@ -204,22 +223,29 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
     assert data["kind"] == "gift" and data["prize"] in (15, 25, 50, 100)
     assert (await client.post("/api/case", headers=auth(8), json={"case": "nft"})).status == 400
 
-    # NFT с ценой от админа -> появляется NFT-кейс; выпавший NFT передаётся через бизнес-аккаунт
+    # Модель у релейера с ценой с маркета -> NFT-кейс; выигравшему уходит случайный подарок этой модели
+    import time as _t
     await casino.db.conn.execute(
-        "INSERT INTO nft_prizes(owned_gift_id, connection_id, title, model, rarity, emoji, price, transfer_cost, updated_at) "
-        "VALUES ('og1','bc1','Plush Pepe #7','Frog',1.5,'🐸',5000,25,0)")
+        "INSERT INTO business_connections(id, user_id, can_gifts, is_enabled, updated_at) VALUES ('bc1', 777, 1, 1, 0)")
+    await casino.db.conn.execute(
+        "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at) "
+        "VALUES ('555','Plush Pepe','Frog Prince',1.5,'🐸',2,5000,?)", (_t.time(),))
+    client.app[BOT].inventory = [unique_gift("og1", "555", "Plush Pepe", 11, "Frog Prince"),
+                                 unique_gift("og2", "555", "Plush Pepe", 12, "Frog Prince"),
+                                 unique_gift("og3", "555", "Plush Pepe", 13, "Other")]
     cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(8))).json())["config"]["cases"]}
     nft_prize = next(p for p in cases["nft"]["prizes"] if p["kind"] == "nft")
-    assert nft_prize["title"] == "Plush Pepe #7" and nft_prize["amount"] == 5000 and nft_prize["model"] == "Frog"
+    assert nft_prize["title"] == "Plush Pepe" and nft_prize["amount"] == 5000 and nft_prize["model"] == "Frog Prince"
     monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[0])
     r = await client.post("/api/case", headers=auth(8), json={"case": "nft"})
     data = await r.json()
-    assert data["kind"] == "nft" and data["nft"]["title"] == "Plush Pepe #7"
+    assert data["kind"] == "nft" and data["nft"]["model"] == "Frog Prince"
     import asyncio
     await asyncio.sleep(0.05)
     t = client.app[BOT].transfers[-1]
-    assert t == {"business_connection_id": "bc1", "owned_gift_id": "og1", "new_owner_chat_id": 8, "star_count": 25}
-    assert (await casino.db.one("SELECT status FROM nft_prizes"))["status"] == "sent"
+    assert t["owned_gift_id"] in ("og1", "og2") and t["new_owner_chat_id"] == 8 and t["business_connection_id"] == "bc1"
+    assert (await casino.db.one("SELECT status FROM nft_wins"))["status"] == "sent"
+    assert (await casino.db.one("SELECT stock, reserved FROM nft_models")) == {"stock": 1, "reserved": 0}
 
 
 async def test_case_disabled_when_real_prices_too_generous(client):

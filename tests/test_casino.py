@@ -201,21 +201,24 @@ async def test_cases_gift(casino):
     assert r["kind"] == "gift" and r["prize"] == 15 and r["gift"] == "🧸" and r["balance"] == 15
 
 
-async def test_cases_nft_reserved_not_credited(casino):
+async def test_cases_nft_model_reserved_not_credited(casino):
+    import time as _t
     await casino.db.conn.execute(
-        "INSERT INTO nft_prizes(owned_gift_id, connection_id, title, model, price, updated_at) "
-        "VALUES ('og1','bc','Plush Pepe #7','Frog',5000,0)")
+        "INSERT INTO nft_models(collection_id, collection_name, model, stock, price, price_at) "
+        "VALUES ('555','Plush Pepe','Frog Prince',1,5000,?)", (_t.time(),))
     nft_case = {"id": "nft", "price": 250, "prizes": [
-        {"kind": "nft", "nft_id": 1, "emoji": "🐸", "title": "Plush Pepe #7", "model": "Frog", "amount": 5000, "weight": 1},
+        {"kind": "nft", "model_id": 1, "emoji": "🐸", "title": "Plush Pepe", "model": "Frog Prince",
+         "amount": 5000, "weight": 1},
     ]}
     await fund(casino, 1, 500)
     await fund(casino, 2, 500)
     r = await casino.open_case(1, nft_case)
-    assert r["kind"] == "nft" and r["nft"]["title"] == "Plush Pepe #7"
+    assert r["kind"] == "nft" and r["nft"]["model"] == "Frog Prince" and r["nft"]["win_id"] == 1
     assert r["balance"] == 250                                   # NFT не зачисляется звёздами
-    row = await casino.db.one("SELECT status, winner_id FROM nft_prizes WHERE id=1")
-    assert row == {"status": "won", "winner_id": 1}
-    with pytest.raises(GameError, match="только что выиграл"):  # второй раз этот NFT не выпадет
+    assert (await casino.db.one("SELECT stock, reserved FROM nft_models")) == {"stock": 1, "reserved": 1}
+    assert (await casino.db.one("SELECT user_id, status, price FROM nft_wins")) == {
+        "user_id": 1, "status": "won", "price": 5000}
+    with pytest.raises(GameError, match="закончились"):          # единственный подарок модели уже зарезервирован
         await casino.open_case(2, nft_case)
     assert await balance(casino, 2) == 500                       # списание откатилось
 
