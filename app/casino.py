@@ -129,6 +129,87 @@ class Casino:
             cur = await c.execute("UPDATE checks SET active=0 WHERE code=? AND active=1", (code.strip(),))
         return cur.rowcount == 1
 
+    # ---------- вывод подарками ----------
+
+    async def wager_status(self, user_id: int) -> dict:
+        """Звёзды из чеков и бонусов нужно отыграть: сумма ставок ≥ полученного бесплатно."""
+        free = await self.db.one(
+            "SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE user_id=? AND kind IN ('check','bonus')", user_id
+        )
+        user = await self.db.get_user(user_id)
+        wagered = user["wagered"] if user else 0
+        return {"required": free["s"], "done": wagered, "left": max(0, free["s"] - wagered)}
+
+    async def withdraw_request(self, user_id: int, gift_id: str, price: int, emoji: str | None) -> dict:
+        if price < 1:
+            raise GameError("Подарок недоступен")
+        wager = await self.wager_status(user_id)
+        if wager["left"] > 0:
+            raise GameError(f"Сначала отыграйте бонусные звёзды: осталось поставить {wager['left']} ⭐")
+        async with self.db.tx() as c:
+            async with c.execute(
+                "SELECT 1 FROM withdrawals WHERE user_id=? AND status IN ('pending','sending')", (user_id,)
+            ) as q:
+                if await q.fetchone():
+                    raise GameError("У вас уже есть заявка на вывод — дождитесь её обработки")
+            cur = await c.execute(
+                "INSERT INTO withdrawals(user_id, amount, gift_id, gift_emoji, created_at) VALUES (?,?,?,?,?)",
+                (user_id, price, gift_id, emoji, time.time()),
+            )
+            wd_id = cur.lastrowid
+            try:
+                balance = await self.db.change_balance(c, user_id, -price, "withdraw", str(wd_id))
+            except InsufficientFunds:
+                raise GameError("Недостаточно звёзд на балансе") from None
+        return {"id": wd_id, "user_id": user_id, "amount": price, "emoji": emoji, "status": "pending",
+                "balance": balance}
+
+    async def get_withdrawal(self, wd_id: int) -> dict | None:
+        return await self.db.one("SELECT * FROM withdrawals WHERE id=?", wd_id)
+
+    async def withdraw_claim(self, wd_id: int, admin_id: int) -> dict | None:
+        """Берёт заявку в отправку. None — если её уже обработали."""
+        async with self.db.tx() as c:
+            cur = await c.execute(
+                "UPDATE withdrawals SET status='sending', admin_id=? WHERE id=? AND status='pending'", (admin_id, wd_id)
+            )
+        return await self.get_withdrawal(wd_id) if cur.rowcount == 1 else None
+
+    async def withdraw_finish(self, wd_id: int, ok: bool, error: str | None = None) -> None:
+        """После попытки отправки: успех — sent, ошибка — заявка снова ждёт решения."""
+        async with self.db.tx() as c:
+            await c.execute(
+                "UPDATE withdrawals SET status=?, error=?, processed_at=? WHERE id=? AND status='sending'",
+                ("sent" if ok else "pending", error, time.time(), wd_id),
+            )
+
+    async def withdraw_reject(self, wd_id: int, admin_id: int) -> dict | None:
+        """Отклоняет заявку и возвращает звёзды игроку."""
+        async with self.db.tx() as c:
+            cur = await c.execute(
+                "UPDATE withdrawals SET status='rejected', admin_id=?, processed_at=? WHERE id=? AND status='pending'",
+                (admin_id, time.time(), wd_id),
+            )
+            if cur.rowcount != 1:
+                return None
+            async with c.execute("SELECT * FROM withdrawals WHERE id=?", (wd_id,)) as q:
+                wd = dict(await q.fetchone())
+            wd["balance"] = await self.db.change_balance(c, wd["user_id"], wd["amount"], "withdraw_refund", str(wd_id))
+        return wd
+
+    async def withdrawals(self, user_id: int | None = None, status: str | None = None, limit: int = 20) -> list[dict]:
+        sql = "SELECT * FROM withdrawals WHERE 1=1"
+        args: list[Any] = []
+        if user_id is not None:
+            sql += " AND user_id=?"
+            args.append(user_id)
+        if status is not None:
+            sql += " AND status=?"
+            args.append(status)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        return await self.db.all(sql, *args)
+
     # ---------- слоты ----------
 
     async def slots(self, user_id: int, bet: Any) -> dict:

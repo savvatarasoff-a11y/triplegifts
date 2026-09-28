@@ -77,6 +77,19 @@ CREATE TABLE IF NOT EXISTS crash_games (
     auto       REAL,
     started_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS withdrawals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL,
+    amount       INTEGER NOT NULL,
+    gift_id      TEXT NOT NULL,
+    gift_emoji   TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending',  -- pending | sending | sent | rejected
+    error        TEXT,
+    admin_id     INTEGER,
+    created_at   REAL NOT NULL,
+    processed_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id, id);
 CREATE TABLE IF NOT EXISTS pvp_rounds (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     status      TEXT NOT NULL DEFAULT 'open',   -- open | done | refunded
@@ -244,6 +257,10 @@ class Database:
             "SELECT COALESCE(SUM(amount*left),0) liab, COUNT(*) n FROM checks WHERE active=1 AND left>0"
         )
         issued = await self.one("SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE kind='check'")
+        wd = await self.one(
+            "SELECT COALESCE(SUM(CASE WHEN status='sent' THEN amount END),0) sent, "
+            "COALESCE(SUM(CASE WHEN status IN ('pending','sending') THEN amount END),0) pending FROM withdrawals"
+        )
         return {
             "users": users["n"],
             "balances": users["bal"],
@@ -255,4 +272,6 @@ class Database:
             "active_checks": checks["n"],
             "checks_liability": checks["liab"],
             "checks_redeemed": issued["s"],
+            "withdrawn": wd["sent"],
+            "withdraw_pending": wd["pending"],
         }

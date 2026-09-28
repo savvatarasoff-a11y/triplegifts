@@ -8,6 +8,7 @@ from urllib.parse import quote
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -18,13 +19,15 @@ from aiogram.types import (
 from .casino import Casino, GameError
 from .config import Config
 from .web import DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, parse_deposit_payload
+from .withdraw import admin_keyboard, approve, reject
 
 log = logging.getLogger(__name__)
 
 RULES = (
-    "Звёзды на балансе — игровая валюта Svag Gifts. Пополнить баланс можно через Telegram Stars "
-    "или чеком. <b>Вывода звёзд нет</b>, они не обмениваются на деньги. Играйте только ради "
-    "развлечения. 18+."
+    "Пополнить баланс Svag Gifts можно через Telegram Stars или чеком. "
+    "<b>Вывод — подарками Telegram</b>: выберите подарок в мини-приложении (раздел «Вывод»), "
+    "после проверки администратором он придёт вам в Telegram, его можно оставить или обменять на звёзды. "
+    "Звёзды из чеков и бонусов нужно сначала отыграть. Играйте ответственно. 18+."
 )
 
 
@@ -59,6 +62,7 @@ def build_router(cfg: Config, casino: Casino) -> Router:
         await message.answer(
             f"🎁 <b>Добро пожаловать в Svag Gifts!</b>\n\n"
             f"Слоты, краш, мины, кости, рулетка, кейсы и PvP-рулетка — в мини-приложении.\n"
+            f"Вывод — подарками Telegram.\n"
             f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
             f"/deposit — пополнить звёздами\n/balance — баланс\n/help — правила",
             reply_markup=play_keyboard(cfg),
@@ -131,12 +135,15 @@ def build_router(cfg: Config, casino: Casino) -> Router:
 
     admin = Router(name="admin")
     admin.message.filter(F.from_user.id.in_(cfg.admin_ids))
+    admin.callback_query.filter(F.from_user.id.in_(cfg.admin_ids))
 
     @admin.message(Command("admin"))
     async def admin_help(message: Message) -> None:
         await message.answer(
             "<b>Команды администратора</b>\n"
             "/check <code>сумма [активаций]</code> — создать чек, например <code>/check 100 5</code>\n"
+            "/withdrawals — заявки на вывод\n"
+            "/stars — баланс звёзд бота (из него отправляются подарки)\n"
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
             "/stats — статистика казино\n"
@@ -200,8 +207,51 @@ def build_router(cfg: Config, casino: Casino) -> Router:
             f"Доход казино с игр: {profit} ⭐\n"
             f"Выдано по чекам: {s['checks_redeemed']} ⭐, ещё можно активировать на {s['checks_liability']} ⭐ "
             f"({s['active_checks']} чеков)\n"
-            f"Звёзд на балансах игроков: {s['balances']} ⭐"
+            f"Звёзд на балансах игроков: {s['balances']} ⭐\n"
+            f"Выведено подарками: {s['withdrawn']} ⭐, ждут решения: {s['withdraw_pending']} ⭐"
         )
+
+    @admin.message(Command("withdrawals"))
+    async def list_withdrawals(message: Message) -> None:
+        pending = await casino.withdrawals(status="pending", limit=20)
+        if not pending:
+            await message.answer("Заявок на вывод нет.")
+            return
+        for wd in pending:
+            user = await casino.db.get_user(wd["user_id"])
+            name = html.escape((user or {}).get("first_name") or str(wd["user_id"]))
+            err = f"\n⚠️ Прошлая попытка: {html.escape(wd['error'])}" if wd["error"] else ""
+            await message.answer(
+                f"💸 №{wd['id']}: {name} (<code>{wd['user_id']}</code>) — "
+                f"{wd['gift_emoji'] or '🎁'} {wd['amount']} ⭐{err}",
+                reply_markup=admin_keyboard(wd["id"]),
+            )
+
+    @admin.message(Command("stars"))
+    async def bot_stars(message: Message, bot: Bot) -> None:
+        try:
+            balance = await bot.get_my_star_balance()
+            await message.answer(f"⭐ Баланс звёзд бота: <b>{balance.amount}</b>\nИз него отправляются подарки при выводе.")
+        except Exception as e:
+            await message.answer(f"Не удалось получить баланс: {html.escape(str(e))}")
+
+    @admin.callback_query(F.data.startswith("w:"))
+    async def withdraw_decision(query: CallbackQuery, bot: Bot) -> None:
+        _, action, raw_id = query.data.split(":", 2)
+        wd_id = int(raw_id)
+        if action == "ok":
+            ok, text = await approve(bot, casino, wd_id, query.from_user.id)
+        else:
+            ok, text = await reject(bot, casino, wd_id, query.from_user.id)
+        await query.answer(text[:190], show_alert=not ok)
+        if isinstance(query.message, Message):
+            try:
+                if ok:
+                    await query.message.edit_text(f"{query.message.html_text}\n\n<b>{html.escape(text)}</b>")
+                else:
+                    await query.message.answer(html.escape(text))
+            except Exception:
+                pass
 
     @admin.message(Command("user"))
     async def user_info(message: Message, command: CommandObject) -> None:

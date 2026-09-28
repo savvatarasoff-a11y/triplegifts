@@ -9,7 +9,8 @@ from pydantic import TypeAdapter
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerPreCheckoutQuery, GetMe, SendInvoice, SendMessage, TelegramMethod
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import AnswerPreCheckoutQuery, GetMe, SendGift, SendInvoice, SendMessage, TelegramMethod
 from aiogram.types import Update
 
 from app.bot import build_router
@@ -25,9 +26,12 @@ class FakeSession(BaseSession):
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[TelegramMethod] = []
+        self.gift_error: str | None = None
 
     async def make_request(self, bot: Bot, method: TelegramMethod, timeout: int | None = None) -> Any:
         self.calls.append(method)
+        if isinstance(method, SendGift) and self.gift_error:
+            raise TelegramBadRequest(method=method, message=self.gift_error)
         return TypeAdapter(method.__returning__).validate_python(self._raw(method), context={"bot": bot})
 
     def _raw(self, method: TelegramMethod) -> Any:
@@ -137,3 +141,36 @@ async def test_start_shows_play_button(env):
     await feed(msg(1, PLAYER, "/start"))
     last = [c for c in session.calls if isinstance(c, SendMessage)][-1]
     assert last.reply_markup.inline_keyboard[0][0].web_app.url == "https://casino.example"
+
+
+def cb(uid: int, user_id: int, data: str) -> dict:
+    return {"update_id": uid, "callback_query": {
+        "id": str(uid), "from": {"id": user_id, "is_bot": False, "first_name": "A"}, "chat_instance": "x", "data": data,
+        "message": {"message_id": 9, "date": int(time.time()), "chat": {"id": user_id, "type": "private"}, "text": "заявка"}}}
+
+
+async def test_withdraw_admin_buttons(env):
+    feed, session, casino, db = env["feed"], env["session"], env["casino"], env["db"]
+    await db.touch_user(PLAYER, "p", "P")
+    await db.credit_payment("c1", PLAYER, 200)
+    wd = await casino.withdraw_request(PLAYER, "gift50", 50, "🧸")
+
+    await feed(cb(1, PLAYER, f"w:ok:{wd['id']}"))            # не админ — ничего не происходит
+    assert (await casino.get_withdrawal(wd["id"]))["status"] == "pending"
+
+    session.gift_error = "BALANCE_TOO_LOW"
+    await feed(cb(2, ADMIN, f"w:ok:{wd['id']}"))
+    row = await casino.get_withdrawal(wd["id"])
+    assert row["status"] == "pending" and "BALANCE_TOO_LOW" in row["error"]
+
+    session.gift_error = None
+    await feed(cb(3, ADMIN, f"w:ok:{wd['id']}"))
+    assert (await casino.get_withdrawal(wd["id"]))["status"] == "sent"
+    gift = [c for c in session.calls if isinstance(c, SendGift)][-1]
+    assert gift.user_id == PLAYER and gift.gift_id == "gift50"
+    assert any("Вывод №" in t for t in session.texts(PLAYER))
+
+    wd2 = await casino.withdraw_request(PLAYER, "gift50", 50, "🧸")
+    await feed(cb(4, ADMIN, f"w:no:{wd2['id']}"))
+    assert (await casino.get_withdrawal(wd2["id"]))["status"] == "rejected"
+    assert (await db.get_user(PLAYER))["balance"] == 150

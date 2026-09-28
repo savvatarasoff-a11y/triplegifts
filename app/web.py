@@ -15,6 +15,7 @@ from aiohttp import web
 from .casino import Casino, GameError, display_name
 from .config import Config
 from .games import logic as g
+from .withdraw import GiftCatalog, notify_admins
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ USER_ID = web.RequestKey("user_id", int)
 def deposit_invoice_kwargs(user_id: int, amount: int) -> dict[str, Any]:
     return {
         "title": f"Пополнение на {amount} ⭐",
-        "description": "Игровой баланс казино. Звёзды не выводятся и не обмениваются на деньги.",
+        "description": "Пополнение баланса Svag Gifts. Вывод — подарками Telegram.",
         "payload": f"dep:{user_id}:{amount}",
         "currency": "XTR",
         "prices": [LabeledPrice(label=f"{amount} ⭐", amount=amount)],
@@ -86,6 +87,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
         return data
 
     routes = web.RouteTableDef()
+    catalog = GiftCatalog(bot)
 
     @routes.get("/health")
     async def health(_: web.Request) -> web.Response:
@@ -135,6 +137,34 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
             raise GameError(f"Сумма пополнения — от {DEPOSIT_MIN} до {DEPOSIT_MAX} ⭐")
         link = await bot.create_invoice_link(**deposit_invoice_kwargs(request[USER_ID], amount))
         return web.json_response({"link": link})
+
+    @routes.get("/api/withdraw")
+    async def withdraw_info(request: web.Request) -> web.Response:
+        uid = request[USER_ID]
+        try:
+            gifts = await catalog.list()
+        except Exception:
+            log.warning("Не удалось получить список подарков")
+            gifts = []
+        return web.json_response({
+            "gifts": gifts,
+            "wager": await casino.wager_status(uid),
+            "history": [
+                {"id": w["id"], "amount": w["amount"], "emoji": w["gift_emoji"], "status": w["status"],
+                 "created_at": w["created_at"]}
+                for w in await casino.withdrawals(user_id=uid, limit=10)
+            ],
+        })
+
+    @routes.post("/api/withdraw")
+    async def withdraw(request: web.Request) -> web.Response:
+        gift_id = (await body(request)).get("gift_id")
+        gift = await catalog.get(gift_id) if isinstance(gift_id, str) else None
+        if not gift:
+            raise GameError("Этот подарок сейчас недоступен")
+        wd = await casino.withdraw_request(request[USER_ID], gift["id"], gift["stars"], gift["emoji"])
+        await notify_admins(bot, cfg, casino, wd)
+        return web.json_response(wd)
 
     @routes.post("/api/check")
     async def check(request: web.Request) -> web.Response:

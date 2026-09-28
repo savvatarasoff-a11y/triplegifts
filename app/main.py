@@ -35,6 +35,8 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("revoke", "Отозвать чек"),
     ("stats", "Статистика"),
     ("user", "Инфо об игроке"),
+    ("withdrawals", "Заявки на вывод"),
+    ("stars", "Баланс звёзд бота"),
 ]
 
 

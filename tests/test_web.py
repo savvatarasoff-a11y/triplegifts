@@ -32,19 +32,35 @@ def init_data(user_id: int, token: str = TOKEN, auth_date: int | None = None, fi
     return urlencode(fields)
 
 
+class FakeGift:
+    def __init__(self, gid, stars, emoji, premium=False, remaining=None):
+        self.id, self.star_count, self.is_premium, self.remaining_count = gid, stars, premium, remaining
+        self.sticker = type("S", (), {"emoji": emoji})()
+
+
 class FakeBot:
     def __init__(self):
         self.invoices = []
+        self.messages = []
 
     async def create_invoice_link(self, **kwargs):
         self.invoices.append(kwargs)
         return "https://t.me/$invoice"
 
+    async def get_available_gifts(self):
+        return type("G", (), {"gifts": [
+            FakeGift("g50", 50, "🧸"), FakeGift("g15", 15, "🌹"),
+            FakeGift("gp", 100, "💎", premium=True), FakeGift("gsold", 25, "🎂", remaining=0),
+        ]})()
+
+    async def send_message(self, chat_id, text, **kwargs):
+        self.messages.append((chat_id, text))
+
 
 @pytest.fixture
 async def client(tmp_path):
     cfg = Config(
-        bot_token=TOKEN, admin_ids=frozenset(), webapp_url="https://x", db_path=str(tmp_path / "w.db"),
+        bot_token=TOKEN, admin_ids=frozenset({777}), webapp_url="https://x", db_path=str(tmp_path / "w.db"),
         port=0, min_bet=1, max_bet=1000, start_bonus=25, log_level="INFO",
     )
     db = Database(cfg.db_path)
@@ -128,3 +144,21 @@ async def test_check_via_api(client):
 async def test_index_served(client):
     r = await client.get("/")
     assert r.status == 200 and "telegram-web-app.js" in await r.text()
+
+
+async def test_withdraw_api(client):
+    r = await client.get("/api/withdraw", headers=auth(3))
+    data = await r.json()
+    assert [g["id"] for g in data["gifts"]] == ["g15", "g50"]   # премиум и распроданные скрыты
+    assert data["wager"]["left"] == 25                           # стартовый бонус нужно отыграть
+    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "g15"})
+    assert r.status == 400 and "отыграйте" in (await r.json())["error"]
+    await client.app[CASINO].db.conn.execute("UPDATE users SET wagered=25, balance=80 WHERE id=3")
+    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "g50"})
+    data = await r.json()
+    assert data["amount"] == 50 and data["balance"] == 30
+    assert client.app[BOT].messages[-1][0] == 777 and "Заявка на вывод" in client.app[BOT].messages[-1][1]
+    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "gp"})
+    assert r.status == 400
+    hist = (await (await client.get("/api/withdraw", headers=auth(3))).json())["history"]
+    assert hist[0]["status"] == "pending"

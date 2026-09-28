@@ -212,3 +212,46 @@ async def test_stats(casino):
     assert st["checks_redeemed"] == 5
     detail = (await casino.db.one("SELECT detail FROM bets"))["detail"]
     assert "reels" in json.loads(detail)
+
+
+async def test_withdraw_flow(casino):
+    await fund(casino, 1, 100)
+    wd = await casino.withdraw_request(1, "g1", 50, "🧸")
+    assert wd["balance"] == 50
+    with pytest.raises(GameError, match="уже есть заявка"):
+        await casino.withdraw_request(1, "g1", 15, "🌹")
+    # отправка: claim -> finish(ok)
+    assert (await casino.withdraw_claim(wd["id"], 7))["status"] == "sending"
+    assert await casino.withdraw_claim(wd["id"], 7) is None          # второй клик
+    await casino.withdraw_finish(wd["id"], ok=True)
+    assert (await casino.get_withdrawal(wd["id"]))["status"] == "sent"
+    assert await casino.withdraw_reject(wd["id"], 7) is None          # отправленную не отклонить
+    assert await balance(casino, 1) == 50
+
+
+async def test_withdraw_failed_send_returns_to_pending_and_reject_refunds(casino):
+    await fund(casino, 1, 100)
+    wd = await casino.withdraw_request(1, "g1", 100, "💝")
+    await casino.withdraw_claim(wd["id"], 7)
+    await casino.withdraw_finish(wd["id"], ok=False, error="BALANCE_TOO_LOW")
+    row = await casino.get_withdrawal(wd["id"])
+    assert row["status"] == "pending" and row["error"] == "BALANCE_TOO_LOW"
+    rej = await casino.withdraw_reject(wd["id"], 7)
+    assert rej["balance"] == 100
+    st = await casino.db.stats()
+    assert st["withdrawn"] == 0 and st["withdraw_pending"] == 0
+
+
+async def test_withdraw_requires_wagering_free_stars(casino):
+    code = await casino.create_check(7, 100, 1)
+    await casino.activate_check(1, code)
+    with pytest.raises(GameError, match="отыграйте"):
+        await casino.withdraw_request(1, "g1", 50, "🧸")
+    assert (await casino.wager_status(1))["left"] == 100
+    for _ in range(10):
+        await casino.slots(1, 5) if await balance(casino, 1) >= 5 else None
+    await casino.db.conn.execute("UPDATE users SET wagered=100, balance=100 WHERE id=1")
+    wd = await casino.withdraw_request(1, "g1", 50, "🧸")
+    assert wd["status"] == "pending"
+    with pytest.raises(GameError, match="Недостаточно"):
+        await casino.withdraw_request(2, "g1", 50, "🧸")
