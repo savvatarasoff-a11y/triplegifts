@@ -7,16 +7,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const STAR = "★";
 const state = { me: null, config: null, screen: "home", busy: false };
-const GAME_NAMES = { slots: "Слоты", dice: "Кости", mines: "Мины",
-  crash: "Краш", case: "Кейс", pvp: "PvP" };
-const TITLES = { wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины",
-  dice: "Кости", cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка" };
+const GAME_NAMES = { slots: "Слоты", dice: "Кости", mines: "Мины", crash: "Краш", case: "Кейс",
+  pvp: "PvP-рулетка", hockey: "PvP-хоккей" };
+const TITLES = { wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", dice: "Кости",
+  cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка", hockey: "PvP-хоккей" };
 // Оттенки фирменного фиолетового и белый: [фон, цвет текста]
 const PVP_COLORS = [["#8B5CF6", "#FFFFFF"], ["#FFFFFF", "#0B0A10"], ["#6D28D9", "#FFFFFF"], ["#C4B5FD", "#0B0A10"],
   ["#4C1D95", "#FFFFFF"], ["#EDE9FE", "#0B0A10"], ["#7C3AED", "#FFFFFF"], ["#A78BFA", "#0B0A10"]];
 const WD_STATUS = { pending: "на проверке", sending: "отправляется", sent: "отправлен", rejected: "отклонён" };
 const BIG_WIN_X = 10;
-const COLOR = { accent: "#8B5CF6", soft: "#A78BFA", white: "#FFFFFF", muted: "#5E5977" };
+const COLOR = { accent: "#8B5CF6", soft: "#A78BFA", pale: "#EDE9FE", deep: "#6D28D9", white: "#FFFFFF", muted: "#5E5977", bg: "#0B0A10" };
+const FX_COLORS = [COLOR.accent, COLOR.soft, COLOR.white, COLOR.deep, "#C4B5FD"];
 
 // ---------- утилиты ----------
 
@@ -25,6 +26,7 @@ function haptic(kind) {
     if (!tg || !tg.HapticFeedback) return;
     if (kind === "win") tg.HapticFeedback.notificationOccurred("success");
     else if (kind === "lose") tg.HapticFeedback.notificationOccurred("error");
+    else if (kind === "heavy") tg.HapticFeedback.impactOccurred("heavy");
     else tg.HapticFeedback.impactOccurred("light");
   } catch (e) { /* не критично */ }
 }
@@ -47,17 +49,9 @@ function store(key, value) {
   return null;
 }
 
-function fmt(n) {
-  return Number(n).toLocaleString("ru-RU");
-}
-
-function stars(n) {
-  return `${fmt(n)} ${STAR}`;
-}
-
-function fmtX(x) {
-  return "×" + (x >= 100 ? Math.round(x) : Number(x).toFixed(2));
-}
+const fmt = (n) => Number(n).toLocaleString("ru-RU");
+const stars = (n) => `${fmt(n)} ${STAR}`;
+const fmtX = (x) => "×" + (x >= 100 ? Math.round(x) : Number(x).toFixed(2));
 
 // deferBalance: баланс из ответа покажем сами — после анимации
 async function api(path, body, opts) {
@@ -81,7 +75,11 @@ async function api(path, body, opts) {
 
 function setBalance(value) {
   if (state.me) state.me.balance = value;
-  $("#balance").textContent = fmt(value);
+  const el = $("#balance");
+  el.textContent = fmt(value);
+  el.parentElement.classList.remove("bump");
+  void el.offsetWidth;
+  el.parentElement.classList.add("bump");
 }
 
 // Ставка списывается на экране сразу, выигрыш добавляется после анимации
@@ -107,6 +105,76 @@ async function confirmAsk(text) {
   return window.confirm(text);
 }
 
+const initials = (name) => (name || "?").replace("@", "").slice(0, 2).toUpperCase();
+
+// Аватарка игрока: фото из Telegram, если нет — инициалы на цвете игрока
+function avatarEl(p, cls, colors) {
+  const [bg, fg] = colors;
+  const el = document.createElement("span");
+  el.className = cls;
+  el.style.background = bg;
+  el.style.color = fg;
+  el.textContent = initials(p.name);
+  const img = new Image();
+  img.alt = "";
+  img.onload = () => el.append(img);
+  img.src = `/avatar/${p.id}`;
+  return el;
+}
+
+const avatarImages = {};
+function avatarImage(id) {
+  if (!avatarImages[id]) {
+    const img = new Image();
+    img.ok = false;
+    img.onload = () => { img.ok = true; };
+    img.src = `/avatar/${id}`;
+    avatarImages[id] = img;
+  }
+  return avatarImages[id];
+}
+
+// ---------- частицы ----------
+
+const fx = { parts: [], raf: 0 };
+
+function fxBurst(x, y, opts) {
+  const o = Object.assign({ count: 40, speed: 7, colors: FX_COLORS, gravity: 0.25, size: 4, life: 60 }, opts || {});
+  for (let i = 0; i < o.count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const v = o.speed * (0.4 + Math.random() * 0.8);
+    fx.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - o.speed * 0.3, g: o.gravity,
+      s: o.size * (0.6 + Math.random() * 0.8), c: o.colors[i % o.colors.length], life: o.life, max: o.life });
+  }
+  if (!fx.raf) fx.raf = requestAnimationFrame(fxLoop);
+}
+
+function fxBurstAt(el, opts) {
+  const r = el.getBoundingClientRect();
+  fxBurst(r.left + r.width / 2, r.top + r.height / 2, opts);
+}
+
+function fxLoop() {
+  const c = $("#fx");
+  const dpr = window.devicePixelRatio || 1;
+  if (c.width !== innerWidth * dpr) { c.width = innerWidth * dpr; c.height = innerHeight * dpr; }
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  fx.parts = fx.parts.filter((p) => p.life > 0);
+  fx.parts.forEach((p) => {
+    p.x += p.vx; p.y += p.vy; p.vy += p.g; p.vx *= 0.985; p.life--;
+    ctx.globalAlpha = Math.max(0, p.life / p.max);
+    ctx.fillStyle = p.c;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.s, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  fx.raf = fx.parts.length ? requestAnimationFrame(fxLoop) : 0;
+  if (!fx.raf) ctx.clearRect(0, 0, innerWidth, innerHeight);
+}
+
 // ---------- большой выигрыш ----------
 
 function bigWin(x, win) {
@@ -115,11 +183,10 @@ function bigWin(x, win) {
   $("#bigwin-sum").textContent = "+" + stars(win);
   const conf = $("#confetti");
   conf.innerHTML = "";
-  const colors = ["#8B5CF6", "#A78BFA", "#FFFFFF", "#6D28D9", "#C4B5FD"];
   for (let i = 0; i < 70; i++) {
     const c = document.createElement("i");
     c.style.left = Math.random() * 100 + "%";
-    c.style.background = colors[i % colors.length];
+    c.style.background = FX_COLORS[i % FX_COLORS.length];
     c.style.animationDuration = 1.8 + Math.random() * 2 + "s";
     c.style.animationDelay = Math.random() * 0.6 + "s";
     conf.append(c);
@@ -128,14 +195,16 @@ function bigWin(x, win) {
   haptic("win");
 }
 
-function celebrate(bet, win) {
+function celebrate(bet, win, el) {
+  if (win > 0 && el) fxBurstAt(el, { count: win >= bet * 3 ? 60 : 30 });
   if (win > 0 && win >= bet * BIG_WIN_X) bigWin(win / bet, win);
 }
 
 // ---------- навигация ----------
 
 function go(screen) {
-  if (screen !== "pvp") pvpLeave();
+  if (screen !== "pvp" && screen !== "hockey") pvpLeave();
+  if (screen !== "crash") crashLeave();
   if (screen !== "home") tickerStop();
   state.screen = screen;
   $$(".screen").forEach((s) => s.classList.toggle("active", s.id === screen));
@@ -146,7 +215,8 @@ function go(screen) {
   $("#back").classList.toggle("hidden", isHome || !!(tg && tg.BackButton));
   if (tg && tg.BackButton) isHome ? tg.BackButton.hide() : tg.BackButton.show();
   window.scrollTo(0, 0);
-  const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, pvp: pvpEnter, cases: renderCases, wallet: walletEnter };
+  const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
+    pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey") };
   if (enter[screen]) enter[screen]();
 }
 
@@ -237,21 +307,19 @@ async function loadTicker() {
     const { wins } = await api("/api/feed");
     const track = $("#ticker-track");
     track.innerHTML = "";
-    if (wins.length) {
-      wins.concat(wins).forEach((w) => {  // дублируем для бесконечной прокрутки
-        const el = document.createElement("div");
-        el.className = "tk";
-        const nm = document.createElement("span");
-        nm.textContent = `${w.name} · ${GAME_NAMES[w.game] || ""}`;
-        const x = document.createElement("span");
-        x.className = "xx";
-        x.textContent = fmtX(w.x);
-        const sum = document.createElement("b");
-        sum.textContent = "+" + stars(w.win);
-        el.append(nm, x, sum);
-        track.append(el);
-      });
-    }
+    wins.concat(wins).forEach((w) => {  // дублируем для бесконечной прокрутки
+      const el = document.createElement("div");
+      el.className = "tk";
+      const nm = document.createElement("span");
+      nm.textContent = `${w.name} · ${GAME_NAMES[w.game] || ""}`;
+      const x = document.createElement("span");
+      x.className = "xx";
+      x.textContent = fmtX(w.x);
+      const sum = document.createElement("b");
+      sum.textContent = "+" + stars(w.win);
+      el.append(nm, x, sum);
+      track.append(el);
+    });
   } catch (e) { /* лента не критична */ }
   if (state.screen === "home") tickerTimer = setTimeout(loadTicker, 20000);
 }
@@ -267,6 +335,7 @@ async function activateCheck() {
     const r = await api("/api/check", { code });
     $("#check-code").value = "";
     toast("Чек активирован: +" + stars(r.amount));
+    fxBurstAt($("#balance-btn"), { count: 30 });
     haptic("win");
   });
 }
@@ -310,6 +379,7 @@ async function deposit(amount) {
           await loadMe().catch(() => {});
           if (state.me && state.me.balance !== before) break;
         }
+        fxBurstAt($("#balance-btn"), { count: 50 });
         haptic("win");
         go("home");
       } else if (status === "failed") {
@@ -410,26 +480,30 @@ async function slotsSpin() {
       const r = await api("/api/slots", { bet }, { deferBalance: true });
       showBetTaken(bet);
       haptic();
-      const reels = $$("#slots .strip");
-      await Promise.all(reels.map((strip, i) => new Promise((resolve) => {
-        const items = reelStrip(r.reels[i], 20 + i * 7);
+      const reels = $$("#slots .reel");
+      await Promise.all(reels.map((reel, i) => new Promise((resolve) => {
+        const strip = reel.querySelector(".strip");
+        const items = reelStrip(r.reels[i], 22 + i * 8);
         strip.innerHTML = items.map((sym) => `<div>${sym}</div>`).join("");
         strip.style.transition = "none";
         strip.style.transform = "translateY(0)";
+        reel.classList.remove("stop");
         void strip.offsetHeight;
-        const ms = 1000 + i * 400;
-        strip.style.transition = `transform ${ms}ms cubic-bezier(.15,.85,.25,1.02)`;
+        const ms = 1100 + i * 450;
+        strip.classList.add("spin");
+        strip.style.transition = `transform ${ms}ms cubic-bezier(.12,.8,.25,1)`;
         strip.style.transform = `translateY(-${(items.length - 1) * REEL_H}px)`;
-        setTimeout(() => { haptic(); resolve(); }, ms);
+        setTimeout(() => strip.classList.remove("spin"), ms * 0.75);
+        setTimeout(() => { reel.classList.add("stop"); haptic(); resolve(); }, ms);
       })));
       setBalance(r.balance);
       const res = $("#slots-result");
       if (r.win > 0) {
         machine.classList.add("won");
-        res.className = "result win";
+        res.className = "result win reveal";
         res.textContent = `${fmtX(r.multiplier)} · +${stars(r.win)}`;
         haptic("win");
-        celebrate(bet, r.win);
+        celebrate(bet, r.win, machine);
       } else {
         res.className = "result lose";
         res.textContent = "Мимо, ещё раз?";
@@ -440,7 +514,7 @@ async function slotsSpin() {
   });
 }
 
-// ---------- ролик (рулетка, кейсы, PvP) ----------
+// ---------- ролик (кейсы, PvP-рулетка) ----------
 
 async function roll(rollerSel, items, targetIndex, duration) {
   const roller = $(rollerSel);
@@ -451,6 +525,7 @@ async function roll(rollerSel, items, targetIndex, duration) {
     d.className = "it " + (it.cls || "");
     if (it.bg) d.style.background = it.bg;
     if (it.fg) d.style.color = it.fg;
+    if (it.player) d.append(avatarEl(it.player, "av-big", it.colors));
     if (it.em) {
       const e = document.createElement("span");
       e.className = "em";
@@ -477,7 +552,22 @@ async function roll(rollerSel, items, targetIndex, duration) {
   void track.offsetWidth;
   track.style.transition = duration ? `transform ${duration}ms cubic-bezier(.08,.75,.12,1)` : "none";
   track.style.transform = `translateX(${offset}px)`;
-  if (duration) await sleep(duration + 100);
+  if (!duration) return;
+  // Щелчки при прохождении карточек под указателем
+  const start = performance.now();
+  let lastIdx = -1;
+  await new Promise((resolve) => {
+    const tick = () => {
+      const t = performance.now() - start;
+      const m = new DOMMatrixReadOnly(getComputedStyle(track).transform);
+      const idx = Math.floor((roller.clientWidth / 2 - m.m41) / itemW);
+      if (idx !== lastIdx) { lastIdx = idx; if (t < duration - 300) haptic(); }
+      t < duration + 100 ? requestAnimationFrame(tick) : resolve();
+    };
+    requestAnimationFrame(tick);
+  });
+  const target = track.children[targetIndex];
+  if (target) fxBurstAt(target, { count: 24, speed: 5 });
 }
 
 // ---------- кости ----------
@@ -526,18 +616,18 @@ async function diceRoll() {
       const start = performance.now();
       await new Promise((resolve) => {
         const tick = (now) => {
-          const t = Math.min(1, (now - start) / 700);
+          const t = Math.min(1, (now - start) / 800);
           el.textContent = t < 1 ? (Math.random() * 100).toFixed(2) : r.roll.toFixed(2);
           t < 1 ? requestAnimationFrame(tick) : resolve();
         };
         requestAnimationFrame(tick);
       });
       setBalance(r.balance);
-      el.className = "dice-roll " + (r.won ? "win" : "lose");
+      el.className = "dice-roll pop " + (r.won ? "win" : "lose");
       if (r.won) {
         toast(`${fmtX(r.multiplier)} · +${stars(r.win)}`);
         haptic("win");
-        celebrate(bet, r.win);
+        celebrate(bet, r.win, marker);
       } else {
         haptic("lose");
       }
@@ -611,10 +701,10 @@ async function minesAction() {
       const r = await api("/api/mines/cashout", {});
       minesGame = null;
       minesRender(r, r);
-      info.className = "result win";
+      info.className = "result win reveal";
       info.textContent = `${fmtX(r.multiplier)} · +${stars(r.win)}`;
       haptic("win");
-      celebrate(r.bet, r.win);
+      celebrate(r.bet, r.win, $("#mines-grid"));
       return;
     }
     const bet = getBet("mines");
@@ -631,47 +721,32 @@ async function minesOpen(cell) {
   await guard(async () => {
     const r = await api("/api/mines/open", { cell });
     const info = $("#mines-info");
+    const cellEl = () => $("#mines-grid").children[cell];
     if (r.boom !== undefined) {
       minesGame = null;
       minesRender(r, r);
       info.className = "result lose";
       info.textContent = "Мина! Ставка сгорела";
-      haptic("lose");
+      fxBurstAt(cellEl(), { count: 50, speed: 9, colors: [COLOR.white, COLOR.muted, COLOR.accent] });
+      haptic("heavy");
     } else if (r.win !== undefined) {
       minesGame = null;
       minesRender(r, r);
-      info.className = "result win";
+      info.className = "result win reveal";
       info.textContent = `Все клетки! ${fmtX(r.multiplier)} · +${stars(r.win)}`;
-      celebrate(r.bet, r.win);
+      celebrate(r.bet, r.win, $("#mines-grid"));
     } else {
       minesGame = r;
       minesRender(r);
+      fxBurstAt(cellEl(), { count: 14, speed: 4, gravity: 0.1 });
       haptic();
     }
   });
 }
 
-// ---------- краш ----------
+// ---------- краш (общие раунды) ----------
 
-const crash = { running: false, start: 0, growth: 0.07, raf: 0, poll: 0, bet: 0, polling: false };
-
-function crashHistory(point) {
-  let list = [];
-  try { list = JSON.parse(store("crash:hist") || "[]"); } catch (e) { list = []; }
-  if (point !== undefined) {
-    list.unshift(point);
-    list = list.slice(0, 20);
-    store("crash:hist", JSON.stringify(list));
-  }
-  const box = $("#crash-history");
-  box.innerHTML = "";
-  list.forEach((p) => {
-    const c = document.createElement("span");
-    c.className = "chip " + (p < 2 ? "lo" : p < 10 ? "mid" : "hi");
-    c.textContent = fmtX(p);
-    box.append(c);
-  });
-}
+const crash = { timer: 0, raf: 0, state: null, syncedAt: 0, lastRound: null, stars: [], trail: [], boomShown: null };
 
 function crashCanvas() {
   const c = $("#crash-canvas");
@@ -679,30 +754,46 @@ function crashCanvas() {
   if (c.width !== Math.round(c.clientWidth * dpr)) {
     c.width = Math.round(c.clientWidth * dpr);
     c.height = Math.round(c.clientHeight * dpr);
+    crash.stars = Array.from({ length: 60 }, () => ({ x: Math.random(), y: Math.random(), z: 0.3 + Math.random() }));
   }
   return c;
 }
 
-function crashDraw(mult, color) {
+// Текущий множитель на экране: считаем от момента старта, присланного сервером
+function crashMultiplier() {
+  const s = crash.state;
+  if (!s || !s.round || s.round.phase !== "running") return 1;
+  const elapsed = s.round.elapsed + (performance.now() - crash.syncedAt) / 1000;
+  return Math.floor(Math.exp(s.growth * elapsed) * 100) / 100;
+}
+
+function crashDraw(mult, mode) {
   const c = crashCanvas();
   const ctx = c.getContext("2d");
   const w = c.width, h = c.height, dpr = window.devicePixelRatio || 1;
+  const growth = (crash.state && crash.state.growth) || 0.07;
   ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(139,92,246,.08)";
-  ctx.lineWidth = dpr;
-  for (let i = 1; i < 4; i++) {
-    ctx.beginPath(); ctx.moveTo(0, (h * i) / 4); ctx.lineTo(w, (h * i) / 4); ctx.stroke();
-  }
-  const t = Math.log(Math.max(mult, 1)) / crash.growth;
+  // звёзды летят быстрее с ростом множителя
+  const speed = mode === "running" ? 0.002 + Math.log(mult) * 0.004 : 0.0005;
+  ctx.fillStyle = "rgba(237,233,254,.55)";
+  crash.stars.forEach((s) => {
+    s.x -= speed * s.z; s.y += speed * s.z * 0.4;
+    if (s.x < 0) s.x += 1;
+    if (s.y > 1) s.y -= 1;
+    ctx.globalAlpha = 0.25 + s.z * 0.4;
+    ctx.fillRect(s.x * w, s.y * h, 1.5 * dpr * s.z, 1.5 * dpr * s.z);
+  });
+  ctx.globalAlpha = 1;
+  if (mode === "betting") return;
+  const t = Math.log(Math.max(mult, 1)) / growth;
   const tMax = Math.max(8, t * 1.2);
   const mMax = Math.max(2, mult * 1.25);
   const pts = [];
   for (let i = 0; i <= 80; i++) {
     const ti = (t * i) / 80;
-    const mi = Math.exp(crash.growth * ti);
-    pts.push([(ti / tMax) * w, h - ((mi - 1) / (mMax - 1)) * (h * 0.8) - 8 * dpr]);
+    pts.push([(ti / tMax) * w, h - ((Math.exp(growth * ti) - 1) / (mMax - 1)) * (h * 0.75) - 22 * dpr]);
   }
-  const col = color || COLOR.accent;
+  const col = mode === "crashed" ? COLOR.muted : mode === "cashed" ? COLOR.soft : COLOR.accent;
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, col + "55");
   grad.addColorStop(1, col + "00");
@@ -722,95 +813,196 @@ function crashDraw(mult, color) {
   ctx.stroke();
   ctx.shadowBlur = 0;
   const [tx, ty] = pts[pts.length - 1];
+  const [px, py] = pts[pts.length - 2];
+  if (mode === "crashed") return;
+  // ракета: белый корпус по направлению полёта и хвост из частиц
+  const ang = Math.atan2(ty - py, tx - px);
+  crash.trail.push({ x: tx, y: ty, life: 20 });
+  crash.trail = crash.trail.filter((p) => --p.life > 0).slice(-40);
+  crash.trail.forEach((p) => {
+    ctx.globalAlpha = p.life / 40;
+    ctx.fillStyle = COLOR.soft;
+    ctx.beginPath();
+    ctx.arc(p.x - Math.cos(ang) * (20 - p.life) * dpr, p.y - Math.sin(ang) * (20 - p.life) * dpr, (p.life / 5) * dpr, 0, 7);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  ctx.save();
+  ctx.translate(tx, ty);
+  ctx.rotate(ang);
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = COLOR.white;
   ctx.beginPath();
-  ctx.arc(tx, ty, 7 * dpr, 0, Math.PI * 2);
-  ctx.fillStyle = color === COLOR.muted ? COLOR.muted : COLOR.white;
+  ctx.moveTo(14, 0); ctx.quadraticCurveTo(4, -7, -10, -6); ctx.lineTo(-10, 6); ctx.quadraticCurveTo(4, 7, 14, 0);
   ctx.fill();
+  ctx.fillStyle = COLOR.accent;
+  ctx.beginPath(); ctx.arc(3, 0, 2.6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-10, -6); ctx.lineTo(-16, -11); ctx.lineTo(-7, -6); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-10, 6); ctx.lineTo(-16, 11); ctx.lineTo(-7, 6); ctx.fill();
+  ctx.fillStyle = COLOR.soft;
+  ctx.beginPath(); ctx.moveTo(-10, -3); ctx.lineTo(-18 - Math.random() * 6, 0); ctx.lineTo(-10, 3); ctx.fill();
+  ctx.restore();
+  crash.rocketPos = [tx / dpr, ty / dpr];
 }
 
-function crashShow(mult, cls, sub) {
-  const el = $("#crash-mult");
-  el.textContent = Number(mult).toFixed(2) + "×";
-  el.className = "crash-mult " + (cls || "");
-  if (sub !== undefined) $("#crash-sub").textContent = sub;
-}
-
-function crashStop() {
-  crash.running = false;
-  cancelAnimationFrame(crash.raf);
-  clearInterval(crash.poll);
-  $("#crash-btn").textContent = "Старт";
-  $("#crash-btn").classList.remove("cash");
-}
-
-function crashFinish(r) {
-  if (!crash.running && r.status !== "cashed" && r.status !== "crashed") return;
-  crashStop();
-  if (r.status === "cashed") {
-    setBalance(r.balance);
-    crashShow(r.multiplier, "win", `Вы забрали +${stars(r.win)} · краш на ${fmtX(r.point)}`);
-    crashDraw(r.multiplier, COLOR.soft);
-    haptic("win");
-    celebrate(r.bet, r.win);
-    crashHistory(r.point);
-  } else if (r.status === "crashed") {
-    setBalance(r.balance);
-    crashShow(r.point, "lose", "Краш! Ставка сгорела");
-    crashDraw(r.point, COLOR.muted);
-    haptic("lose");
-    crashHistory(r.point);
+function crashFrame() {
+  const s = crash.state;
+  if (state.screen !== "crash") { crash.raf = 0; return; }
+  if (!s || !s.round) {  // первое состояние ещё не пришло
+    crashDraw(1, "betting");
+    crash.raf = requestAnimationFrame(crashFrame);
+    return;
+  }
+  const phase = s.round.phase;
+  const multEl = $("#crash-mult");
+  const bar = $("#crash-phase");
+  if (phase === "betting") {
+    const left = Math.max(0, s.round.betting_left - (performance.now() - crash.syncedAt) / 1000);
+    multEl.textContent = left.toFixed(1) + " с";
+    multEl.className = "crash-mult";
+    $("#crash-sub").textContent = "Приём ставок";
+    bar.style.width = (left / 7) * 100 + "%";
+    crashDraw(1, "betting");
+  } else if (phase === "running") {
+    const m = crashMultiplier();
+    multEl.textContent = m.toFixed(2) + "×";
+    multEl.className = "crash-mult";
+    bar.style.width = "0";
+    const my = s.my;
+    crashDraw(m, my && my.cashout ? "cashed" : "running");
+    if (my && !my.cashout) $("#crash-btn").textContent = "Забрать " + stars(Math.floor(my.bet * m));
   } else {
-    loadMe().catch(() => {});
+    multEl.textContent = s.round.point.toFixed(2) + "×";
+    multEl.className = "crash-mult lose";
+    $("#crash-sub").textContent = "Краш! Следующий раунд через " + Math.ceil(Math.max(0, s.round.next_in - (performance.now() - crash.syncedAt) / 1000)) + " с";
+    crashDraw(s.round.point, "crashed");
+  }
+  crash.raf = requestAnimationFrame(crashFrame);
+}
+
+function crashRenderPlayers(s) {
+  const box = $("#crash-players");
+  const players = s.players || [];
+  const phaseKey = s.round ? s.round.phase + s.round.id : "";
+  const sig = phaseKey + JSON.stringify(players);
+  if (sig === crash.playersSig) return;  // перерисовываем только при изменениях
+  const before = crash.cashedIds || new Set();
+  crash.playersSig = sig;
+  crash.cashedIds = new Set(players.filter((p) => p.cashout).map((p) => p.id));
+  box.innerHTML = "";
+  $("#crash-count").textContent = players.length ? `· ${players.length}` : "";
+  if (!players.length) {
+    box.innerHTML = '<div class="note">Пока никто не поставил</div>';
+    return;
+  }
+  const phase = s.round ? s.round.phase : "";
+  players.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "pl" + (state.me && p.id === state.me.user.id ? " me" : "") + (p.cashout ? " cashed" : "")
+      + (p.cashout && !before.has(p.id) ? " just" : "");
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = p.name;
+    const am = document.createElement("span");
+    am.className = "am";
+    am.textContent = stars(p.bet);
+    const st = document.createElement("span");
+    st.className = "st";
+    if (p.cashout) { st.classList.add("win"); st.textContent = `${fmtX(p.cashout)} · +${fmt(p.win)}`; }
+    else if (phase === "crashed") { st.classList.add("lose"); st.textContent = "сгорела"; }
+    else st.textContent = phase === "running" ? "в полёте" : "ставка";
+    row.append(avatarEl(p, "av", pvpColorFor(p.id)), nm, am, st);
+    box.append(row);
+  });
+}
+
+function crashHistory(list) {
+  const box = $("#crash-history");
+  box.innerHTML = "";
+  (list || []).forEach((p) => {
+    const c = document.createElement("span");
+    c.className = "chip " + (p < 2 ? "lo" : p < 10 ? "mid" : "hi");
+    c.textContent = fmtX(p);
+    box.append(c);
+  });
+}
+
+function crashButton(s) {
+  const btn = $("#crash-btn");
+  const phase = s.round ? s.round.phase : "";
+  const my = s.my;
+  btn.classList.remove("cash");
+  btn.disabled = false;
+  if (phase === "betting") {
+    btn.textContent = my ? `Ставка ${stars(my.bet)} принята` : "Поставить";
+    btn.disabled = !!my;
+  } else if (phase === "running") {
+    if (my && !my.cashout) btn.classList.add("cash");
+    else { btn.textContent = my ? `Забрали ${fmtX(my.cashout)}` : "Ждём следующий раунд"; btn.disabled = true; }
+  } else {
+    btn.textContent = "Ждём следующий раунд";
+    btn.disabled = true;
   }
 }
 
-function crashRun(r) {
-  crash.running = true;
-  crash.growth = r.growth || crash.growth;
-  crash.start = performance.now() - (r.elapsed || 0) * 1000;
-  crash.bet = r.bet;
-  $("#crash-btn").classList.add("cash");
-  $("#crash-sub").textContent = r.auto ? `Автовывод на ${fmtX(r.auto)}` : "Успейте забрать!";
-  const frame = () => {
-    if (!crash.running) return;
-    const t = (performance.now() - crash.start) / 1000;
-    const m = Math.floor(Math.exp(crash.growth * t) * 100) / 100;
-    crashShow(m);
-    crashDraw(m);
-    $("#crash-btn").textContent = "Забрать " + stars(Math.floor(crash.bet * m));
-    crash.raf = requestAnimationFrame(frame);
-  };
-  frame();
-  clearInterval(crash.poll);
-  // Опрашиваем часто, чтобы множитель на экране не «перелетал» точку краша
-  crash.poll = setInterval(async () => {
-    if (!crash.running || crash.polling) return;
-    crash.polling = true;
-    try {
-      const s = await api("/api/crash", undefined, { deferBalance: true });
-      if (s.status !== "running") crashFinish(s);
-    } catch (e) { /* повторим */ } finally {
-      crash.polling = false;
-    }
-  }, 150);
-}
-
-async function crashEnter() {
-  crashStop();
-  crashShow(1, "", "Сделайте ставку");
-  crashDraw(1);
-  crashHistory();
+async function crashPoll() {
   try {
     const s = await api("/api/crash", undefined, { deferBalance: true });
-    if (s.status === "running") crashRun(s);
-  } catch (e) { toast(e.message, true); }
+    const prev = crash.state;
+    crash.state = s;
+    crash.syncedAt = performance.now();
+    const phase = s.round ? s.round.phase : "";
+    // взрыв ракеты — один раз на раунд
+    if (phase === "crashed" && crash.boomShown !== s.round.id) {
+      crash.boomShown = s.round.id;
+      if (prev && prev.round && prev.round.id === s.round.id && prev.round.phase === "running") {
+        const box = $(".crash-box").getBoundingClientRect();
+        const [x, y] = crash.rocketPos || [box.width * 0.7, box.height * 0.4];
+        fxBurst(box.left + x, box.top + y, { count: 60, speed: 8, colors: [COLOR.white, COLOR.soft, COLOR.muted] });
+        haptic(s.my && !s.my.cashout ? "lose" : "heavy");
+      }
+      crash.trail = [];
+      if (s.my) loadMe().catch(() => {});
+    }
+    if (phase === "betting" && prev && prev.round && prev.round.id !== s.round.id) $("#crash-sub").textContent = "Приём ставок";
+    if (phase === "running") {
+      const my = s.my;
+      $("#crash-sub").textContent = my && my.cashout ? `Вы забрали +${stars(my.win)}` : my ? `В полёте: ${stars(my.bet)}` : "Ракета летит";
+    }
+    crashRenderPlayers(s);
+    crashHistory(s.history);
+    crashButton(s);
+  } catch (e) { /* повторим */ }
+  const phase = crash.state && crash.state.round ? crash.state.round.phase : "";
+  crash.timer = setTimeout(crashPoll, phase === "running" ? 150 : 400);
+}
+
+function crashEnter() {
+  crashLeave();
+  crashPoll();
+  crash.raf = requestAnimationFrame(crashFrame);
+}
+
+function crashLeave() {
+  clearTimeout(crash.timer);
+  cancelAnimationFrame(crash.raf);
+  crash.timer = 0;
+  crash.raf = 0;
 }
 
 async function crashAction() {
-  if (crash.running) {
+  const s = crash.state;
+  const phase = s && s.round ? s.round.phase : "";
+  if (phase === "running" && s.my && !s.my.cashout) {
     try {
       const r = await api("/api/crash/cashout", {}, { deferBalance: true });
-      if (r.status !== "running") crashFinish(r);
+      setBalance(r.balance);
+      s.my.cashout = r.cashout;
+      s.my.win = r.win;
+      $("#crash-sub").textContent = `Вы забрали +${stars(r.win)}`;
+      crashButton(s);
+      haptic("win");
+      celebrate(r.bet, r.win, $(".crash-box"));
     } catch (e) { toast(e.message, true); }
     return;
   }
@@ -819,9 +1011,11 @@ async function crashAction() {
     const autoRaw = $("#crash-auto").value.trim().replace(",", ".");
     const body = { bet };
     if (autoRaw) body.auto = parseFloat(autoRaw);
-    const r = await api("/api/crash/start", body);
+    await api("/api/crash/bet", body);
     haptic();
-    crashRun(r);
+    fxBurstAt($("#crash-btn"), { count: 16, speed: 4 });
+    clearTimeout(crash.timer);
+    crashPoll();
   });
 }
 
@@ -832,14 +1026,16 @@ let currentCase = null;
 function renderCases() {
   const box = $("#cases-list");
   box.innerHTML = "";
-  (state.config ? state.config.cases : []).forEach((c) => {
+  const cases = state.config ? state.config.cases : [];
+  if (!cases.length) box.innerHTML = '<div class="note">Кейсы временно недоступны — обновляем цены подарков.</div>';
+  cases.forEach((c) => {
     const b = document.createElement("button");
-    b.className = "case-card";
-    const top = c.prizes[c.prizes.length - 1];
+    b.className = "case-card" + (c.id === "nft" ? " nft" : "");
+    const top = c.prizes.reduce((a, p) => (p.amount > a.amount ? p : a), c.prizes[0]);
     b.innerHTML = '<div class="e"></div><div class="n"></div><div class="j"></div><div class="p"></div>';
     b.querySelector(".e").textContent = c.emoji;
     b.querySelector(".n").textContent = c.name;
-    b.querySelector(".j").textContent = `джекпот ${top.gift} ${stars(top.amount)}`;
+    b.querySelector(".j").textContent = top.kind === "nft" ? `NFT до ${stars(top.amount)}` : `до ${top.emoji} ${stars(top.amount)}`;
     b.querySelector(".p").textContent = stars(c.price);
     b.addEventListener("click", () => openCaseScreen(c));
     box.append(b);
@@ -849,12 +1045,12 @@ function renderCases() {
 // Редкость — оттенками фирменного цвета: от тёмного к белому
 function prizeItem(p, price) {
   const ratio = p.amount / price;
-  const [bg, fg] = ratio >= 20 ? ["#FFFFFF", "#0B0A10"]
-    : ratio >= 5 ? ["#A78BFA", "#0B0A10"]
-    : ratio >= 2 ? ["#8B5CF6", "#FFFFFF"]
+  const [bg, fg] = p.kind === "nft" || ratio >= 20 ? ["#FFFFFF", "#0B0A10"]
+    : ratio >= 3 ? ["#A78BFA", "#0B0A10"]
+    : ratio >= 1.5 ? ["#8B5CF6", "#FFFFFF"]
     : ratio >= 1 ? ["#6D28D9", "#FFFFFF"]
     : ["#242033", "#FFFFFF"];
-  return { em: p.gift, sub: stars(p.amount), bg, fg };
+  return { em: p.emoji, sub: p.kind === "nft" ? "NFT" : stars(p.amount), bg, fg };
 }
 
 function pickPrize(c) {
@@ -872,14 +1068,24 @@ function openCaseScreen(c) {
   $("#case-result").textContent = "";
   const box = $("#case-prizes");
   box.innerHTML = "";
-  c.prizes.slice().reverse().forEach((p) => {
+  c.prizes.slice().sort((a, b) => b.amount - a.amount).forEach((p) => {
     const d = document.createElement("div");
     const e = document.createElement("span");
     e.className = "em";
-    e.textContent = p.gift;
+    e.textContent = p.emoji;
     const sm = document.createElement("small");
-    sm.textContent = p.chance + "%";
-    d.append(e, document.createTextNode(stars(p.amount)), sm);
+    sm.textContent = (p.chance < 0.1 ? p.chance.toFixed(3) : p.chance.toFixed(2)) + "%";
+    if (p.kind === "nft") {
+      d.className = "nft";
+      const ttl = document.createElement("span");
+      ttl.className = "ttl";
+      ttl.textContent = p.title;
+      const model = document.createElement("small");
+      model.textContent = `модель «${p.model || "—"}»` + (p.rarity != null ? ` · ${p.rarity}%` : "");
+      d.append(e, ttl, model, document.createTextNode("≈ " + stars(p.amount)), sm);
+    } else {
+      d.append(e, document.createTextNode(stars(p.amount)), sm);
+    }
     box.append(d);
   });
   const items = [];
@@ -896,61 +1102,67 @@ async function openCase() {
       const r = await api("/api/case", { case: currentCase.id }, { deferBalance: true });
       showBetTaken(currentCase.price);
       haptic();
-      const won = currentCase.prizes.find((p) => p.amount === r.prize) || { amount: r.prize, gift: r.gift };
+      const won = r.kind === "nft"
+        ? { kind: "nft", emoji: r.gift, amount: r.prize }
+        : { kind: "gift", emoji: r.gift, amount: r.prize };
       const items = [];
       for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? won : pickPrize(currentCase), currentCase.price));
       $("#case-result").className = "result";
       $("#case-result").textContent = "Открываем…";
-      await roll("#case-roller", items, 50, 5000);
+      await roll("#case-roller", items, 50, 5200);
       setBalance(r.balance);
       const res = $("#case-result");
       const good = r.prize >= currentCase.price;
-      res.className = "result " + (good ? "win" : "lose");
-      res.textContent = `${r.gift} ${stars(r.prize)}`;
+      res.className = "result reveal " + (good ? "win" : "lose");
+      res.textContent = r.kind === "nft"
+        ? `NFT ${r.nft.title}! Передаём вам в Telegram`
+        : `${r.gift} ${stars(r.prize)}`;
       haptic(good ? "win" : "lose");
-      celebrate(currentCase.price, r.prize);
+      celebrate(currentCase.price, r.prize, $("#case-roller"));
+      if (r.kind === "nft") {
+        await loadMe().catch(() => {});
+        renderCases();
+      }
     } finally {
       $("#case-btn").disabled = false;
     }
   });
 }
 
-// ---------- PvP ----------
+// ---------- PvP: рулетка и хоккей ----------
 
-const pvp = { timer: 0, lastSeen: null, animating: false, colors: {} };
+const pvp = { game: null, timer: 0, lastSeen: {}, animating: false, colors: {}, round: null, holdUntil: 0 };
+const PVP_RESULT_HOLD = 7000;  // сколько показывать итог раунда, пока новый раунд пустой
 
-function pvpColor(id) {
+function pvpColorFor(id) {
   if (!pvp.colors[id]) pvp.colors[id] = PVP_COLORS[Object.keys(pvp.colors).length % PVP_COLORS.length];
   return pvp.colors[id];
 }
 
-function initials(name) {
-  return (name || "?").replace("@", "").slice(0, 2).toUpperCase();
+function pvpEl(game, part) {
+  return $(`#${game === "hockey" ? "hockey" : "pvp"}-${part}`);
 }
 
-function pvpRenderPlayers(round) {
-  const box = $("#pvp-players");
-  const bar = $("#pvp-bar");
+function pvpRenderPlayers(game, round) {
+  const box = pvpEl(game, "players");
   box.innerHTML = "";
-  bar.innerHTML = "";
+  const bar = game === "roulette" ? $("#pvp-bar") : null;
+  if (bar) bar.innerHTML = "";
   const players = round ? round.players : [];
   if (!players.length) {
     box.innerHTML = '<div class="note">Пока никого. Сделайте первую ставку!</div>';
     return;
   }
   players.forEach((p) => {
-    const [bg, fg] = pvpColor(p.id);
-    const seg = document.createElement("span");
-    seg.style.width = p.chance + "%";
-    seg.style.background = bg;
-    bar.append(seg);
+    const colors = pvpColorFor(p.id);
+    if (bar) {
+      const seg = document.createElement("span");
+      seg.style.width = p.chance + "%";
+      seg.style.background = colors[0];
+      bar.append(seg);
+    }
     const row = document.createElement("div");
     row.className = "pl" + (state.me && p.id === state.me.user.id ? " me" : "");
-    const av = document.createElement("span");
-    av.className = "av";
-    av.style.background = bg;
-    av.style.color = fg;
-    av.textContent = initials(p.name);
     const nm = document.createElement("span");
     nm.className = "nm";
     nm.textContent = p.name;
@@ -960,66 +1172,84 @@ function pvpRenderPlayers(round) {
     const ch = document.createElement("span");
     ch.className = "ch";
     ch.textContent = p.chance + "%";
-    row.append(av, nm, am, ch);
+    row.append(avatarEl(p, "av", colors), nm, am, ch);
     box.append(row);
   });
 }
 
-async function pvpAnimate(last) {
-  pvp.animating = true;
-  try {
-    const pick = () => {
-      let r = Math.random() * 100;
-      for (const p of last.players) { r -= p.chance; if (r <= 0) return p; }
-      return last.players[0];
-    };
-    const items = [];
-    for (let i = 0; i < 60; i++) {
-      const p = i === 50 ? last.winner : pick();
-      const [bg, fg] = pvpColor(p.id);
-      items.push({ text: initials(p.name), sub: p.name, bg, fg });
-    }
-    $("#pvp-result").className = "result";
-    $("#pvp-result").textContent = "Крутим…";
-    await roll("#pvp-roller", items, 50, 5500);
-    const mine = state.me && last.winner.id === state.me.user.id;
-    $("#pvp-result").className = "result " + (mine ? "win" : "");
-    $("#pvp-result").textContent = mine
-      ? `Вы забрали ${stars(last.payout)}!`
-      : `${last.winner.name} забирает ${stars(last.payout)}`;
-    if (mine) {
-      const myBet = (last.players.find((p) => p.id === last.winner.id) || {}).amount || last.payout;
-      celebrate(myBet, last.payout);
-      haptic("win");
-    }
-    loadMe().catch(() => {});
-  } finally {
-    pvp.animating = false;
+async function pvpAnimateRoulette(last) {
+  const pick = () => {
+    let r = Math.random() * 100;
+    for (const p of last.players) { r -= p.chance; if (r <= 0) return p; }
+    return last.players[0];
+  };
+  const items = [];
+  for (let i = 0; i < 60; i++) {
+    const p = i === 50 ? last.winner : pick();
+    const colors = pvpColorFor(p.id);
+    items.push({ player: p, colors, sub: p.name, bg: colors[0], fg: colors[1] });
   }
+  await roll("#pvp-roller", items, 50, 5500);
+}
+
+function pvpShowResult(game, last) {
+  const mine = state.me && last.winner.id === state.me.user.id;
+  const res = pvpEl(game, "result");
+  res.className = "result reveal " + (mine ? "win" : "");
+  res.textContent = mine ? `Вы забрали ${stars(last.payout)}!` : `${last.winner.name} забирает ${stars(last.payout)}`;
+  if (mine) {
+    const myBet = (last.players.find((p) => p.id === last.winner.id) || {}).amount || last.payout;
+    celebrate(myBet, last.payout, res);
+    haptic("win");
+  }
+  loadMe().catch(() => {});
 }
 
 async function pvpRefresh() {
+  const game = pvp.game;
+  if (!game) return;
   try {
-    const s = await api("/api/pvp");
-    $("#pvp-fee").textContent = Math.round(s.commission * 100);
+    const s = await api(`/api/pvp?game=${game}`);
+    if (pvp.game !== game) return;
+    document.querySelectorAll(".pvp-fee").forEach((el) => { el.textContent = Math.round(s.commission * 100); });
     const round = s.round;
-    if (s.last && pvp.lastSeen !== null && s.last.id !== pvp.lastSeen && s.last.finished_ago < 15 && !pvp.animating) {
-      pvp.lastSeen = s.last.id;
-      pvpAnimate(s.last);
-    } else if (pvp.lastSeen === null) {
-      pvp.lastSeen = s.last ? s.last.id : 0;
+    pvp.round = round;
+    const seen = pvp.lastSeen[game];
+    if (s.last && seen !== undefined && s.last.id !== seen && s.last.finished_ago < 15 && !pvp.animating) {
+      pvp.lastSeen[game] = s.last.id;
+      pvp.animating = true;
+      pvpEl(game, "result").className = "result";
+      pvpEl(game, "result").textContent = game === "hockey" ? "Удар!" : "Крутим…";
+      try {
+        if (game === "hockey") await hockeyAnimate(s.last);
+        else await pvpAnimateRoulette(s.last);
+        pvpShowResult(game, s.last);
+        pvp.holdUntil = performance.now() + PVP_RESULT_HOLD;
+      } finally {
+        pvp.animating = false;
+      }
+    } else if (seen === undefined) {
+      pvp.lastSeen[game] = s.last ? s.last.id : 0;
     }
-    $("#pvp-pot").textContent = fmt(round ? round.pot : 0);
-    const timer = $("#pvp-timer");
+    pvpEl(game, "pot").textContent = fmt(round ? round.pot : 0);
+    const timer = pvpEl(game, "timer");
     if (!round || !round.players.length) timer.textContent = "Ждём игроков…";
     else if (round.ends_in === null) timer.textContent = "Ждём второго…";
     else timer.textContent = `${Math.ceil(round.ends_in)} с`;
-    if (!pvp.animating) pvpRenderPlayers(round);
+    const holding = performance.now() < pvp.holdUntil && (!round || !round.players.length);
+    if (!pvp.animating && !holding) {
+      pvpRenderPlayers(game, round);
+      if (game === "hockey") hockeyDrawIdle(round);
+    }
   } catch (e) { /* повторим */ }
 }
 
-function pvpEnter() {
+function pvpEnter(game) {
   pvpLeave();
+  pvp.game = game;
+  pvp.holdUntil = 0;
+  pvpEl(game, "result").textContent = "";
+  if (game === "hockey") hockeyDrawIdle(null);
   pvpRefresh();
   pvp.timer = setInterval(pvpRefresh, 1000);
 }
@@ -1027,17 +1257,183 @@ function pvpEnter() {
 function pvpLeave() {
   clearInterval(pvp.timer);
   pvp.timer = 0;
+  pvp.game = null;
 }
 
-async function pvpBet() {
+async function pvpBet(game) {
   await guard(async () => {
-    const amount = getBet("pvp");
-    const s = await api("/api/pvp/bet", { amount });
+    const amount = getBet(game === "hockey" ? "hockey" : "pvp");
+    const s = await api("/api/pvp/bet", { amount, game });
+    pvp.holdUntil = 0;
     loadMe().catch(() => {});
-    pvpRenderPlayers(s.round);
+    pvpRenderPlayers(game, s.round);
+    if (game === "hockey") hockeyDrawIdle(s.round);
     toast("Ставка принята");
+    fxBurstAt(pvpEl(game, "btn"), { count: 16, speed: 4 });
     haptic();
   });
+}
+
+// ---------- хоккей: поле и шайба ----------
+
+const FIELD = [100, 160];
+
+function hockeyCtx() {
+  const c = $("#hockey-canvas");
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(c.clientWidth * dpr);
+  if (c.width !== w) { c.width = w; c.height = Math.round(w * FIELD[1] / FIELD[0]); }
+  const ctx = c.getContext("2d");
+  const k = c.width / FIELD[0];
+  return { c, ctx, k, dpr };
+}
+
+// Зоны игроков из текущего раунда: доли по ставкам (как на сервере)
+function zonesFromPlayers(players) {
+  const total = players.reduce((a, p) => a + p.amount, 0) || 1;
+  let y = 0;
+  return players.map((p, i) => {
+    const y1 = i === players.length - 1 ? FIELD[1] : y + FIELD[1] * p.amount / total;
+    const z = [y, y1];
+    y = y1;
+    return z;
+  });
+}
+
+function hockeyDrawField(players, zones, highlight) {
+  const { ctx, k, c } = hockeyCtx();
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#0E0C16";
+  ctx.fillRect(0, 0, c.width, c.height);
+  (players || []).forEach((p, i) => {
+    const [y0, y1] = zones[i];
+    const [bg] = pvpColorFor(p.id);
+    ctx.globalAlpha = highlight === undefined ? 0.22 : highlight === i ? 0.5 : 0.08;
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, y0 * k, c.width, (y1 - y0) * k);
+    ctx.globalAlpha = 1;
+    if (i > 0) {
+      ctx.strokeStyle = "rgba(237,233,254,.35)";
+      ctx.setLineDash([6 * k / 4, 6 * k / 4]);
+      ctx.lineWidth = k * 0.4;
+      ctx.beginPath(); ctx.moveTo(0, y0 * k); ctx.lineTo(c.width, y0 * k); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // аватар и имя в зоне
+    const h = (y1 - y0) * k;
+    if (h > 14 * k / 2) {
+      const r = Math.min(7 * k, h * 0.3);
+      const cx = 12 * k, cy = (y0 + y1) / 2 * k;
+      const img = avatarImage(p.id);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.closePath();
+      ctx.fillStyle = bg; ctx.fill();
+      if (img.ok) { ctx.clip(); ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2); }
+      else {
+        ctx.fillStyle = pvpColorFor(p.id)[1];
+        ctx.font = `800 ${r * 0.8}px Manrope, sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(initials(p.name), cx, cy);
+      }
+      ctx.restore();
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = `800 ${Math.min(4.2 * k, h * 0.22)}px Manrope, sans-serif`;
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(`${p.name} · ${p.chance}%`, cx + r + 3 * k, cy);
+    }
+  });
+  // разметка площадки
+  ctx.strokeStyle = "rgba(139,92,246,.55)";
+  ctx.lineWidth = k * 0.6;
+  ctx.beginPath(); ctx.arc(50 * k, 80 * k, 12 * k, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 80 * k); ctx.lineTo(c.width, 80 * k); ctx.stroke();
+  ctx.strokeStyle = "rgba(237,233,254,.25)";
+  ctx.strokeRect(k, k, c.width - 2 * k, c.height - 2 * k);
+}
+
+function hockeyPuck(x, y, trail) {
+  const { ctx, k } = hockeyCtx();
+  (trail || []).forEach((p, i) => {
+    ctx.globalAlpha = (i + 1) / trail.length * 0.5;
+    ctx.fillStyle = COLOR.soft;
+    ctx.beginPath(); ctx.arc(p[0] * k, p[1] * k, 2.2 * k * (i + 1) / trail.length, 0, 7); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  ctx.shadowColor = COLOR.accent;
+  ctx.shadowBlur = 12 * k / 3;
+  ctx.fillStyle = COLOR.white;
+  ctx.beginPath(); ctx.arc(x * k, y * k, 3 * k, 0, 7); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = COLOR.accent;
+  ctx.lineWidth = k * 0.7;
+  ctx.beginPath(); ctx.arc(x * k, y * k, 2 * k, 0, 7); ctx.stroke();
+}
+
+function hockeyDrawIdle(round) {
+  if (pvp.animating) return;
+  const players = round ? round.players : [];
+  hockeyDrawField(players, zonesFromPlayers(players));
+  hockeyPuck(50, 80);
+}
+
+// Шайба едет по траектории с сервера с равномерным торможением
+async function hockeyAnimate(last) {
+  const d = last.detail;
+  const players = last.players;
+  const zones = d.zones;
+  const pts = d.points;
+  const seg = [];
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const len = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    seg.push([total, len]);
+    total += len;
+  }
+  const duration = 5200;
+  const start = performance.now();
+  const trail = [];
+  let lastSeg = 0;
+  const canvasEl = $("#hockey-canvas");
+  await new Promise((resolve) => {
+    const frame = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const dist = total * (1 - Math.pow(1 - t, 2.2));
+      let i = seg.findIndex(([s0, len]) => dist <= s0 + len);
+      if (i < 0) i = seg.length - 1;
+      const [s0, len] = seg[i];
+      const f = len ? (dist - s0) / len : 1;
+      const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f;
+      const y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f;
+      if (i !== lastSeg) {  // отскок от борта
+        lastSeg = i;
+        haptic();
+        const r = canvasEl.getBoundingClientRect();
+        fxBurst(r.left + pts[i][0] / FIELD[0] * r.width, r.top + pts[i][1] / FIELD[1] * r.height,
+          { count: 10, speed: 3, gravity: 0 });
+      }
+      trail.push([x, y]);
+      if (trail.length > 14) trail.shift();
+      hockeyDrawField(players, zones);
+      hockeyPuck(x, y, trail);
+      t < 1 ? requestAnimationFrame(frame) : resolve();
+    };
+    requestAnimationFrame(frame);
+  });
+  const winnerIdx = players.findIndex((p) => p.id === last.winner.id);
+  const [ex, ey] = pts[pts.length - 1];
+  for (let i = 0; i < 3; i++) {  // зона победителя мигает
+    hockeyDrawField(players, zones, winnerIdx);
+    hockeyPuck(ex, ey);
+    await sleep(220);
+    hockeyDrawField(players, zones);
+    hockeyPuck(ex, ey);
+    await sleep(160);
+  }
+  hockeyDrawField(players, zones, winnerIdx);
+  hockeyPuck(ex, ey);
+  const r = canvasEl.getBoundingClientRect();
+  fxBurst(r.left + ex / FIELD[0] * r.width, r.top + ey / FIELD[1] * r.height, { count: 50, speed: 6 });
+  haptic("heavy");
 }
 
 // ---------- запуск ----------
@@ -1069,7 +1465,8 @@ function bind() {
   $("#mines-btn").addEventListener("click", minesAction);
   $("#crash-btn").addEventListener("click", crashAction);
   $("#case-btn").addEventListener("click", openCase);
-  $("#pvp-btn").addEventListener("click", pvpBet);
+  $("#pvp-btn").addEventListener("click", () => pvpBet("roulette"));
+  $("#hockey-btn").addEventListener("click", () => pvpBet("hockey"));
   $("#bigwin-ok").addEventListener("click", () => $("#bigwin").classList.add("hidden"));
   if (tg && tg.BackButton) tg.BackButton.onClick(goBack);
 }
@@ -1084,7 +1481,6 @@ async function init() {
   bind();
   diceUpdate(false);
   minesRender(null);
-  crashDraw(1);
   if (!tg || !tg.initData) {
     toast("Откройте Svag Gifts через кнопку в Telegram-боте", true);
     return;

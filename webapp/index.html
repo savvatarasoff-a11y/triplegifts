@@ -21,6 +21,7 @@
     <symbol id="i-dice" viewBox="0 0 48 48"><rect x="8" y="8" width="32" height="32" rx="8"/><circle cx="17" cy="17" r="2.5"/><circle cx="31" cy="17" r="2.5"/><circle cx="24" cy="24" r="2.5"/><circle cx="17" cy="31" r="2.5"/><circle cx="31" cy="31" r="2.5"/></symbol>
     <symbol id="i-cases" viewBox="0 0 48 48"><rect x="7" y="20" width="34" height="21" rx="4"/><rect x="5" y="13" width="38" height="8" rx="3"/><path d="M24 13v28"/><path d="M24 13c-4-7-12-6-10-1 1 2 6 2 10 1zM24 13c4-7 12-6 10-1-1 2-6 2-10 1z"/></symbol>
     <symbol id="i-pvp" viewBox="0 0 48 48"><path d="M8 8l22 22M40 8L18 30"/><path d="M26 34l8-8M22 34l-8-8"/><path d="M31 37l6 4 4-4-4-6M17 37l-6 4-4-4 4-6"/></symbol>
+    <symbol id="i-hockey" viewBox="0 0 48 48"><path d="M30 6L18 30h-8a3 3 0 000 6h12l12-28"/><ellipse cx="34" cy="38" rx="7" ry="3"/><path d="M27 38v2c0 1.7 3.1 3 7 3s7-1.3 7-3v-2"/></symbol>
     <symbol id="i-out" viewBox="0 0 48 48"><path d="M24 30V8M15 17l9-9 9 9"/><path d="M8 28v8a4 4 0 004 4h24a4 4 0 004-4v-8"/></symbol>
   </svg>
 
@@ -57,8 +58,9 @@
         <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10000</span><span class="gn">Краш</span></button>
         <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×2000+</span><span class="gn">Мины</span></button>
         <button class="game" data-go="dice"><svg class="gi"><use href="#i-dice"/></svg><span class="gx">до ×9500</span><span class="gn">Кости</span></button>
-        <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">до ×100</span><span class="gn">Кейсы</span></button>
-        <button class="game wide accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">игрок против игрока</span><span class="gn">PvP-рулетка</span></button>
+        <button class="game wide" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">до ×100</span><span class="gn">Кейсы</span></button>
+        <button class="game accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">PvP</span><span class="gn">Рулетка</span></button>
+        <button class="game accent" data-go="hockey"><svg class="gi"><use href="#i-hockey"/></svg><span class="gx">PvP</span><span class="gn">Хоккей</span></button>
       </div>
 
       <div class="panel">
@@ -123,13 +125,14 @@
       <div class="panel"><div class="panel-title">Выплаты</div><div id="paytable" class="paytable"></div></div>
     </section>
 
-    <!-- Краш -->
+    <!-- Краш (общие раунды) -->
     <section class="screen" id="crash">
       <div class="chips" id="crash-history"></div>
       <div class="crash-box">
         <canvas id="crash-canvas"></canvas>
         <div class="crash-mult" id="crash-mult">1.00×</div>
-        <div class="crash-sub" id="crash-sub">Сделайте ставку</div>
+        <div class="crash-sub" id="crash-sub">Подключаемся…</div>
+        <div class="phase-bar"><i id="crash-phase"></i></div>
       </div>
       <div class="panel controls">
         <div class="betbox" data-bet="crash"></div>
@@ -137,7 +140,11 @@
           <label class="lbl">Автовывод ×</label>
           <input id="crash-auto" type="number" step="0.01" min="1.01" inputmode="decimal" placeholder="выкл">
         </div>
-        <button class="btn big" id="crash-btn">Старт</button>
+        <button class="btn big" id="crash-btn">Поставить</button>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Игроки раунда <span class="muted" id="crash-count"></span></div>
+        <div class="plist" id="crash-players"></div>
       </div>
     </section>
 
@@ -192,7 +199,7 @@
       <div class="panel"><div class="panel-title">Что внутри</div><div id="case-prizes" class="prizes"></div></div>
     </section>
 
-    <!-- PvP -->
+    <!-- PvP-рулетка -->
     <section class="screen" id="pvp">
       <div class="pvp-top">
         <div class="pot"><small>Банк</small><b><span id="pvp-pot">0</span> ★</b></div>
@@ -201,12 +208,28 @@
       <div class="pvp-bar" id="pvp-bar"></div>
       <div class="roller tall" id="pvp-roller"><div class="roller-track"></div><div class="roller-pointer"></div></div>
       <div class="result" id="pvp-result"></div>
-      <div class="pvp-players" id="pvp-players"></div>
+      <div class="plist" id="pvp-players"></div>
       <div class="panel controls">
         <div class="betbox" data-bet="pvp"></div>
         <button class="btn big" id="pvp-btn">Сделать ставку</button>
       </div>
-      <p class="note">Шанс на победу пропорционален ставке. Победитель забирает банк за вычетом комиссии <span id="pvp-fee">5</span>%.</p>
+      <p class="note">Шанс на победу пропорционален ставке. Победитель забирает банк за вычетом комиссии <span class="pvp-fee">5</span>%.</p>
+    </section>
+
+    <!-- PvP-хоккей -->
+    <section class="screen" id="hockey">
+      <div class="pvp-top">
+        <div class="pot"><small>Банк</small><b><span id="hockey-pot">0</span> ★</b></div>
+        <div class="timer" id="hockey-timer">Ждём игроков…</div>
+      </div>
+      <div class="rink"><canvas id="hockey-canvas"></canvas></div>
+      <div class="result" id="hockey-result"></div>
+      <div class="plist" id="hockey-players"></div>
+      <div class="panel controls">
+        <div class="betbox" data-bet="hockey"></div>
+        <button class="btn big" id="hockey-btn">Сделать ставку</button>
+      </div>
+      <p class="note">Поле делится на зоны пропорционально ставкам. Шайба вылетает из центра в случайную сторону с сильным ударом — чья зона, где она остановится, тот и забирает банк (комиссия <span class="pvp-fee">5</span>%).</p>
     </section>
   </main>
 
@@ -220,6 +243,7 @@
     <div class="confetti" id="confetti"></div>
   </div>
 
+  <canvas class="fx" id="fx"></canvas>
   <div class="toast" id="toast"></div>
   <script src="/static/app.js"></script>
 </body>

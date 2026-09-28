@@ -272,3 +272,46 @@ main { padding: 0 16px; max-width: 520px; margin: 0 auto; }
   font-weight: 700; opacity: 0; transform: translateY(20px); transition: all .25s; pointer-events: none; z-index: 70; }
 .toast.show { opacity: 1; transform: none; }
 .toast.err { border-color: #5E5977; color: var(--muted); }
+
+/* ---------- эффекты и новые элементы ---------- */
+.fx { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 80; }
+.muted { color: var(--muted); font-weight: 600; font-family: var(--font); }
+
+.av { position: relative; overflow: hidden; }
+.av img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.it .av-big { width: 46px; height: 46px; border-radius: 50%; overflow: hidden; display: grid; place-items: center;
+  font-weight: 800; font-size: 15px; position: relative; box-shadow: 0 0 0 2px rgba(255, 255, 255, .6); margin-bottom: 3px; }
+.it .av-big img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.plist { display: flex; flex-direction: column; gap: 6px; }
+.plist .pl .st { min-width: 86px; text-align: right; font-weight: 800; font-size: 13px; }
+.plist .pl .st.win { color: var(--accent-soft); } .plist .pl .st.lose { color: #5E5977; }
+.plist .pl.cashed { border-color: var(--accent); background: linear-gradient(90deg, rgba(139, 92, 246, .18), var(--surface)); }
+.plist .pl.just { animation: pop .3s; }
+
+.phase-bar { position: absolute; left: 14px; right: 14px; bottom: 12px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.phase-bar i { display: block; height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+.rink { margin-top: 12px; border-radius: 26px; overflow: hidden; border: 2px solid rgba(139, 92, 246, .5);
+  box-shadow: 0 20px 50px -20px var(--accent-glow); background: #0E0C16; }
+#hockey-canvas { display: block; width: 100%; aspect-ratio: 100 / 160; max-height: 62vh; margin: 0 auto; }
+
+.strip.spin { filter: blur(2.5px); }
+.reel { transition: box-shadow .2s; }
+.reel.stop { animation: reelstop .35s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes reelstop { 0% { transform: translateY(-6px); } 100% { transform: none; } }
+
+.mines-grid button.safe, .mines-grid button.boom { animation: flip .4s cubic-bezier(.3, 1.4, .5, 1); }
+@keyframes flip { from { transform: rotateY(90deg) scale(.8); } to { transform: none; } }
+
+.dice-roll.pop { animation: numpop .45s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes numpop { from { transform: scale(.7); } }
+
+.prizes .nft { grid-column: span 2; background: linear-gradient(135deg, rgba(139, 92, 246, .35), var(--surface-2));
+  box-shadow: inset 0 0 0 1px var(--accent); }
+.prizes .nft .ttl { display: block; font-size: 12px; } .prizes .nft small { color: var(--accent-pale); }
+.case-card.nft { background: var(--grad); border-color: transparent; }
+.case-card.nft .j { color: #fff; } .case-card.nft .p { background: #fff; color: var(--accent-deep); }
+.result.reveal { animation: numpop .5s cubic-bezier(.3, 1.6, .5, 1); }
+.balance.bump { animation: bump .35s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes bump { 50% { transform: scale(1.08); } }
