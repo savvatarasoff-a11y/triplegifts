@@ -22,7 +22,7 @@ from .web import DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, parse_deposit
 log = logging.getLogger(__name__)
 
 RULES = (
-    "Звёзды на балансе — игровая валюта казино. Пополнить баланс можно через Telegram Stars "
+    "Звёзды на балансе — игровая валюта Svag Gifts. Пополнить баланс можно через Telegram Stars "
     "или чеком. <b>Вывода звёзд нет</b>, они не обмениваются на деньги. Играйте только ради "
     "развлечения. 18+."
 )
@@ -32,7 +32,7 @@ def play_keyboard(cfg: Config) -> InlineKeyboardMarkup | None:
     if not cfg.webapp_url:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎰 Играть", web_app=WebAppInfo(url=cfg.webapp_url))
+        InlineKeyboardButton(text="🎁 Играть в Svag Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
     ]])
 
 
@@ -57,7 +57,7 @@ def build_router(cfg: Config, casino: Casino) -> Router:
                 await message.answer(f"⚠️ {html.escape(str(e))}")
             user = await casino.db.get_user(user["id"])
         await message.answer(
-            f"🎰 <b>Добро пожаловать в казино!</b>\n\n"
+            f"🎁 <b>Добро пожаловать в Svag Gifts!</b>\n\n"
             f"Слоты, краш, мины, кости, рулетка, кейсы и PvP-рулетка — в мини-приложении.\n"
             f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
             f"/deposit — пополнить звёздами\n/balance — баланс\n/help — правила",

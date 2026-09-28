@@ -69,8 +69,11 @@ async def test_dice_and_roulette(casino):
     await fund(casino, 1, 1000)
     r = await casino.dice(1, 10, 50)
     assert r["win"] in (0, 19)
-    with pytest.raises(GameError):
-        await casino.dice(1, 10, 99)
+    r = await casino.dice(1, 100, 0.5, over=True)
+    assert r["win"] in (0, 19800) and r["over"] is True
+    for bad in (99, 0, 1.234, "50", True):
+        with pytest.raises(GameError):
+            await casino.dice(1, 10, bad)
     r = await casino.roulette(1, 10, "number", 7)
     assert r["win"] in (0, 360)
     with pytest.raises(GameError):
@@ -147,9 +150,9 @@ async def test_crash_instant(casino, monkeypatch):
 
 
 async def test_cases(casino):
-    await fund(casino, 1, 10)
-    r = await casino.open_case(1, "bronze")
-    assert r["balance"] == r["prize"]
+    await fund(casino, 1, 25)
+    r = await casino.open_case(1, "bear")
+    assert r["balance"] == r["prize"] and r["gift"] in "🌹🧸🎁💝🍾🏆💍"
     with pytest.raises(GameError):
         await casino.open_case(1, "nope")
 
@@ -183,6 +186,16 @@ async def test_pvp_refund_lonely(casino, monkeypatch):
     monkeypatch.setattr(casino_mod, "PVP_IDLE_REFUND", -1)
     await casino.pvp_tick()
     assert await balance(casino, 1) == 100
+
+
+async def test_big_wins_feed(casino, monkeypatch):
+    await fund(casino, 1, 100)
+    monkeypatch.setattr(g, "slots_spin", lambda rng=None: (["💎", "💎", "💎"], 1000))
+    await casino.slots(1, 2)
+    monkeypatch.setattr(g, "slots_spin", lambda rng=None: (["🍋", "🍇", "🔔"], 0))
+    await casino.slots(1, 2)
+    feed = await casino.big_wins()
+    assert feed == [{"game": "slots", "bet": 2, "win": 2000, "x": 1000.0, "name": "User1"}]
 
 
 async def test_stats(casino):

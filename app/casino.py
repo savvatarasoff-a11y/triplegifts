@@ -71,6 +71,20 @@ class Casino:
             user = await self.db.get_user(user_id)
         return user
 
+    async def big_wins(self, limit: int = 20) -> list[dict]:
+        """Лента крупных выигрышей всех игроков (от ×5)."""
+        rows = await self.db.all(
+            "SELECT b.game, b.bet, b.win, b.ts, u.id, u.first_name, u.username FROM bets b "
+            "LEFT JOIN users u ON u.id = b.user_id WHERE b.win >= b.bet * 5 AND b.win > 0 "
+            "ORDER BY b.id DESC LIMIT ?",
+            limit,
+        )
+        return [
+            {"game": r["game"], "bet": r["bet"], "win": r["win"], "x": round(r["win"] / r["bet"], 2),
+             "name": display_name({"id": r["id"], "first_name": r["first_name"], "username": r["username"]})}
+            for r in rows
+        ]
+
     # ---------- чеки ----------
 
     async def create_check(self, admin_id: int, amount: int, activations: int) -> str:
@@ -128,17 +142,21 @@ class Casino:
 
     # ---------- кости ----------
 
-    async def dice(self, user_id: int, bet: Any, chance: Any) -> dict:
+    async def dice(self, user_id: int, bet: Any, chance: Any, over: Any = False) -> dict:
         bet = self._check_bet(bet)
-        if not isinstance(chance, int) or not g.DICE_MIN_CHANCE <= chance <= g.DICE_MAX_CHANCE:
-            raise GameError(f"Шанс — от {g.DICE_MIN_CHANCE} до {g.DICE_MAX_CHANCE}%")
-        roll, won, mult = g.dice_roll(chance)
+        if not isinstance(chance, (int, float)) or isinstance(chance, bool) or not g.dice_valid_chance(float(chance)):
+            raise GameError(f"Шанс — от {g.DICE_MIN_CHANCE} до {g.DICE_MAX_CHANCE:g}%, не больше двух знаков после точки")
+        chance = float(chance)
+        over = over is True
+        roll, won, mult = g.dice_roll(chance, over)
         win = g.payout(bet, mult)
         async with self.db.tx() as c:
             await self._take(c, user_id, bet, "dice")
-            balance = await self._settle(c, user_id, "dice", bet, win, {"roll": roll, "chance": chance})
-        return {"roll": roll, "chance": chance, "won": won, "multiplier": g.dice_multiplier(chance),
-                "win": win, "balance": balance}
+            balance = await self._settle(
+                c, user_id, "dice", bet, win, {"roll": roll, "chance": chance, "over": over}
+            )
+        return {"roll": roll, "chance": chance, "over": over, "won": won,
+                "multiplier": g.dice_multiplier(chance), "win": win, "balance": balance}
 
     # ---------- рулетка ----------
 
@@ -168,11 +186,13 @@ class Casino:
         case = g.CASES_BY_ID.get(case_id) if isinstance(case_id, str) else None
         if not case:
             raise GameError("Кейс не найден")
-        prize = g.case_open(case)
+        prize, gift = g.case_open(case)
         async with self.db.tx() as c:
             await self._take(c, user_id, case.price, "case")
-            balance = await self._settle(c, user_id, "case", case.price, prize, {"case": case.id, "prize": prize})
-        return {"case": case.id, "prize": prize, "balance": balance}
+            balance = await self._settle(
+                c, user_id, "case", case.price, prize, {"case": case.id, "prize": prize, "gift": gift}
+            )
+        return {"case": case.id, "prize": prize, "gift": gift, "balance": balance}
 
     # ---------- мины ----------
 

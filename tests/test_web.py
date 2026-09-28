@@ -79,7 +79,8 @@ async def test_me_and_start_bonus(client):
     assert r.status == 200
     data = await r.json()
     assert data["balance"] == 25 and data["user"]["name"] == "Петя"
-    assert data["config"]["cases"][0]["id"] == "bronze"
+    assert data["config"]["cases"][0]["id"] == "bear"
+    assert data["config"]["cases"][0]["prizes"][-1] == {"amount": 2500, "gift": "💍", "chance": 0.15}
     # повторный вход бонус не начисляет
     data = await (await client.get("/api/me", headers=auth())).json()
     assert data["balance"] == 25
@@ -102,6 +103,9 @@ async def test_play_and_errors(client):
     assert r.status == 200
     r = await client.get("/api/pvp", headers=auth())
     assert r.status == 200
+    r = await client.post("/api/dice", headers=auth(), json={"bet": 1, "chance": 12.5, "over": True})
+    assert (await r.json())["multiplier"] == 7.92
+    assert (await client.get("/api/feed", headers=auth())).status == 200
 
 
 async def test_deposit_link_and_payload(client):

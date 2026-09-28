@@ -22,7 +22,7 @@ from .web import build_app
 log = logging.getLogger("casino")
 
 PLAYER_COMMANDS = [
-    ("start", "Открыть казино"),
+    ("start", "Открыть Svag Gifts"),
     ("deposit", "Пополнить звёздами"),
     ("balance", "Баланс"),
     ("help", "Правила"),
@@ -72,7 +72,7 @@ async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
                 log.warning("Меню админа %s не установлено: он ещё не нажал /start", admin_id)
         if cfg.webapp_url:
             await bot.set_chat_menu_button(
-                menu_button=MenuButtonWebApp(text="🎰 Казино", web_app=WebAppInfo(url=cfg.webapp_url))
+                menu_button=MenuButtonWebApp(text="Svag Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
             )
     except Exception:
         log.exception("Не удалось настроить меню бота")

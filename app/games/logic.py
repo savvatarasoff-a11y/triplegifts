@@ -12,28 +12,27 @@ from typing import Sequence
 
 RNG = secrets.SystemRandom()
 
-HOUSE_EDGE = 0.03  # 3% — для кубика, мин и краша
+HOUSE_EDGE = 0.01  # 1% — как на крупных площадках: кости, мины, краш
 
 
 # ---------------- Слоты ----------------
 
-SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "⭐", "7️⃣"]
-SLOT_WEIGHTS = [15, 25, 22, 18, 12, 8]
-# Три одинаковых символа -> множитель
-SLOT_TRIPLE = {"🍒": 4, "🍋": 7, "🍇": 15, "🔔": 30, "⭐": 55, "7️⃣": 180}
-# Ровно две вишни -> ×3, одна вишня -> возврат 40% ставки. RTP ≈ 94.7%
-SLOT_TWO_CHERRIES = 3
-SLOT_ONE_CHERRY = 0.4
+SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "⭐", "7️⃣", "💎"]
+SLOT_WEIGHTS = [28, 22, 18, 13, 9, 6, 4]
+# Три одинаковых символа -> множитель. 💎💎💎 — джекпот ×1000 (примерно 1 раз на 15 600 спинов)
+SLOT_TRIPLE = {"🍒": 4, "🍋": 8, "🍇": 15, "🔔": 30, "⭐": 60, "7️⃣": 250, "💎": 1000}
+SLOT_TWO_DIAMONDS = 10   # два 💎 в любом месте
+SLOT_TWO_CHERRIES = 2.5  # две 🍒 в любом месте
+# RTP ≈ 95.8%, выигрышных спинов ≈ 21.6%
 
 
 def slots_multiplier(reels: Sequence[str]) -> float:
     if reels[0] == reels[1] == reels[2]:
         return SLOT_TRIPLE[reels[0]]
-    cherries = sum(1 for s in reels if s == "🍒")
-    if cherries == 2:
+    if sum(1 for s in reels if s == "💎") == 2:
+        return SLOT_TWO_DIAMONDS
+    if sum(1 for s in reels if s == "🍒") == 2:
         return SLOT_TWO_CHERRIES
-    if cherries == 1:
-        return SLOT_ONE_CHERRY
     return 0.0
 
 
@@ -56,20 +55,25 @@ def slots_rtp() -> float:
 
 # ---------------- Кости (Dice) ----------------
 
-DICE_MIN_CHANCE = 1
-DICE_MAX_CHANCE = 95
+DICE_MIN_CHANCE = 0.01
+DICE_MAX_CHANCE = 98.0
 
 
-def dice_multiplier(chance: int) -> float:
-    return round((1 - HOUSE_EDGE) * 100 / chance, 4)
+def dice_valid_chance(chance: float) -> bool:
+    return DICE_MIN_CHANCE <= chance <= DICE_MAX_CHANCE and round(chance, 2) == chance
 
 
-def dice_roll(chance: int, rng: random.Random = RNG) -> tuple[float, bool, float]:
-    """Выпадает число 0.00–99.99; выигрыш, если оно меньше шанса."""
-    if not DICE_MIN_CHANCE <= chance <= DICE_MAX_CHANCE:
+def dice_multiplier(chance: float) -> float:
+    """Шанс 50% -> ×1.98, 1% -> ×99, 0.01% -> ×9900."""
+    return math.floor((1 - HOUSE_EDGE) * 100 / chance * 10000) / 10000
+
+
+def dice_roll(chance: float, over: bool = False, rng: random.Random = RNG) -> tuple[float, bool, float]:
+    """Выпадает число 0.00–99.99. «Меньше»: выигрыш при roll < шанс; «больше»: при roll ≥ 100 − шанс."""
+    if not dice_valid_chance(chance):
         raise ValueError("chance")
     roll = rng.randrange(10000) / 100
-    win = roll < chance
+    win = roll >= round(100 - chance, 2) if over else roll < chance
     return roll, win, dice_multiplier(chance) if win else 0.0
 
 
@@ -137,11 +141,11 @@ def mines_place(mines: int, rng: random.Random = RNG) -> list[int]:
 # ---------------- Краш ----------------
 
 CRASH_GROWTH = 0.07   # множитель растёт как e^(0.07·t), t в секундах
-CRASH_MAX = 1000.0
+CRASH_MAX = 10000.0
 
 
 def crash_point(rng: random.Random = RNG) -> float:
-    """Точка краша: P(краш ≥ x) = 0.97 / x. Около 3% раундов падают сразу на 1.00."""
+    """Точка краша: P(краш ≥ x) = 0.99 / x. Около 1% раундов падают сразу на 1.00."""
     u = rng.random()
     point = (1 - HOUSE_EDGE) / (1 - u)
     point = math.floor(point * 100) / 100
@@ -158,32 +162,49 @@ def crash_time_of(multiplier: float) -> float:
 
 # ---------------- Кейсы ----------------
 
+# Подарки в кейсах: (множитель от цены кейса, вес, подарок). RTP ≈ 90.6%, джекпот ×100
+CASE_TIERS = (
+    (0.2, 960, "🌹"),
+    (0.5, 560, "🧸"),
+    (1, 280, "🎁"),
+    (2, 130, "💝"),
+    (5, 56, "🍾"),
+    (20, 11, "🏆"),
+    (100, 3, "💍"),
+)
+
+
 @dataclass(frozen=True)
 class Case:
     id: str
     name: str
     emoji: str
     price: int
-    prizes: tuple[tuple[int, int], ...]  # (звёзды, вес)
+
+    @property
+    def prizes(self) -> tuple[tuple[int, int, str], ...]:
+        """(звёзды, вес, подарок)."""
+        return tuple((max(1, round(self.price * m)), w, gift) for m, w, gift in CASE_TIERS)
 
     def expected_value(self) -> float:
-        total = sum(w for _, w in self.prizes)
-        return sum(p * w for p, w in self.prizes) / total
+        total = sum(w for _, w, _ in self.prizes)
+        return sum(p * w for p, w, _ in self.prizes) / total
 
 
 CASES = [
-    Case("bronze", "Бронзовый", "🥉", 10, ((1, 40), (5, 30), (10, 15), (20, 10), (50, 4), (100, 1))),
-    Case("silver", "Серебряный", "🥈", 50, ((10, 40), (25, 28), (50, 17), (100, 10), (250, 4), (500, 1))),
-    Case("gold", "Золотой", "🥇", 200, ((50, 40), (100, 28), (200, 17), (400, 10), (1000, 4), (2500, 1))),
-    Case("diamond", "Алмазный", "💎", 1000, ((250, 42), (500, 28), (1000, 16), (2000, 9), (5000, 4), (15000, 1))),
+    Case("bear", "Мишка", "🧸", 25),
+    Case("heart", "Сердечко", "💝", 100),
+    Case("champagne", "Шампанское", "🍾", 500),
+    Case("ring", "Кольцо", "💍", 2500),
 ]
 CASES_BY_ID = {c.id: c for c in CASES}
 
 
-def case_open(case: Case, rng: random.Random = RNG) -> int:
-    values = [p for p, _ in case.prizes]
-    weights = [w for _, w in case.prizes]
-    return rng.choices(values, weights=weights, k=1)[0]
+def case_open(case: Case, rng: random.Random = RNG) -> tuple[int, str]:
+    """Возвращает (звёзды, подарок)."""
+    prizes = case.prizes
+    prize = rng.choices(prizes, weights=[w for _, w, _ in prizes], k=1)[0]
+    return prize[0], prize[2]
 
 
 # ---------------- PvP-рулетка ----------------

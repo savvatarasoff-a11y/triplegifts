@@ -108,12 +108,13 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
                 "max_bet": cfg.max_bet,
                 "deposit_presets": DEPOSIT_PRESETS,
                 "slots": {"symbols": g.SLOT_SYMBOLS, "triple": g.SLOT_TRIPLE,
-                          "two_cherries": g.SLOT_TWO_CHERRIES, "one_cherry": g.SLOT_ONE_CHERRY},
+                          "two_diamonds": g.SLOT_TWO_DIAMONDS, "two_cherries": g.SLOT_TWO_CHERRIES},
                 "dice": {"min": g.DICE_MIN_CHANCE, "max": g.DICE_MAX_CHANCE, "edge": g.HOUSE_EDGE},
                 "cases": [
                     {"id": c.id, "name": c.name, "emoji": c.emoji, "price": c.price,
-                     "prizes": [{"amount": p, "chance": round(w / sum(x for _, x in c.prizes) * 100, 2)}
-                                for p, w in c.prizes]}
+                     "prizes": [{"amount": p, "gift": gift,
+                                 "chance": round(w / sum(x for _, x, _ in c.prizes) * 100, 2)}
+                                for p, w, gift in c.prizes]}
                     for c in g.CASES
                 ],
                 "red": sorted(g.RED_NUMBERS),
@@ -121,6 +122,10 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
                 "pvp_commission": g.PVP_COMMISSION,
             },
         })
+
+    @routes.get("/api/feed")
+    async def feed(_: web.Request) -> web.Response:
+        return web.json_response({"wins": await casino.big_wins()})
 
     @routes.post("/api/deposit")
     async def deposit(request: web.Request) -> web.Response:
@@ -147,7 +152,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
     @routes.post("/api/dice")
     async def dice(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.dice(request[USER_ID], data.get("bet"), data.get("chance")))
+        return web.json_response(await casino.dice(request[USER_ID], data.get("bet"), data.get("chance"), data.get("over", False)))
 
     @routes.post("/api/roulette")
     async def roulette(request: web.Request) -> web.Response:
