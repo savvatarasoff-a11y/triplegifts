@@ -71,11 +71,32 @@ def test_crash_time_roundtrip():
         assert g.crash_multiplier_at(g.crash_time_of(m) + 1e-6) == pytest.approx(m, abs=0.011)
 
 
-def test_cases_have_house_edge():
-    for case in g.CASES:
-        assert 0.85 < case.expected_value() / case.price < 0.88
-        assert max(p for p, _, _ in case.prizes) == case.price * 100
-        assert g.case_open(case) in {(p, gift) for p, _, gift in case.prizes}
+STD_GIFT_PRICES = {"💝": 15, "🧸": 15, "🎁": 25, "🌹": 25, "🎂": 50, "💐": 50, "🚀": 50, "🍾": 50,
+                   "🏆": 100, "💍": 100, "💎": 100}
+
+
+def test_case_defs_house_edge_with_real_prices():
+    for case in g.CASE_DEFS:
+        rtp = g.expected_value([(STD_GIFT_PRICES[e], w) for e, w in case.items]) / case.price
+        assert 0.85 < rtp < 0.9
+
+
+def test_nft_case_weights_hit_target():
+    for nft_prices, exact in (([5000], True), ([5000, 1200], True), ([300, 800, 20000], False)):
+        p_nft, p_gift = g.nft_case_weights(250, nft_prices, [15, 25, 50, 100])
+        assert sum(p_nft) + sum(p_gift) == pytest.approx(1)
+        ev = sum(p * v for p, v in zip(p_nft, nft_prices)) + sum(p * v for p, v in zip(p_gift, [15, 25, 50, 100]))
+        if exact:
+            assert ev / 250 == pytest.approx(0.87, abs=0.001)
+        else:  # обычных подарков дороже 100 нет — RTP получается ниже цели, в пользу казино
+            assert ev / 250 < 0.87
+        # каждый NFT в среднем «съедает» равную долю
+        shares = [p * v for p, v in zip(p_nft, nft_prices)]
+        assert max(shares) == pytest.approx(min(shares))
+    # дешёвые NFT: вероятность NFT не больше 50%, RTP не выше цели
+    p_nft, p_gift = g.nft_case_weights(250, [260], [15, 25, 50, 100])
+    ev = p_nft[0] * 260 + sum(p * v for p, v in zip(p_gift, [15, 25, 50, 100]))
+    assert sum(p_nft) <= 0.5 + 1e-9 and ev / 250 <= 0.87 + 1e-9
 
 
 def test_pvp_winner_proportional():

@@ -190,12 +190,34 @@ async def test_crash_instant(casino, monkeypatch):
     assert await balance(casino, 1) == 0
 
 
-async def test_cases(casino):
+GIFT_CASE = {"id": "bear", "price": 25, "prizes": [
+    {"kind": "gift", "emoji": "🧸", "gift_id": "g1", "amount": 15, "weight": 1},
+]}
+
+
+async def test_cases_gift(casino):
     await fund(casino, 1, 25)
-    r = await casino.open_case(1, "bear")
-    assert r["balance"] == r["prize"] and r["gift"] in "🌹🧸🎁💝🍾🏆💍"
-    with pytest.raises(GameError):
-        await casino.open_case(1, "nope")
+    r = await casino.open_case(1, GIFT_CASE)
+    assert r["kind"] == "gift" and r["prize"] == 15 and r["gift"] == "🧸" and r["balance"] == 15
+
+
+async def test_cases_nft_reserved_not_credited(casino):
+    await casino.db.conn.execute(
+        "INSERT INTO nft_prizes(owned_gift_id, connection_id, title, model, price, updated_at) "
+        "VALUES ('og1','bc','Plush Pepe #7','Frog',5000,0)")
+    nft_case = {"id": "nft", "price": 250, "prizes": [
+        {"kind": "nft", "nft_id": 1, "emoji": "🐸", "title": "Plush Pepe #7", "model": "Frog", "amount": 5000, "weight": 1},
+    ]}
+    await fund(casino, 1, 500)
+    await fund(casino, 2, 500)
+    r = await casino.open_case(1, nft_case)
+    assert r["kind"] == "nft" and r["nft"]["title"] == "Plush Pepe #7"
+    assert r["balance"] == 250                                   # NFT не зачисляется звёздами
+    row = await casino.db.one("SELECT status, winner_id FROM nft_prizes WHERE id=1")
+    assert row == {"status": "won", "winner_id": 1}
+    with pytest.raises(GameError, match="только что выиграл"):  # второй раз этот NFT не выпадет
+        await casino.open_case(2, nft_case)
+    assert await balance(casino, 2) == 500                       # списание откатилось
 
 
 async def test_pvp_round(casino, monkeypatch):

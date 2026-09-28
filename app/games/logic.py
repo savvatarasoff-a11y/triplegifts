@@ -8,7 +8,7 @@ import math
 import random
 import secrets
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Sequence
 
 RNG = secrets.SystemRandom()
 
@@ -125,49 +125,83 @@ def crash_time_of(multiplier: float) -> float:
 
 # ---------------- Кейсы ----------------
 
-# Подарки в кейсах: (множитель от цены кейса, вес, подарок). RTP ≈ 87%, джекпот ×100
-CASE_TIERS = (
-    (0.2, 1000, "🌹"),
-    (0.5, 560, "🧸"),
-    (1, 270, "🎁"),
-    (2, 120, "💝"),
-    (5, 52, "🍾"),
-    (20, 10, "🏆"),
-    (100, 3, "💍"),
-)
+# Кейсы состоят из настоящих подарков Telegram. Цена каждого подарка берётся из живого каталога
+# (getAvailableGifts) в момент открытия — здесь только состав и веса. Если какого-то подарка
+# нет в каталоге или с реальными ценами кейс стал выгоден игроку сильнее CASE_MAX_RTP, кейс отключается.
+CASE_MAX_RTP = 0.92
+CASE_TARGET_RTP = 0.87
 
 
 @dataclass(frozen=True)
-class Case:
+class CaseDef:
     id: str
     name: str
     emoji: str
     price: int
-
-    @property
-    def prizes(self) -> tuple[tuple[int, int, str], ...]:
-        """(звёзды, вес, подарок)."""
-        return tuple((max(1, round(self.price * m)), w, gift) for m, w, gift in CASE_TIERS)
-
-    def expected_value(self) -> float:
-        total = sum(w for _, w, _ in self.prizes)
-        return sum(p * w for p, w, _ in self.prizes) / total
+    items: tuple[tuple[str, float], ...]   # (эмодзи подарка, вес)
 
 
-CASES = [
-    Case("bear", "Мишка", "🧸", 25),
-    Case("heart", "Сердечко", "💝", 100),
-    Case("champagne", "Шампанское", "🍾", 500),
-    Case("ring", "Кольцо", "💍", 2500),
+CASE_DEFS = [
+    CaseDef("bear", "Мишка", "🧸", 25, (
+        ("🧸", 55), ("💝", 14), ("🌹", 14), ("🎁", 8), ("🚀", 4), ("🍾", 2), ("💎", 3),
+    )),
+    CaseDef("rocket", "Ракета", "🚀", 50, (
+        ("🧸", 12), ("💝", 10), ("🌹", 16), ("🎁", 12), ("🎂", 12), ("🚀", 12), ("🍾", 10),
+        ("🏆", 7), ("💍", 5), ("💎", 4),
+    )),
 ]
-CASES_BY_ID = {c.id: c for c in CASES}
+NFT_CASE_ID = "nft"
+NFT_SHARE = 0.5          # доля цены NFT-кейса, которая в среднем уходит на NFT
 
 
-def case_open(case: Case, rng: random.Random = RNG) -> tuple[int, str]:
-    """Возвращает (звёзды, подарок)."""
-    prizes = case.prizes
-    prize = rng.choices(prizes, weights=[w for _, w, _ in prizes], k=1)[0]
-    return prize[0], prize[2]
+def pick_weighted(items: Sequence[Any], weights: Sequence[float], rng: random.Random = RNG) -> Any:
+    return rng.choices(items, weights=weights, k=1)[0]
+
+
+def expected_value(prizes: Sequence[tuple[float, float]]) -> float:
+    """prizes: (стоимость, вес)."""
+    total = sum(w for _, w in prizes)
+    return sum(v * w for v, w in prizes) / total
+
+
+def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequence[int],
+                     target_rtp: float = CASE_TARGET_RTP) -> tuple[list[float], list[float]] | None:
+    """Вероятности для NFT-кейса: (вероятности NFT, вероятности обычных подарков).
+
+    Каждый NFT в среднем «съедает» равную часть NFT_SHARE·цены: p_i = NFT_SHARE·C / (n·P_i).
+    Остальная вероятность делится между двумя соседними по цене обычными подарками так,
+    чтобы итоговый RTP был равен target_rtp (или ниже, если точнее не получается).
+    """
+    if not nft_prices or not gift_prices:
+        return None
+    levels = sorted(set(gift_prices))
+    n = len(nft_prices)
+    p_nft = [NFT_SHARE * price / (n * pn) for pn in nft_prices]
+    total_nft = sum(p_nft)
+    if total_nft > 0.5:                        # NFT слишком дешёвые относительно кейса
+        p_nft = [p * 0.5 / total_nft for p in p_nft]
+        total_nft = 0.5
+    q = 1 - total_nft
+    nft_ev = sum(p * pn for p, pn in zip(p_nft, nft_prices))
+    need_mean = (target_rtp * price - nft_ev) / q
+    p_gift = [0.0] * len(gift_prices)
+    if need_mean <= levels[0]:
+        lo = hi = levels[0]
+        share_hi = 0.0
+    elif need_mean >= levels[-1]:
+        lo = hi = levels[-1]
+        share_hi = 1.0
+    else:
+        hi = next(v for v in levels if v >= need_mean)
+        lo = max(v for v in levels if v <= need_mean)
+        share_hi = 0.0 if hi == lo else (need_mean - lo) / (hi - lo)
+    lo_idx = [i for i, v in enumerate(gift_prices) if v == lo]
+    hi_idx = [i for i, v in enumerate(gift_prices) if v == hi]
+    for i in lo_idx:
+        p_gift[i] += q * (1 - share_hi) / len(lo_idx)
+    for i in hi_idx:
+        p_gift[i] += q * share_hi / len(hi_idx)
+    return p_nft, p_gift
 
 
 # ---------------- PvP-рулетка ----------------

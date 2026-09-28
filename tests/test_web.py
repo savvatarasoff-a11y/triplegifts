@@ -42,16 +42,24 @@ class FakeBot:
     def __init__(self):
         self.invoices = []
         self.messages = []
+        self.transfers = []
+        self.prices = {}
 
     async def create_invoice_link(self, **kwargs):
         self.invoices.append(kwargs)
         return "https://t.me/$invoice"
 
     async def get_available_gifts(self):
-        return type("G", (), {"gifts": [
-            FakeGift("g50", 50, "🧸"), FakeGift("g15", 15, "🌹"),
-            FakeGift("gp", 100, "💎", premium=True), FakeGift("gsold", 25, "🎂", remaining=0),
+        std = [("💝", 15), ("🧸", 15), ("🎁", 25), ("🌹", 25), ("🎂", 50), ("💐", 50), ("🚀", 50), ("🍾", 50),
+               ("🏆", 100), ("💍", 100), ("💎", 100)]
+        gifts = [FakeGift(f"id{e}", self.prices.get(e, p), e) for e, p in std]
+        return type("G", (), {"gifts": gifts + [
+            FakeGift("gp", 100, "🦄", premium=True), FakeGift("gsold", 25, "🐉", remaining=0),
         ]})()
+
+    async def transfer_gift(self, **kwargs):
+        self.transfers.append(kwargs)
+        return True
 
     async def send_message(self, chat_id, text, **kwargs):
         self.messages.append((chat_id, text))
@@ -103,8 +111,11 @@ async def test_me_and_start_bonus(client):
     assert r.status == 200
     data = await r.json()
     assert data["balance"] == 25 and data["user"]["name"] == "Петя"
-    assert data["config"]["cases"][0]["id"] == "bear"
-    assert data["config"]["cases"][0]["prizes"][-1] == {"amount": 2500, "gift": "💍", "chance": 0.15}
+    cases = {c["id"]: c for c in data["config"]["cases"]}
+    assert set(cases) == {"bear", "rocket"}                       # NFT-кейса нет, пока нет NFT с ценой
+    bear = cases["bear"]["prizes"]
+    assert {p["emoji"]: p["amount"] for p in bear}["🧸"] == 15    # реальная цена из каталога
+    assert sum(p["chance"] for p in bear) == pytest.approx(100, abs=0.01)
     # повторный вход бонус не начисляет
     data = await (await client.get("/api/me", headers=auth())).json()
     assert data["balance"] == 25
@@ -160,12 +171,13 @@ async def test_index_served(client):
 async def test_withdraw_api(client):
     r = await client.get("/api/withdraw", headers=auth(3))
     data = await r.json()
-    assert [g["id"] for g in data["gifts"]] == ["g15", "g50"]   # премиум и распроданные скрыты
+    ids = [g["id"] for g in data["gifts"]]
+    assert "gp" not in ids and "gsold" not in ids and ids[0] in ("id💝", "id🧸")   # премиум и распроданные скрыты
     assert data["wager"]["left"] == 25                           # стартовый бонус нужно отыграть
-    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "g15"})
+    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "id🧸"})
     assert r.status == 400 and "отыграйте" in (await r.json())["error"]
     await client.app[CASINO].db.conn.execute("UPDATE users SET wagered=25, balance=80 WHERE id=3")
-    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "g50"})
+    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "id🎂"})
     data = await r.json()
     assert data["amount"] == 50 and data["balance"] == 30
     assert client.app[BOT].messages[-1][0] == 777 and "Заявка на вывод" in client.app[BOT].messages[-1][1]
@@ -180,3 +192,39 @@ async def test_avatar(client):
     await client.get("/api/me", headers=auth(5))
     assert (await client.get("/avatar/5")).status == 200
     assert (await client.get("/avatar/abc")).status == 404
+
+
+async def test_cases_api_real_prices_and_nft(client, monkeypatch):
+    from app.games import logic as g
+    casino = client.app[CASINO]
+    await client.get("/api/me", headers=auth(8))
+    await casino.db.conn.execute("UPDATE users SET balance=1000 WHERE id=8")
+    r = await client.post("/api/case", headers=auth(8), json={"case": "bear"})
+    data = await r.json()
+    assert data["kind"] == "gift" and data["prize"] in (15, 25, 50, 100)
+    assert (await client.post("/api/case", headers=auth(8), json={"case": "nft"})).status == 400
+
+    # NFT с ценой от админа -> появляется NFT-кейс; выпавший NFT передаётся через бизнес-аккаунт
+    await casino.db.conn.execute(
+        "INSERT INTO nft_prizes(owned_gift_id, connection_id, title, model, rarity, emoji, price, transfer_cost, updated_at) "
+        "VALUES ('og1','bc1','Plush Pepe #7','Frog',1.5,'🐸',5000,25,0)")
+    cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(8))).json())["config"]["cases"]}
+    nft_prize = next(p for p in cases["nft"]["prizes"] if p["kind"] == "nft")
+    assert nft_prize["title"] == "Plush Pepe #7" and nft_prize["amount"] == 5000 and nft_prize["model"] == "Frog"
+    monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[0])
+    r = await client.post("/api/case", headers=auth(8), json={"case": "nft"})
+    data = await r.json()
+    assert data["kind"] == "nft" and data["nft"]["title"] == "Plush Pepe #7"
+    import asyncio
+    await asyncio.sleep(0.05)
+    t = client.app[BOT].transfers[-1]
+    assert t == {"business_connection_id": "bc1", "owned_gift_id": "og1", "new_owner_chat_id": 8, "star_count": 25}
+    assert (await casino.db.one("SELECT status FROM nft_prizes"))["status"] == "sent"
+
+
+async def test_case_disabled_when_real_prices_too_generous(client):
+    client.app[BOT].prices = {"🧸": 60}      # подарок «подорожал» до первого запроса каталога
+    cases = [c["id"] for c in (await (await client.get("/api/me", headers=auth(9))).json())["config"]["cases"]]
+    assert cases == []                       # с такой ценой оба кейса убыточны — выключены
+    r = await client.post("/api/case", headers=auth(9), json={"case": "bear"})
+    assert r.status == 400

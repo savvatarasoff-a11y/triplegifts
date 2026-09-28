@@ -37,6 +37,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("user", "Инфо об игроке"),
     ("withdrawals", "Заявки на вывод"),
     ("stars", "Баланс звёзд бота"),
+    ("nfts", "NFT для NFT-кейса"),
 ]
 
 

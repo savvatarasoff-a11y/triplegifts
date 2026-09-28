@@ -244,17 +244,31 @@ class Casino:
 
     # ---------- кейсы ----------
 
-    async def open_case(self, user_id: int, case_id: Any) -> dict:
-        case = g.CASES_BY_ID.get(case_id) if isinstance(case_id, str) else None
-        if not case:
-            raise GameError("Кейс не найден")
-        prize, gift = g.case_open(case)
+    async def open_case(self, user_id: int, case: dict) -> dict:
+        """case — готовый кейс из CaseCatalog (с живыми ценами). NFT не зачисляется звёздами, а передаётся игроку."""
+        prize = g.pick_weighted(case["prizes"], [p["weight"] for p in case["prizes"]])
+        detail = {"case": case["id"], "prize": prize["amount"], "gift": prize["emoji"], "kind": prize["kind"]}
         async with self.db.tx() as c:
-            await self._take(c, user_id, case.price, "case")
-            balance = await self._settle(
-                c, user_id, "case", case.price, prize, {"case": case.id, "prize": prize, "gift": gift}
-            )
-        return {"case": case.id, "prize": prize, "gift": gift, "balance": balance}
+            await self._take(c, user_id, case["price"], "case")
+            if prize["kind"] == "nft":
+                cur = await c.execute(
+                    "UPDATE nft_prizes SET status='won', winner_id=?, updated_at=? WHERE id=? AND status='available'",
+                    (user_id, time.time(), prize["nft_id"]),
+                )
+                if cur.rowcount != 1:
+                    raise GameError("Этот NFT только что выиграл другой игрок — откройте кейс ещё раз")
+                detail["nft_id"] = prize["nft_id"]
+                await self.db.log_bet(c, user_id, "case", case["price"], prize["amount"],
+                                      json.dumps(detail, ensure_ascii=False))
+                async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
+                    balance = (await q.fetchone())["balance"]
+            else:
+                balance = await self._settle(c, user_id, "case", case["price"], prize["amount"], detail)
+        result = {"case": case["id"], "kind": prize["kind"], "prize": prize["amount"], "gift": prize["emoji"],
+                  "balance": balance}
+        if prize["kind"] == "nft":
+            result["nft"] = {"id": prize["nft_id"], "title": prize["title"], "model": prize["model"]}
+        return result
 
     # ---------- мины ----------
 

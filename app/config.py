@@ -12,6 +12,7 @@ DEFAULT_DB_PATH = "/data/bot.db" if os.path.isdir("/data") else "bot.db"
 DEFAULT_MIN_BET = 1
 DEFAULT_MAX_BET = 10000
 DEFAULT_START_BONUS = 0
+DEFAULT_NFT_CASE_PRICE = 250      # цена NFT-кейса в звёздах
 
 
 class ConfigError(RuntimeError):
@@ -59,6 +60,7 @@ class Config:
     max_bet: int
     start_bonus: int
     log_level: str
+    nft_case_price: int = DEFAULT_NFT_CASE_PRICE
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -76,6 +78,7 @@ class Config:
             max_bet=max(min_bet, _int("MAX_BET", DEFAULT_MAX_BET)),
             start_bonus=max(0, _int("START_BONUS", DEFAULT_START_BONUS)),
             log_level=(os.getenv("LOG_LEVEL", "").strip() or "INFO").upper(),
+            nft_case_price=max(1, _int("NFT_CASE_PRICE", DEFAULT_NFT_CASE_PRICE)),
         )
 
     def is_admin(self, user_id: int) -> bool:

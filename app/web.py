@@ -1,6 +1,7 @@
 """HTTP-сервер: API мини-приложения и его статические файлы."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -15,6 +16,8 @@ from aiohttp import web
 from .casino import Casino, GameError, display_name
 from .config import Config
 from .games import logic as g
+from .cases import CaseCatalog
+from .nft import deliver as deliver_nft
 from .withdraw import GiftCatalog, notify_admins
 
 log = logging.getLogger(__name__)
@@ -90,6 +93,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
 
     routes = web.RouteTableDef()
     catalog = GiftCatalog(bot)
+    cases = CaseCatalog(catalog, casino.db, cfg.nft_case_price)
     avatars: dict[int, tuple[float, bytes | None]] = {}
 
     async def load_avatar(user_id: int) -> bytes | None:
@@ -147,11 +151,10 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
                           "two_diamonds": g.SLOT_TWO_DIAMONDS, "two_cherries": g.SLOT_TWO_CHERRIES},
                 "dice": {"min": g.DICE_MIN_CHANCE, "max": g.DICE_MAX_CHANCE, "edge": g.HOUSE_EDGE},
                 "cases": [
-                    {"id": c.id, "name": c.name, "emoji": c.emoji, "price": c.price,
-                     "prizes": [{"amount": p, "gift": gift,
-                                 "chance": round(w / sum(x for _, x, _ in c.prizes) * 100, 2)}
-                                for p, w, gift in c.prizes]}
-                    for c in g.CASES
+                    {**{k: c[k] for k in ("id", "name", "emoji", "price")},
+                     "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity")}
+                                for p in c["prizes"]]}
+                    for c in await cases.list()
                 ],
                 "mines_min": g.MINES_MIN,
                 "crash_growth": g.CRASH_GROWTH,
@@ -220,8 +223,14 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
 
     @routes.post("/api/case")
     async def open_case(request: web.Request) -> web.Response:
-        data = await body(request)
-        return web.json_response(await casino.open_case(request[USER_ID], data.get("case")))
+        case_id = (await body(request)).get("case")
+        case = await cases.get(case_id) if isinstance(case_id, str) else None
+        if not case:
+            raise GameError("Кейс сейчас недоступен")
+        result = await casino.open_case(request[USER_ID], case)
+        if result["kind"] == "nft":
+            asyncio.create_task(deliver_nft(bot, casino.db, cfg, result["nft"]["id"]))
+        return web.json_response(result)
 
     @routes.get("/api/mines")
     async def mines_state(request: web.Request) -> web.Response:

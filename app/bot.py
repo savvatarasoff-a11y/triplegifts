@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import html
 import logging
+import time
 from urllib.parse import quote
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
+    BusinessConnection,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -19,6 +21,7 @@ from aiogram.types import (
 from .casino import Casino, GameError
 from .config import Config
 from .web import DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, parse_deposit_payload
+from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
 from .withdraw import admin_keyboard, approve, reject
 
 log = logging.getLogger(__name__)
@@ -143,6 +146,10 @@ def build_router(cfg: Config, casino: Casino) -> Router:
             "<b>Команды администратора</b>\n"
             "/check <code>сумма [активаций]</code> — создать чек, например <code>/check 100 5</code>\n"
             "/withdrawals — заявки на вывод\n"
+            "/nfts — NFT на вашем аккаунте для NFT-кейса\n"
+            "/nftprice <code>номер цена</code> — назначить цену NFT (после проверки на маркете)\n"
+            "/nftoff <code>номер</code> — убрать NFT из кейса\n"
+            "/nftsend <code>номер</code> — повторить передачу выигранного NFT\n"
             "/stars — баланс звёзд бота (из него отправляются подарки)\n"
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
@@ -234,6 +241,93 @@ def build_router(cfg: Config, casino: Casino) -> Router:
             await message.answer(f"⭐ Баланс звёзд бота: <b>{balance.amount}</b>\nИз него отправляются подарки при выводе.")
         except Exception as e:
             await message.answer(f"Не удалось получить баланс: {html.escape(str(e))}")
+
+    @router.business_connection()
+    async def business_connection(conn: BusinessConnection) -> None:
+        """Админ подключает бота к своему аккаунту, чтобы отдавать NFT из кейсов."""
+        rights = conn.rights
+        can_gifts = bool(rights and rights.can_view_gifts_and_stars and rights.can_transfer_and_upgrade_gifts)
+        async with casino.db.tx() as c:
+            await c.execute(
+                "INSERT INTO business_connections(id, user_id, can_gifts, is_enabled, updated_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id, can_gifts=excluded.can_gifts, "
+                "is_enabled=excluded.is_enabled, updated_at=excluded.updated_at",
+                (conn.id, conn.user.id, int(can_gifts), int(conn.is_enabled), time.time()),
+            )
+        if not cfg.is_admin(conn.user.id):
+            return
+        if not conn.is_enabled:
+            text = "🔌 Бот отключён от вашего аккаунта — NFT-кейс выключен."
+        elif not can_gifts:
+            text = ("⚠️ Бот подключён, но без прав на подарки. В настройках чат-бота включите "
+                    "просмотр подарков и звёзд и передачу подарков.")
+        else:
+            text = "🔌 Бот подключён к аккаунту с правами на подарки. Отправьте /nfts, чтобы увидеть NFT."
+        try:
+            await conn.bot.send_message(conn.user.id, text)
+        except Exception:
+            pass
+
+    @admin.message(Command("nfts"))
+    async def nfts(message: Message, bot: Bot) -> None:
+        count, error = await sync_nfts(bot, casino.db, cfg)
+        if error:
+            await message.answer(f"⚠️ {html.escape(error)}")
+            return
+        rows = await casino.db.all(
+            "SELECT * FROM nft_prizes WHERE status IN ('available','won','sending','failed') ORDER BY id"
+        )
+        if not rows:
+            await message.answer("На аккаунте нет NFT-подарков, которые можно передать.")
+            return
+        status_text = {"available": "", "won": " — выигран, передаётся", "sending": " — передаётся",
+                       "failed": " — ⚠️ не передан, /nftsend"}
+        lines = [f"<b>{r['id']}.</b> {describe_nft(r)}{status_text.get(r['status'], '')}" for r in rows]
+        priced = sum(1 for r in rows if r["status"] == "available" and r["price"])
+        await message.answer(
+            f"💎 <b>NFT на аккаунте: {count}</b>, в кейсе: {priced}\n\n" + "\n".join(lines) +
+            f"\n\nЦена NFT-кейса: {cfg.nft_case_price} ⭐. В кейс попадают только NFT с ценой. "
+            "Бот не видит рыночную цену через API — проверьте цену на маркете Telegram (профиль → подарок → "
+            "«Купить похожие» / маркетплейс) и назначьте: <code>/nftprice номер цена</code>."
+        )
+
+    @admin.message(Command("nftprice"))
+    async def nft_price(message: Message, command: CommandObject) -> None:
+        args = (command.args or "").split()
+        if len(args) != 2 or not all(a.isdigit() for a in args) or int(args[1]) < 1:
+            await message.answer("Формат: <code>/nftprice номер цена</code>, например <code>/nftprice 3 5000</code>")
+            return
+        async with casino.db.tx() as c:
+            cur = await c.execute(
+                "UPDATE nft_prizes SET price=?, updated_at=? WHERE id=? AND status='available'",
+                (int(args[1]), time.time(), int(args[0])),
+            )
+        if cur.rowcount != 1:
+            await message.answer("NFT не найден или уже выигран. Список — /nfts")
+            return
+        n = await casino.db.one("SELECT * FROM nft_prizes WHERE id=?", int(args[0]))
+        await message.answer(f"✅ {describe_nft(n)}\nNFT в кейсе.")
+
+    @admin.message(Command("nftoff"))
+    async def nft_off(message: Message, command: CommandObject) -> None:
+        arg = (command.args or "").strip()
+        if not arg.isdigit():
+            await message.answer("Формат: <code>/nftoff номер</code>")
+            return
+        async with casino.db.tx() as c:
+            cur = await c.execute(
+                "UPDATE nft_prizes SET price=NULL WHERE id=? AND status='available'", (int(arg),)
+            )
+        await message.answer("NFT убран из кейса." if cur.rowcount == 1 else "NFT не найден.")
+
+    @admin.message(Command("nftsend"))
+    async def nft_send(message: Message, command: CommandObject, bot: Bot) -> None:
+        arg = (command.args or "").strip()
+        if not arg.isdigit():
+            await message.answer("Формат: <code>/nftsend номер</code>")
+            return
+        ok, text = await deliver_nft(bot, casino.db, cfg, int(arg))
+        await message.answer(("✅ " if ok else "⚠️ ") + html.escape(text))
 
     @admin.callback_query(F.data.startswith("w:"))
     async def withdraw_decision(query: CallbackQuery, bot: Bot) -> None:

@@ -90,6 +90,28 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     processed_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id, id);
+CREATE TABLE IF NOT EXISTS business_connections (
+    id         TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    can_gifts  INTEGER NOT NULL,          -- может ли бот видеть и передавать подарки
+    is_enabled INTEGER NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS nft_prizes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    owned_gift_id  TEXT NOT NULL UNIQUE,
+    connection_id  TEXT NOT NULL,
+    title          TEXT NOT NULL,          -- «Plush Pepe #123»
+    model          TEXT,
+    rarity         REAL,                   -- редкость модели, %
+    emoji          TEXT,
+    price          INTEGER,                -- цена в звёздах, назначает админ после проверки на маркете
+    transfer_cost  INTEGER NOT NULL DEFAULT 0,
+    status         TEXT NOT NULL DEFAULT 'available',  -- available | won | sent | failed | gone
+    winner_id      INTEGER,
+    error          TEXT,
+    updated_at     REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS crash_rounds (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     point         REAL NOT NULL,
