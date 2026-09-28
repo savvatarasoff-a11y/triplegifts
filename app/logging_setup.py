@@ -7,7 +7,7 @@ import sys
 
 # Токен бота: 123456789:AA...; ключ Anthropic: sk-ant-...
 _PATTERNS = [
-    re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{30,}\b"),
+    re.compile(r"(?<!\d)\d{6,12}:[A-Za-z0-9_-]{30,}"),
     re.compile(r"sk-ant-[A-Za-z0-9_-]{10,}"),
 ]
 MASK = "***"
