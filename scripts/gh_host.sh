@@ -57,10 +57,14 @@ python -m app.main &
 BOT_PID=$!
 
 END=$((SECONDS + RUN_SECONDS))
+STOP=""
+# При отмене запуска (Cancel run) GitHub присылает SIGINT/SIGTERM — сохраняем базу перед выходом
+trap 'STOP=1' INT TERM
 CHAINED=""
 STARTED=$SECONDS
-while [ $SECONDS -lt $END ] && kill -0 $BOT_PID 2>/dev/null; do
-  sleep "$BACKUP_EVERY"
+while [ -z "$STOP" ] && [ $SECONDS -lt $END ] && kill -0 $BOT_PID 2>/dev/null; do
+  sleep "$BACKUP_EVERY" & wait $!
+  [ -n "$STOP" ] && break
   [ -f "$DATA_DIR/bot.db" ] && backup
   # Бот живёт 2 минуты — ставим в очередь следующий запуск (он дождётся окончания этого)
   if [ -z "$CHAINED" ] && [ $((SECONDS - STARTED)) -ge 120 ] && [ -n "${CHAIN_WORKFLOW:-}" ]; then

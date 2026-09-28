@@ -5,13 +5,18 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const STAR = "★";
 const state = { me: null, config: null, screen: "home", busy: false };
-const GAME_NAMES = { slots: "🎰 Слоты", dice: "🎲 Кости", roulette: "🎡 Рулетка", mines: "💣 Мины",
-  crash: "🚀 Краш", case: "🎁 Кейс", pvp: "⚔️ PvP" };
-const TITLES = { deposit: "⭐ Пополнение", slots: "🎰 Слоты", crash: "🚀 Краш", mines: "💣 Мины",
-  dice: "🎲 Кости", roulette: "🎡 Рулетка", cases: "🎁 Кейсы", case: "🎁 Кейс", pvp: "⚔️ PvP-рулетка" };
-const PVP_COLORS = ["#FFC53D", "#2EE59D", "#4DA3FF", "#FF4D6D", "#C084FC", "#FF8A00", "#2EE6D6", "#FF6FCF"];
+const GAME_NAMES = { slots: "Слоты", dice: "Кости", roulette: "Рулетка", mines: "Мины",
+  crash: "Краш", case: "Кейс", pvp: "PvP" };
+const TITLES = { wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины",
+  dice: "Кости", roulette: "Рулетка", cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка" };
+// Оттенки фирменного фиолетового и белый: [фон, цвет текста]
+const PVP_COLORS = [["#8B5CF6", "#FFFFFF"], ["#FFFFFF", "#0B0A10"], ["#6D28D9", "#FFFFFF"], ["#C4B5FD", "#0B0A10"],
+  ["#4C1D95", "#FFFFFF"], ["#EDE9FE", "#0B0A10"], ["#7C3AED", "#FFFFFF"], ["#A78BFA", "#0B0A10"]];
+const WD_STATUS = { pending: "на проверке", sending: "отправляется", sent: "отправлен", rejected: "отклонён" };
 const BIG_WIN_X = 10;
+const COLOR = { accent: "#8B5CF6", soft: "#A78BFA", white: "#FFFFFF", muted: "#5E5977" };
 
 // ---------- утилиты ----------
 
@@ -46,32 +51,42 @@ function fmt(n) {
   return Number(n).toLocaleString("ru-RU");
 }
 
+function stars(n) {
+  return `${fmt(n)} ${STAR}`;
+}
+
 function fmtX(x) {
   return "×" + (x >= 100 ? Math.round(x) : Number(x).toFixed(2));
 }
 
-async function api(path, body) {
-  const opts = { method: body === undefined ? "GET" : "POST",
+// deferBalance: баланс из ответа покажем сами — после анимации
+async function api(path, body, opts) {
+  const req = { method: body === undefined ? "GET" : "POST",
     headers: { Authorization: "tma " + (tg ? tg.initData : "") } };
   if (body !== undefined) {
-    opts.headers["Content-Type"] = "application/json";
-    opts.body = JSON.stringify(body);
+    req.headers["Content-Type"] = "application/json";
+    req.body = JSON.stringify(body);
   }
   let res;
   try {
-    res = await fetch(path, opts);
+    res = await fetch(path, req);
   } catch (e) {
     throw new Error("Нет связи с сервером");
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Ошибка " + res.status);
-  if (typeof data.balance === "number") setBalance(data.balance);
+  if (typeof data.balance === "number" && !(opts && opts.deferBalance)) setBalance(data.balance);
   return data;
 }
 
 function setBalance(value) {
   if (state.me) state.me.balance = value;
   $("#balance").textContent = fmt(value);
+}
+
+// Ставка списывается на экране сразу, выигрыш добавляется после анимации
+function showBetTaken(bet) {
+  if (state.me) $("#balance").textContent = fmt(Math.max(0, state.me.balance - bet));
 }
 
 async function guard(fn) {
@@ -87,16 +102,20 @@ async function guard(fn) {
   }
 }
 
+async function confirmAsk(text) {
+  if (tg && tg.showConfirm) return new Promise((resolve) => tg.showConfirm(text, resolve));
+  return window.confirm(text);
+}
+
 // ---------- большой выигрыш ----------
 
 function bigWin(x, win) {
-  const box = $("#bigwin");
   $("#bigwin-label").textContent = x >= 100 ? "MEGA WIN" : x >= 50 ? "SUPER WIN" : "BIG WIN";
   $("#bigwin-x").textContent = fmtX(x);
-  $("#bigwin-sum").textContent = `+${fmt(win)} ⭐`;
+  $("#bigwin-sum").textContent = "+" + stars(win);
   const conf = $("#confetti");
   conf.innerHTML = "";
-  const colors = ["#FFC53D", "#A855F7", "#EC4899", "#2EE59D", "#FFFFFF"];
+  const colors = ["#8B5CF6", "#A78BFA", "#FFFFFF", "#6D28D9", "#C4B5FD"];
   for (let i = 0; i < 70; i++) {
     const c = document.createElement("i");
     c.style.left = Math.random() * 100 + "%";
@@ -105,7 +124,7 @@ function bigWin(x, win) {
     c.style.animationDelay = Math.random() * 0.6 + "s";
     conf.append(c);
   }
-  box.classList.remove("hidden");
+  $("#bigwin").classList.remove("hidden");
   haptic("win");
 }
 
@@ -127,7 +146,7 @@ function go(screen) {
   $("#back").classList.toggle("hidden", isHome || !!(tg && tg.BackButton));
   if (tg && tg.BackButton) isHome ? tg.BackButton.hide() : tg.BackButton.show();
   window.scrollTo(0, 0);
-  const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, pvp: pvpEnter, cases: renderCases, deposit: renderPresets };
+  const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, pvp: pvpEnter, cases: renderCases, wallet: walletEnter };
   if (enter[screen]) enter[screen]();
 }
 
@@ -153,7 +172,6 @@ function betBoxes() {
       b.addEventListener("click", () => {
         input.value = fn(parseInt(input.value, 10) || 0);
         store(key, input.value);
-        input.dispatchEvent(new Event("input"));
         haptic();
       });
       return b;
@@ -163,13 +181,10 @@ function betBoxes() {
   });
 }
 
-function betInput(game) {
-  return $(`.betbox[data-bet="${game}"] input`);
-}
-
 function getBet(game) {
-  const v = parseInt(betInput(game).value, 10);
+  const v = parseInt($(`.betbox[data-bet="${game}"] input`).value, 10);
   if (!Number.isInteger(v) || v <= 0) throw new Error("Введите ставку");
+  if (state.me && v > state.me.balance) throw new Error("Недостаточно звёзд на балансе");
   return v;
 }
 
@@ -189,6 +204,18 @@ async function homeEnter() {
   loadTicker();
 }
 
+function historyRow(label, value, positive) {
+  const row = document.createElement("div");
+  row.className = "h";
+  const name = document.createElement("span");
+  name.textContent = label;
+  const res = document.createElement("b");
+  res.className = positive ? "win" : "lose";
+  res.textContent = value;
+  row.append(name, res);
+  return row;
+}
+
 function renderHistory(items) {
   const box = $("#history");
   box.innerHTML = "";
@@ -197,16 +224,9 @@ function renderHistory(items) {
     return;
   }
   items.forEach((h) => {
-    const row = document.createElement("div");
-    row.className = "h";
-    const name = document.createElement("span");
-    name.textContent = `${GAME_NAMES[h.game] || h.game} · ${fmt(h.bet)} ⭐`;
-    const res = document.createElement("b");
     const diff = h.win - h.bet;
-    res.className = diff >= 0 ? "win" : "lose";
-    res.textContent = (diff >= 0 ? "+" : "") + fmt(diff) + " ⭐";
-    row.append(name, res);
-    box.append(row);
+    box.append(historyRow(`${GAME_NAMES[h.game] || h.game} · ${stars(h.bet)}`,
+      (diff >= 0 ? "+" : "") + stars(diff), diff >= 0));
   });
 }
 
@@ -218,17 +238,16 @@ async function loadTicker() {
     const track = $("#ticker-track");
     track.innerHTML = "";
     if (wins.length) {
-      const items = wins.concat(wins);  // дублируем для бесконечной прокрутки
-      items.forEach((w) => {
+      wins.concat(wins).forEach((w) => {  // дублируем для бесконечной прокрутки
         const el = document.createElement("div");
         el.className = "tk";
         const nm = document.createElement("span");
-        nm.textContent = `${(GAME_NAMES[w.game] || "").split(" ")[0]} ${w.name}`;
+        nm.textContent = `${w.name} · ${GAME_NAMES[w.game] || ""}`;
         const x = document.createElement("span");
         x.className = "xx";
         x.textContent = fmtX(w.x);
         const sum = document.createElement("b");
-        sum.textContent = `+${fmt(w.win)} ⭐`;
+        sum.textContent = "+" + stars(w.win);
         el.append(nm, x, sum);
         track.append(el);
       });
@@ -247,19 +266,31 @@ async function activateCheck() {
     if (!code) throw new Error("Введите код чека");
     const r = await api("/api/check", { code });
     $("#check-code").value = "";
-    toast(`🎁 Чек активирован: +${fmt(r.amount)} ⭐`);
+    toast("Чек активирован: +" + stars(r.amount));
     haptic("win");
   });
 }
 
-// ---------- пополнение ----------
+// ---------- кошелёк ----------
+
+function walletTab(tab) {
+  $$("#wallet-tabs button").forEach((b) => b.classList.toggle("sel", b.dataset.tab === tab));
+  $("#tab-dep").classList.toggle("hidden", tab !== "dep");
+  $("#tab-out").classList.toggle("hidden", tab !== "out");
+  if (tab === "out") loadWithdraw();
+}
+
+function walletEnter() {
+  renderPresets();
+  walletTab("dep");
+}
 
 function renderPresets() {
   const box = $("#presets");
   box.innerHTML = "";
   (state.config ? state.config.deposit_presets : [50, 100, 250, 500, 1000, 2500]).forEach((a) => {
     const b = document.createElement("button");
-    b.textContent = fmt(a) + " ⭐";
+    b.textContent = stars(a);
     b.addEventListener("click", () => deposit(a));
     box.append(b);
   });
@@ -285,6 +316,55 @@ async function deposit(amount) {
         toast("Оплата не прошла", true);
       }
     });
+  });
+}
+
+async function loadWithdraw() {
+  const box = $("#gifts");
+  box.textContent = "Загружаем подарки…";
+  try {
+    const data = await api("/api/withdraw");
+    const wager = $("#wager");
+    wager.classList.toggle("hidden", !data.wager.left);
+    wager.textContent = data.wager.left
+      ? `Чтобы вывести звёзды из чеков и бонусов, их нужно отыграть: осталось поставить ${stars(data.wager.left)}.`
+      : "";
+    box.innerHTML = "";
+    if (!data.gifts.length) box.textContent = "Подарки сейчас недоступны, попробуйте позже.";
+    const balance = state.me ? state.me.balance : 0;
+    data.gifts.forEach((gift) => {
+      const b = document.createElement("button");
+      b.className = "gift";
+      const em = document.createElement("span");
+      em.className = "em";
+      em.textContent = gift.emoji;
+      const price = document.createElement("b");
+      price.textContent = stars(gift.stars);
+      b.append(em, price);
+      b.disabled = gift.stars > balance || data.wager.left > 0;
+      b.addEventListener("click", () => withdraw(gift));
+      box.append(b);
+    });
+    const hist = $("#wd-history");
+    hist.innerHTML = "";
+    if (!data.history.length) hist.textContent = "Выводов пока не было.";
+    data.history.forEach((w) => {
+      hist.append(historyRow(`${w.emoji || "🎁"} №${w.id} · ${stars(w.amount)}`,
+        WD_STATUS[w.status] || w.status, w.status === "sent"));
+    });
+  } catch (e) {
+    box.textContent = e.message;
+  }
+}
+
+async function withdraw(gift) {
+  const ok = await confirmAsk(`Вывести ${gift.emoji} за ${gift.stars} ★? Звёзды спишутся сразу, подарок придёт после проверки.`);
+  if (!ok) return;
+  await guard(async () => {
+    await api("/api/withdraw", { gift_id: gift.id });
+    toast("Заявка отправлена, ждите подарок");
+    haptic("win");
+    loadWithdraw();
   });
 }
 
@@ -327,12 +407,13 @@ async function slotsSpin() {
     $("#slots-result").className = "result";
     $("#slots-result").textContent = "Крутим…";
     try {
-      const r = await api("/api/slots", { bet });
+      const r = await api("/api/slots", { bet }, { deferBalance: true });
+      showBetTaken(bet);
       haptic();
       const reels = $$("#slots .strip");
       await Promise.all(reels.map((strip, i) => new Promise((resolve) => {
         const items = reelStrip(r.reels[i], 20 + i * 7);
-        strip.innerHTML = items.map((s) => `<div>${s}</div>`).join("");
+        strip.innerHTML = items.map((sym) => `<div>${sym}</div>`).join("");
         strip.style.transition = "none";
         strip.style.transform = "translateY(0)";
         void strip.offsetHeight;
@@ -341,11 +422,12 @@ async function slotsSpin() {
         strip.style.transform = `translateY(-${(items.length - 1) * REEL_H}px)`;
         setTimeout(() => { haptic(); resolve(); }, ms);
       })));
+      setBalance(r.balance);
       const res = $("#slots-result");
       if (r.win > 0) {
         machine.classList.add("won");
         res.className = "result win";
-        res.textContent = `${fmtX(r.multiplier)} · +${fmt(r.win)} ⭐`;
+        res.textContent = `${fmtX(r.multiplier)} · +${stars(r.win)}`;
         haptic("win");
         celebrate(bet, r.win);
       } else {
@@ -368,6 +450,7 @@ async function roll(rollerSel, items, targetIndex, duration) {
     const d = document.createElement("div");
     d.className = "it " + (it.cls || "");
     if (it.bg) d.style.background = it.bg;
+    if (it.fg) d.style.color = it.fg;
     if (it.em) {
       const e = document.createElement("span");
       e.className = "em";
@@ -380,14 +463,14 @@ async function roll(rollerSel, items, targetIndex, duration) {
       d.append(big);
     }
     if (it.sub) {
-      const s = document.createElement("small");
-      s.textContent = it.sub;
-      d.append(s);
+      const sm = document.createElement("small");
+      sm.textContent = it.sub;
+      d.append(sm);
     }
     track.append(d);
   });
   const itemW = 92;
-  const jitter = duration ? (Math.random() - 0.5) * 60 : 0;
+  const jitter = duration ? (Math.random() - 0.5) * 50 : 0;
   const offset = roller.clientWidth / 2 - (targetIndex * itemW + itemW / 2) + jitter;
   track.style.transition = "none";
   track.style.transform = "translateX(0)";
@@ -397,51 +480,65 @@ async function roll(rollerSel, items, targetIndex, duration) {
   if (duration) await sleep(duration + 100);
 }
 
-// ---------- рулетка ----------
+// ---------- рулетка (американская) ----------
 
 let rouletteType = "red";
+const DOUBLE_ZERO = 37;
+
+function rouletteLabel(n) {
+  return n === DOUBLE_ZERO ? "00" : String(n);
+}
 
 function rouletteColor(n) {
-  if (n === 0) return "green";
+  if (n === 0 || n === DOUBLE_ZERO) return "green";
   const red = (state.config && state.config.red) || [];
   return red.includes(n) ? "red" : "black";
 }
 
+function rouletteItem(n) {
+  return { text: rouletteLabel(n), cls: rouletteColor(n) };
+}
+
 function rouletteIdle() {
   const items = [];
-  for (let i = 0; i < 12; i++) {
-    const n = Math.floor(Math.random() * 37);
-    items.push({ text: String(n), cls: rouletteColor(n) });
-  }
+  for (let i = 0; i < 12; i++) items.push(rouletteItem(Math.floor(Math.random() * 38)));
   roll("#roulette-roller", items, 5, 0);
+}
+
+function parseRouletteNumber() {
+  const raw = $("#rnum").value.trim();
+  if (raw === "00") return DOUBLE_ZERO;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 36) throw new Error("Число — от 0 до 36 или 00");
+  return n;
 }
 
 async function rouletteSpin() {
   await guard(async () => {
     const bet = getBet("roulette");
     const body = { bet, type: rouletteType };
-    if (rouletteType === "number") body.value = parseInt($("#rnum").value, 10);
+    if (rouletteType === "number") body.value = parseRouletteNumber();
     $("#roulette-btn").disabled = true;
     try {
-      const r = await api("/api/roulette", body);
+      const r = await api("/api/roulette", body, { deferBalance: true });
+      showBetTaken(bet);
       haptic();
       const items = [];
-      for (let i = 0; i < 60; i++) {
-        const n = i === 50 ? r.number : Math.floor(Math.random() * 37);
-        items.push({ text: String(n), cls: rouletteColor(n) });
-      }
+      for (let i = 0; i < 60; i++) items.push(rouletteItem(i === 50 ? r.number : Math.floor(Math.random() * 38)));
       $("#roulette-result").className = "result";
       $("#roulette-result").textContent = "Крутим…";
       await roll("#roulette-roller", items, 50, 3800);
+      setBalance(r.balance);
       const res = $("#roulette-result");
+      const label = r.label || rouletteLabel(r.number);
       if (r.win > 0) {
         res.className = "result win";
-        res.textContent = `Выпало ${r.number} · +${fmt(r.win)} ⭐`;
+        res.textContent = `Выпало ${label} · +${stars(r.win)}`;
         haptic("win");
         celebrate(bet, r.win);
       } else {
         res.className = "result lose";
-        res.textContent = `Выпало ${r.number}`;
+        res.textContent = `Выпало ${label}`;
         haptic("lose");
       }
     } finally {
@@ -454,12 +551,16 @@ async function rouletteSpin() {
 
 let diceOver = false;
 
+function diceCfg() {
+  return (state.config && state.config.dice) || { min: 0.01, max: 90, edge: 0.05 };
+}
+
 function diceChance() {
   return Math.round(parseFloat(String($("#dice-chance-input").value).replace(",", ".")) * 100) / 100;
 }
 
 function diceUpdate(fromSlider) {
-  const cfg = (state.config && state.config.dice) || { min: 0.01, max: 98, edge: 0.01 };
+  const cfg = diceCfg();
   if (fromSlider) $("#dice-chance-input").value = $("#dice-chance").value;
   let chance = diceChance();
   if (!Number.isFinite(chance)) return;
@@ -481,7 +582,8 @@ async function diceRoll() {
     const chance = diceChance();
     $("#dice-btn").disabled = true;
     try {
-      const r = await api("/api/dice", { bet, chance, over: diceOver });
+      const r = await api("/api/dice", { bet, chance, over: diceOver }, { deferBalance: true });
+      showBetTaken(bet);
       haptic();
       const el = $("#dice-roll");
       el.className = "dice-roll";
@@ -497,9 +599,10 @@ async function diceRoll() {
         };
         requestAnimationFrame(tick);
       });
+      setBalance(r.balance);
       el.className = "dice-roll " + (r.won ? "win" : "lose");
       if (r.won) {
-        toast(`${fmtX(r.multiplier)} · +${fmt(r.win)} ⭐`);
+        toast(`${fmtX(r.multiplier)} · +${stars(r.win)}`);
         haptic("win");
         celebrate(bet, r.win);
       } else {
@@ -540,8 +643,8 @@ function minesRender(game, reveal) {
   if (active) {
     $("#mines-mult").textContent = fmtX(game.multiplier);
     $("#mines-next").textContent = game.next_multiplier ? fmtX(game.next_multiplier) : "—";
-    $("#mines-win").textContent = fmt(game.opened.length ? game.cashout : 0) + " ⭐";
-    btn.textContent = game.opened.length ? `Забрать ${fmt(game.cashout)} ⭐` : "Откройте клетку";
+    $("#mines-win").textContent = fmt(game.opened.length ? game.cashout : 0);
+    btn.textContent = game.opened.length ? "Забрать " + stars(game.cashout) : "Откройте клетку";
     btn.classList.toggle("cash", game.opened.length > 0);
   } else {
     btn.textContent = "Играть";
@@ -551,12 +654,10 @@ function minesRender(game, reveal) {
 }
 
 function minesPreview() {
-  // Множители до начала игры: 1-я клетка при выбранном числе мин
-  const edge = (state.config && state.config.dice && state.config.dice.edge) || 0.01;
-  let fair = 25 / (25 - minesCount);
+  const edge = diceCfg().edge;
   $("#mines-mult").textContent = "×1.00";
-  $("#mines-next").textContent = fmtX(Math.round((1 - edge) * fair * 10000) / 10000);
-  $("#mines-win").textContent = "0 ⭐";
+  $("#mines-next").textContent = fmtX(Math.floor((1 - edge) * 25 / (25 - minesCount) * 10000) / 10000);
+  $("#mines-win").textContent = "0";
 }
 
 async function minesEnter() {
@@ -564,8 +665,8 @@ async function minesEnter() {
     const r = await api("/api/mines");
     minesGame = r.game;
     minesRender(minesGame);
-    $("#mines-info").textContent = minesGame ? "Игра продолжается" : "";
     $("#mines-info").className = "result";
+    $("#mines-info").textContent = minesGame ? "Игра продолжается" : "";
   } catch (e) { toast(e.message, true); }
 }
 
@@ -578,7 +679,7 @@ async function minesAction() {
       minesGame = null;
       minesRender(r, r);
       info.className = "result win";
-      info.textContent = `${fmtX(r.multiplier)} · +${fmt(r.win)} ⭐`;
+      info.textContent = `${fmtX(r.multiplier)} · +${stars(r.win)}`;
       haptic("win");
       celebrate(r.bet, r.win);
       return;
@@ -601,13 +702,13 @@ async function minesOpen(cell) {
       minesGame = null;
       minesRender(r, r);
       info.className = "result lose";
-      info.textContent = "💥 Мина! Ставка сгорела";
+      info.textContent = "Мина! Ставка сгорела";
       haptic("lose");
     } else if (r.win !== undefined) {
       minesGame = null;
       minesRender(r, r);
       info.className = "result win";
-      info.textContent = `Все клетки! ${fmtX(r.multiplier)} · +${fmt(r.win)} ⭐`;
+      info.textContent = `Все клетки! ${fmtX(r.multiplier)} · +${stars(r.win)}`;
       celebrate(r.bet, r.win);
     } else {
       minesGame = r;
@@ -619,7 +720,7 @@ async function minesOpen(cell) {
 
 // ---------- краш ----------
 
-const crash = { running: false, start: 0, growth: 0.07, raf: 0, poll: 0, bet: 0 };
+const crash = { running: false, start: 0, growth: 0.07, raf: 0, poll: 0, bet: 0, polling: false };
 
 function crashHistory(point) {
   let list = [];
@@ -654,8 +755,7 @@ function crashDraw(mult, color) {
   const ctx = c.getContext("2d");
   const w = c.width, h = c.height, dpr = window.devicePixelRatio || 1;
   ctx.clearRect(0, 0, w, h);
-  // сетка
-  ctx.strokeStyle = "rgba(255,255,255,.05)";
+  ctx.strokeStyle = "rgba(139,92,246,.08)";
   ctx.lineWidth = dpr;
   for (let i = 1; i < 4; i++) {
     ctx.beginPath(); ctx.moveTo(0, (h * i) / 4); ctx.lineTo(w, (h * i) / 4); ctx.stroke();
@@ -669,9 +769,9 @@ function crashDraw(mult, color) {
     const mi = Math.exp(crash.growth * ti);
     pts.push([(ti / tMax) * w, h - ((mi - 1) / (mMax - 1)) * (h * 0.8) - 8 * dpr]);
   }
-  const col = color || "#EC4899";
+  const col = color || COLOR.accent;
   const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, col + "66");
+  grad.addColorStop(0, col + "55");
   grad.addColorStop(1, col + "00");
   ctx.beginPath();
   pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
@@ -689,10 +789,10 @@ function crashDraw(mult, color) {
   ctx.stroke();
   ctx.shadowBlur = 0;
   const [tx, ty] = pts[pts.length - 1];
-  ctx.font = `${28 * dpr}px serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(color === "#FF4D6D" ? "💥" : "🚀", tx, ty);
+  ctx.beginPath();
+  ctx.arc(tx, ty, 7 * dpr, 0, Math.PI * 2);
+  ctx.fillStyle = color === COLOR.muted ? COLOR.muted : COLOR.white;
+  ctx.fill();
 }
 
 function crashShow(mult, cls, sub) {
@@ -711,16 +811,19 @@ function crashStop() {
 }
 
 function crashFinish(r) {
+  if (!crash.running && r.status !== "cashed" && r.status !== "crashed") return;
   crashStop();
   if (r.status === "cashed") {
-    crashShow(r.multiplier, "win", `Вы забрали +${fmt(r.win)} ⭐ · краш на ${fmtX(r.point)}`);
-    crashDraw(r.multiplier, "#2EE59D");
+    setBalance(r.balance);
+    crashShow(r.multiplier, "win", `Вы забрали +${stars(r.win)} · краш на ${fmtX(r.point)}`);
+    crashDraw(r.multiplier, COLOR.soft);
     haptic("win");
     celebrate(r.bet, r.win);
     crashHistory(r.point);
   } else if (r.status === "crashed") {
+    setBalance(r.balance);
     crashShow(r.point, "lose", "Краш! Ставка сгорела");
-    crashDraw(r.point, "#FF4D6D");
+    crashDraw(r.point, COLOR.muted);
     haptic("lose");
     crashHistory(r.point);
   } else {
@@ -741,18 +844,22 @@ function crashRun(r) {
     const m = Math.floor(Math.exp(crash.growth * t) * 100) / 100;
     crashShow(m);
     crashDraw(m);
-    $("#crash-btn").textContent = `Забрать ${fmt(Math.floor(crash.bet * m))} ⭐`;
+    $("#crash-btn").textContent = "Забрать " + stars(Math.floor(crash.bet * m));
     crash.raf = requestAnimationFrame(frame);
   };
   frame();
   clearInterval(crash.poll);
+  // Опрашиваем часто, чтобы множитель на экране не «перелетал» точку краша
   crash.poll = setInterval(async () => {
-    if (!crash.running) return;
+    if (!crash.running || crash.polling) return;
+    crash.polling = true;
     try {
-      const s = await api("/api/crash");
+      const s = await api("/api/crash", undefined, { deferBalance: true });
       if (s.status !== "running") crashFinish(s);
-    } catch (e) { /* повторим */ }
-  }, 400);
+    } catch (e) { /* повторим */ } finally {
+      crash.polling = false;
+    }
+  }, 150);
 }
 
 async function crashEnter() {
@@ -761,7 +868,7 @@ async function crashEnter() {
   crashDraw(1);
   crashHistory();
   try {
-    const s = await api("/api/crash");
+    const s = await api("/api/crash", undefined, { deferBalance: true });
     if (s.status === "running") crashRun(s);
   } catch (e) { toast(e.message, true); }
 }
@@ -769,7 +876,7 @@ async function crashEnter() {
 async function crashAction() {
   if (crash.running) {
     try {
-      const r = await api("/api/crash/cashout", {});
+      const r = await api("/api/crash/cashout", {}, { deferBalance: true });
       if (r.status !== "running") crashFinish(r);
     } catch (e) { toast(e.message, true); }
     return;
@@ -799,21 +906,22 @@ function renderCases() {
     b.innerHTML = '<div class="e"></div><div class="n"></div><div class="j"></div><div class="p"></div>';
     b.querySelector(".e").textContent = c.emoji;
     b.querySelector(".n").textContent = c.name;
-    b.querySelector(".j").textContent = `джекпот ${top.gift} ${fmt(top.amount)} ⭐`;
-    b.querySelector(".p").textContent = fmt(c.price) + " ⭐";
+    b.querySelector(".j").textContent = `джекпот ${top.gift} ${stars(top.amount)}`;
+    b.querySelector(".p").textContent = stars(c.price);
     b.addEventListener("click", () => openCaseScreen(c));
     box.append(b);
   });
 }
 
+// Редкость — оттенками фирменного цвета: от тёмного к белому
 function prizeItem(p, price) {
   const ratio = p.amount / price;
-  const bg = ratio >= 20 ? "linear-gradient(180deg,#FFD166,#C77800)"
-    : ratio >= 5 ? "linear-gradient(180deg,#F06292,#9C1C5B)"
-    : ratio >= 2 ? "linear-gradient(180deg,#B67DFF,#6A2BC2)"
-    : ratio >= 1 ? "linear-gradient(180deg,#4DA3FF,#1F5BB8)"
-    : "linear-gradient(180deg,#3A3350,#241E36)";
-  return { em: p.gift, sub: fmt(p.amount) + " ⭐", bg };
+  const [bg, fg] = ratio >= 20 ? ["#FFFFFF", "#0B0A10"]
+    : ratio >= 5 ? ["#A78BFA", "#0B0A10"]
+    : ratio >= 2 ? ["#8B5CF6", "#FFFFFF"]
+    : ratio >= 1 ? ["#6D28D9", "#FFFFFF"]
+    : ["#242033", "#FFFFFF"];
+  return { em: p.gift, sub: stars(p.amount), bg, fg };
 }
 
 function pickPrize(c) {
@@ -825,9 +933,9 @@ function pickPrize(c) {
 function openCaseScreen(c) {
   currentCase = c;
   go("case");
-  $("#title").textContent = `${c.emoji} ${c.name}`;
+  $("#title").textContent = c.name;
   $("#case-emoji").textContent = c.emoji;
-  $("#case-btn").textContent = `Открыть за ${fmt(c.price)} ⭐`;
+  $("#case-btn").textContent = "Открыть за " + stars(c.price);
   $("#case-result").textContent = "";
   const box = $("#case-prizes");
   box.innerHTML = "";
@@ -836,9 +944,9 @@ function openCaseScreen(c) {
     const e = document.createElement("span");
     e.className = "em";
     e.textContent = p.gift;
-    const s = document.createElement("small");
-    s.textContent = p.chance + "%";
-    d.append(e, document.createTextNode(fmt(p.amount) + " ⭐"), s);
+    const sm = document.createElement("small");
+    sm.textContent = p.chance + "%";
+    d.append(e, document.createTextNode(stars(p.amount)), sm);
     box.append(d);
   });
   const items = [];
@@ -849,9 +957,11 @@ function openCaseScreen(c) {
 async function openCase() {
   if (!currentCase) return;
   await guard(async () => {
+    if (state.me && state.me.balance < currentCase.price) throw new Error("Недостаточно звёзд на балансе");
     $("#case-btn").disabled = true;
     try {
-      const r = await api("/api/case", { case: currentCase.id });
+      const r = await api("/api/case", { case: currentCase.id }, { deferBalance: true });
+      showBetTaken(currentCase.price);
       haptic();
       const won = currentCase.prizes.find((p) => p.amount === r.prize) || { amount: r.prize, gift: r.gift };
       const items = [];
@@ -859,10 +969,11 @@ async function openCase() {
       $("#case-result").className = "result";
       $("#case-result").textContent = "Открываем…";
       await roll("#case-roller", items, 50, 5000);
+      setBalance(r.balance);
       const res = $("#case-result");
       const good = r.prize >= currentCase.price;
       res.className = "result " + (good ? "win" : "lose");
-      res.textContent = `${r.gift} ${fmt(r.prize)} ⭐`;
+      res.textContent = `${r.gift} ${stars(r.prize)}`;
       haptic(good ? "win" : "lose");
       celebrate(currentCase.price, r.prize);
     } finally {
@@ -895,22 +1006,24 @@ function pvpRenderPlayers(round) {
     return;
   }
   players.forEach((p) => {
+    const [bg, fg] = pvpColor(p.id);
     const seg = document.createElement("span");
     seg.style.width = p.chance + "%";
-    seg.style.background = pvpColor(p.id);
+    seg.style.background = bg;
     bar.append(seg);
     const row = document.createElement("div");
     row.className = "pl" + (state.me && p.id === state.me.user.id ? " me" : "");
     const av = document.createElement("span");
     av.className = "av";
-    av.style.background = pvpColor(p.id);
+    av.style.background = bg;
+    av.style.color = fg;
     av.textContent = initials(p.name);
     const nm = document.createElement("span");
     nm.className = "nm";
     nm.textContent = p.name;
     const am = document.createElement("span");
     am.className = "am";
-    am.textContent = fmt(p.amount) + " ⭐";
+    am.textContent = stars(p.amount);
     const ch = document.createElement("span");
     ch.className = "ch";
     ch.textContent = p.chance + "%";
@@ -930,7 +1043,8 @@ async function pvpAnimate(last) {
     const items = [];
     for (let i = 0; i < 60; i++) {
       const p = i === 50 ? last.winner : pick();
-      items.push({ text: initials(p.name), sub: p.name, bg: pvpColor(p.id) });
+      const [bg, fg] = pvpColor(p.id);
+      items.push({ text: initials(p.name), sub: p.name, bg, fg });
     }
     $("#pvp-result").className = "result";
     $("#pvp-result").textContent = "Крутим…";
@@ -938,14 +1052,14 @@ async function pvpAnimate(last) {
     const mine = state.me && last.winner.id === state.me.user.id;
     $("#pvp-result").className = "result " + (mine ? "win" : "");
     $("#pvp-result").textContent = mine
-      ? `🏆 Вы забрали ${fmt(last.payout)} ⭐!`
-      : `🏆 ${last.winner.name} забирает ${fmt(last.payout)} ⭐`;
+      ? `Вы забрали ${stars(last.payout)}!`
+      : `${last.winner.name} забирает ${stars(last.payout)}`;
     if (mine) {
       const myBet = (last.players.find((p) => p.id === last.winner.id) || {}).amount || last.payout;
       celebrate(myBet, last.payout);
       haptic("win");
-      loadMe().catch(() => {});
     }
+    loadMe().catch(() => {});
   } finally {
     pvp.animating = false;
   }
@@ -966,7 +1080,7 @@ async function pvpRefresh() {
     const timer = $("#pvp-timer");
     if (!round || !round.players.length) timer.textContent = "Ждём игроков…";
     else if (round.ends_in === null) timer.textContent = "Ждём второго…";
-    else timer.textContent = `⏱ ${Math.ceil(round.ends_in)} с`;
+    else timer.textContent = `${Math.ceil(round.ends_in)} с`;
     if (!pvp.animating) pvpRenderPlayers(round);
   } catch (e) { /* повторим */ }
 }
@@ -999,7 +1113,8 @@ function bind() {
   $$("[data-go]").forEach((b) => b.addEventListener("click", () => { haptic(); go(b.dataset.go); }));
   $("#back").addEventListener("click", goBack);
   $("#brand").addEventListener("click", () => go("home"));
-  $("#balance-btn").addEventListener("click", () => go("deposit"));
+  $("#balance-btn").addEventListener("click", () => go("wallet"));
+  $$("#wallet-tabs button").forEach((b) => b.addEventListener("click", () => { walletTab(b.dataset.tab); haptic(); }));
   $("#dep-btn").addEventListener("click", () => deposit(parseInt($("#dep-amount").value, 10)));
   $("#check-btn").addEventListener("click", activateCheck);
   $("#slots-spin").addEventListener("click", slotsSpin);
@@ -1038,7 +1153,7 @@ async function init() {
   if (tg) {
     tg.ready();
     tg.expand();
-    try { tg.setHeaderColor("#0A0612"); tg.setBackgroundColor("#0A0612"); } catch (e) { /* старые клиенты */ }
+    try { tg.setHeaderColor("#0B0A10"); tg.setBackgroundColor("#0B0A10"); } catch (e) { /* старые клиенты */ }
   }
   betBoxes();
   bind();
@@ -1051,6 +1166,8 @@ async function init() {
     return;
   }
   await homeEnter();
+  diceUpdate(false);
+  minesPreview();
   renderPaytable();
   renderPresets();
 }

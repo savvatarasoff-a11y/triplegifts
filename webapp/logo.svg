@@ -1,44 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Svag Gifts">
+  <!-- Два цвета: почти чёрный #0B0A10 и фиолетовый #8B5CF6 (с оттенками), плюс белый -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1A0F2E"/>
-      <stop offset="1" stop-color="#0A0612"/>
+    <linearGradient id="box" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#6D28D9"/>
     </linearGradient>
-    <linearGradient id="box" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#A855F7"/>
-      <stop offset="1" stop-color="#EC4899"/>
+    <linearGradient id="lid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
     </linearGradient>
-    <linearGradient id="lid" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#C084FC"/>
-      <stop offset="1" stop-color="#F472B6"/>
-    </linearGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFE08A"/>
-      <stop offset="1" stop-color="#FFB020"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.55" r="0.5">
-      <stop offset="0" stop-color="#EC4899" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#EC4899" stop-opacity="0"/>
+    <radialGradient id="glow" cx="0.5" cy="0.58" r="0.5">
+      <stop offset="0" stop-color="#8B5CF6" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#8B5CF6" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <circle cx="256" cy="280" r="230" fill="url(#glow)"/>
-  <!-- коробка -->
+  <rect width="512" height="512" rx="112" fill="#0B0A10"/>
+  <circle cx="256" cy="290" r="230" fill="url(#glow)"/>
   <rect x="120" y="238" width="272" height="170" rx="28" fill="url(#box)"/>
   <rect x="100" y="186" width="312" height="74" rx="24" fill="url(#lid)"/>
-  <!-- лента -->
-  <rect x="232" y="186" width="48" height="222" fill="url(#gold)"/>
-  <rect x="120" y="260" width="272" height="10" fill="#000" opacity="0.18"/>
-  <!-- бант -->
-  <path d="M256 188 C 214 118, 138 126, 158 170 C 170 196, 222 196, 256 188 Z" fill="url(#gold)"/>
-  <path d="M256 188 C 298 118, 374 126, 354 170 C 342 196, 290 196, 256 188 Z" fill="url(#gold)"/>
-  <circle cx="256" cy="186" r="22" fill="#FFC53D"/>
-  <!-- буква S на коробке -->
+  <rect x="232" y="186" width="48" height="222" fill="#FFFFFF"/>
+  <rect x="120" y="260" width="272" height="10" fill="#0B0A10" opacity="0.25"/>
+  <path d="M256 188 C 214 118, 138 126, 158 170 C 170 196, 222 196, 256 188 Z" fill="#FFFFFF"/>
+  <path d="M256 188 C 298 118, 374 126, 354 170 C 342 196, 290 196, 256 188 Z" fill="#FFFFFF"/>
+  <circle cx="256" cy="186" r="22" fill="#EDE9FE"/>
   <text x="256" y="372" text-anchor="middle" font-family="Unbounded, 'Arial Black', Arial, sans-serif"
-        font-weight="900" font-size="112" fill="#FFFFFF" stroke="#3B0A4F" stroke-width="10"
+        font-weight="900" font-size="112" fill="#0B0A10" stroke="#FFFFFF" stroke-width="10"
         paint-order="stroke" stroke-linejoin="round">S</text>
-  <!-- искры -->
-  <path d="M410 108 l10 26 26 10 -26 10 -10 26 -10 -26 -26 -10 26 -10 z" fill="#FFE08A"/>
-  <path d="M96 118 l6 15 15 6 -15 6 -6 15 -6 -15 -15 -6 15 -6 z" fill="#F472B6"/>
-  <path d="M430 330 l5 12 12 5 -12 5 -5 12 -5 -12 -12 -5 12 -5 z" fill="#C084FC"/>
+  <path d="M410 108 l10 26 26 10 -26 10 -10 26 -10 -26 -26 -10 26 -10 z" fill="#FFFFFF"/>
+  <path d="M96 118 l6 15 15 6 -15 6 -6 15 -6 -15 -15 -6 15 -6 z" fill="#A78BFA"/>
+  <path d="M430 330 l5 12 12 5 -12 5 -5 12 -5 -12 -12 -5 12 -5 z" fill="#A78BFA"/>
 </svg>

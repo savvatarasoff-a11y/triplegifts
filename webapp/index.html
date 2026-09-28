@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#0A0612">
+  <meta name="theme-color" content="#0B0A10">
   <title>Svag Gifts</title>
   <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,6 +13,18 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  <!-- Иконки в фирменном цвете -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-slots" viewBox="0 0 48 48"><rect x="5" y="10" width="32" height="28" rx="6"/><rect x="10" y="17" width="6" height="14" rx="2"/><rect x="18" y="17" width="6" height="14" rx="2"/><rect x="26" y="17" width="6" height="14" rx="2"/><path d="M37 18h4v-6"/><circle cx="41" cy="9" r="3"/></symbol>
+    <symbol id="i-crash" viewBox="0 0 48 48"><path d="M6 40h36"/><path d="M8 36c10-2 18-8 24-20"/><path d="M25 13l8 2 1 8"/></symbol>
+    <symbol id="i-mines" viewBox="0 0 48 48"><circle cx="21" cy="27" r="13"/><path d="M30 18l4-4"/><path d="M36 8l1 3M41 12l-3 1M39 6l-2 2"/><circle cx="16" cy="22" r="2.5"/></symbol>
+    <symbol id="i-dice" viewBox="0 0 48 48"><rect x="8" y="8" width="32" height="32" rx="8"/><circle cx="17" cy="17" r="2.5"/><circle cx="31" cy="17" r="2.5"/><circle cx="24" cy="24" r="2.5"/><circle cx="17" cy="31" r="2.5"/><circle cx="31" cy="31" r="2.5"/></symbol>
+    <symbol id="i-roulette" viewBox="0 0 48 48"><circle cx="24" cy="24" r="17"/><circle cx="24" cy="24" r="7"/><path d="M24 7v10M24 31v10M7 24h10M31 24h10M12 12l7 7M29 29l7 7M36 12l-7 7M19 29l-7 7"/></symbol>
+    <symbol id="i-cases" viewBox="0 0 48 48"><rect x="7" y="20" width="34" height="21" rx="4"/><rect x="5" y="13" width="38" height="8" rx="3"/><path d="M24 13v28"/><path d="M24 13c-4-7-12-6-10-1 1 2 6 2 10 1zM24 13c4-7 12-6 10-1-1 2-6 2-10 1z"/></symbol>
+    <symbol id="i-pvp" viewBox="0 0 48 48"><path d="M8 8l22 22M40 8L18 30"/><path d="M26 34l8-8M22 34l-8-8"/><path d="M31 37l6 4 4-4-4-6M17 37l-6 4-4-4 4-6"/></symbol>
+    <symbol id="i-out" viewBox="0 0 48 48"><path d="M24 30V8M15 17l9-9 9 9"/><path d="M8 28v8a4 4 0 004 4h24a4 4 0 004-4v-8"/></symbol>
+  </svg>
+
   <div class="bg-glow"></div>
 
   <header class="topbar">
@@ -23,7 +35,7 @@
     </button>
     <div class="screen-title hidden" id="title"></div>
     <button class="balance" id="balance-btn">
-      <span class="star">⭐</span><span id="balance">—</span><span class="plus">+</span>
+      <span class="star">★</span><span id="balance">—</span><span class="plus">+</span>
     </button>
   </header>
 
@@ -32,27 +44,27 @@
     <section class="screen active" id="home">
       <div class="hero">
         <div class="hero-text">
-          <div class="hero-kicker">Привет, <span id="hello">игрок</span> 👋</div>
+          <div class="hero-kicker">Привет, <span id="hello">игрок</span></div>
           <div class="hero-title">Джекпот <span class="x">×1000</span><br>в слотах</div>
           <button class="btn small" data-go="slots">Крутить</button>
         </div>
-        <div class="hero-art">💎</div>
+        <img class="hero-art" src="/static/logo.svg" alt="">
       </div>
 
       <div class="ticker" id="ticker"><div class="ticker-track" id="ticker-track"></div></div>
 
       <div class="games">
-        <button class="game g-slots" data-go="slots"><span class="gx">до ×1000</span><span class="ge">🎰</span><span class="gn">Слоты</span></button>
-        <button class="game g-crash" data-go="crash"><span class="gx">до ×10000</span><span class="ge">🚀</span><span class="gn">Краш</span></button>
-        <button class="game g-mines" data-go="mines"><span class="gx">до ×2277</span><span class="ge">💣</span><span class="gn">Мины</span></button>
-        <button class="game g-dice" data-go="dice"><span class="gx">до ×9900</span><span class="ge">🎲</span><span class="gn">Кости</span></button>
-        <button class="game g-roulette" data-go="roulette"><span class="gx">×36</span><span class="ge">🎡</span><span class="gn">Рулетка</span></button>
-        <button class="game g-cases" data-go="cases"><span class="gx">до ×100</span><span class="ge">🎁</span><span class="gn">Кейсы</span></button>
-        <button class="game g-pvp wide" data-go="pvp"><span class="gx">1 на 1 и больше</span><span class="ge">⚔️</span><span class="gn">PvP-рулетка</span></button>
+        <button class="game" data-go="slots"><svg class="gi"><use href="#i-slots"/></svg><span class="gx">до ×1000</span><span class="gn">Слоты</span></button>
+        <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10000</span><span class="gn">Краш</span></button>
+        <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×2000+</span><span class="gn">Мины</span></button>
+        <button class="game" data-go="dice"><svg class="gi"><use href="#i-dice"/></svg><span class="gx">до ×9500</span><span class="gn">Кости</span></button>
+        <button class="game" data-go="roulette"><svg class="gi"><use href="#i-roulette"/></svg><span class="gx">×36</span><span class="gn">Рулетка</span></button>
+        <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">до ×100</span><span class="gn">Кейсы</span></button>
+        <button class="game wide accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">игрок против игрока</span><span class="gn">PvP-рулетка</span></button>
       </div>
 
       <div class="panel">
-        <div class="panel-title">🎟 Активировать чек</div>
+        <div class="panel-title">Активировать чек</div>
         <div class="row">
           <input id="check-code" placeholder="Код или ссылка на чек" autocomplete="off">
           <button class="btn" id="check-btn">Забрать</button>
@@ -60,30 +72,44 @@
       </div>
 
       <div class="panel">
-        <div class="panel-title">📜 Мои игры</div>
+        <div class="panel-title">Мои игры</div>
         <div id="history" class="history"></div>
       </div>
-      <p class="note">Звёзды — игровая валюта Svag Gifts. Вывода нет, звёзды не обмениваются на деньги. 18+</p>
+      <p class="note">Пополнение — Telegram Stars, вывод — подарками Telegram. Играйте ответственно. 18+</p>
     </section>
 
-    <!-- Пополнение -->
-    <section class="screen" id="deposit">
-      <div class="panel center">
-        <div class="big-star">⭐</div>
+    <!-- Кошелёк: пополнение и вывод -->
+    <section class="screen" id="wallet">
+      <div class="seg two tabs" id="wallet-tabs">
+        <button data-tab="dep" class="sel">Пополнить</button><button data-tab="out">Вывести</button>
+      </div>
+      <div class="panel center" id="tab-dep">
+        <div class="big-star">★</div>
         <div class="panel-title">Пополнить через Telegram Stars</div>
         <div class="presets" id="presets"></div>
         <div class="row">
           <input id="dep-amount" type="number" inputmode="numeric" placeholder="Своя сумма">
           <button class="btn" id="dep-btn">Пополнить</button>
         </div>
-        <p class="note">Зачисление мгновенно. Вывода нет.</p>
+        <p class="note">Зачисление мгновенно.</p>
+      </div>
+      <div class="hidden" id="tab-out">
+        <div class="panel">
+          <div class="panel-title">Вывод подарком Telegram</div>
+          <p class="note left">Выберите подарок — его стоимость спишется с баланса. После проверки подарок придёт вам в Telegram: его можно оставить или обменять на звёзды в профиле (Telegram начисляет за обмен чуть меньше стоимости).</p>
+          <div class="wager hidden" id="wager"></div>
+          <div class="gifts" id="gifts"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Мои выводы</div>
+          <div class="history" id="wd-history"></div>
+        </div>
       </div>
     </section>
 
     <!-- Слоты -->
     <section class="screen" id="slots">
       <div class="slot-machine">
-        <div class="slot-lights"></div>
         <div class="reels">
           <div class="reel"><div class="strip"></div></div>
           <div class="reel"><div class="strip"></div></div>
@@ -122,14 +148,14 @@
       <div class="stats3">
         <div><small>Множитель</small><b id="mines-mult">×1.00</b></div>
         <div><small>Следующий</small><b id="mines-next">—</b></div>
-        <div><small>Выигрыш</small><b id="mines-win">0 ⭐</b></div>
+        <div><small>Выигрыш</small><b id="mines-win">0</b></div>
       </div>
       <div class="mines-grid" id="mines-grid"></div>
       <div class="result" id="mines-info"></div>
       <div class="panel controls">
         <div class="betbox" data-bet="mines"></div>
         <div class="seg" id="mines-seg">
-          <button data-m="1">1</button><button data-m="3" class="sel">3</button><button data-m="5">5</button>
+          <button data-m="2">2</button><button data-m="3" class="sel">3</button><button data-m="5">5</button>
           <button data-m="10">10</button><button data-m="20">20</button><button data-m="24">24</button>
         </div>
         <button class="btn big" id="mines-btn">Играть</button>
@@ -142,14 +168,14 @@
       <div class="dice-bar" id="dice-bar"><div class="dice-win" id="dice-win"></div><div class="dice-marker" id="dice-marker"></div></div>
       <div class="dice-scale"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
       <div class="stats3">
-        <div><small>Множитель</small><b id="dice-mult">×1.98</b></div>
-        <div><small>Шанс</small><input id="dice-chance-input" type="number" step="0.01" inputmode="decimal" value="50"></div>
+        <div><small>Множитель</small><b id="dice-mult">×1.90</b></div>
+        <div><small>Шанс, %</small><input id="dice-chance-input" type="number" step="0.01" inputmode="decimal" value="50"></div>
         <div><small id="dice-cond-label">Меньше</small><b id="dice-under">50.00</b></div>
       </div>
-      <input id="dice-chance" type="range" min="1" max="98" step="0.5" value="50">
+      <input id="dice-chance" type="range" min="1" max="90" step="0.5" value="50">
       <div class="panel controls">
         <div class="seg two" id="dice-mode">
-          <button data-over="0" class="sel">⬇ Меньше</button><button data-over="1">⬆ Больше</button>
+          <button data-over="0" class="sel">Меньше</button><button data-over="1">Больше</button>
         </div>
         <div class="betbox" data-bet="dice"></div>
         <button class="btn big" id="dice-btn">Бросить</button>
@@ -161,8 +187,8 @@
       <div class="roller" id="roulette-roller"><div class="roller-track"></div><div class="roller-pointer"></div></div>
       <div class="result" id="roulette-result">Выберите ставку</div>
       <div class="rbets" id="rbets">
-        <button data-type="red" class="rb red">Красное <i>×2</i></button>
-        <button data-type="black" class="rb black">Чёрное <i>×2</i></button>
+        <button data-type="red" class="rb">● Красное <i>×2</i></button>
+        <button data-type="black" class="rb">○ Чёрное <i>×2</i></button>
         <button data-type="even" class="rb">Чёт <i>×2</i></button>
         <button data-type="odd" class="rb">Нечет <i>×2</i></button>
         <button data-type="low" class="rb">1–18 <i>×2</i></button>
@@ -170,16 +196,17 @@
         <button data-type="dozen1" class="rb">1–12 <i>×3</i></button>
         <button data-type="dozen2" class="rb">13–24 <i>×3</i></button>
         <button data-type="dozen3" class="rb">25–36 <i>×3</i></button>
-        <button data-type="number" class="rb gold">Число <i>×36</i></button>
+        <button data-type="number" class="rb">Число <i>×36</i></button>
       </div>
       <div class="row hidden" id="rnum-row">
-        <label class="lbl">Число 0–36</label>
-        <input id="rnum" type="number" min="0" max="36" value="7" inputmode="numeric">
+        <label class="lbl">0–36 или 00</label>
+        <input id="rnum" value="7" inputmode="numeric" autocomplete="off">
       </div>
       <div class="panel controls">
         <div class="betbox" data-bet="roulette"></div>
         <button class="btn big" id="roulette-btn">Крутить</button>
       </div>
+      <p class="note">Американская рулетка: 0 и 00.</p>
     </section>
 
     <!-- Кейсы -->
@@ -197,7 +224,7 @@
     <!-- PvP -->
     <section class="screen" id="pvp">
       <div class="pvp-top">
-        <div class="pot"><small>Банк</small><b><span id="pvp-pot">0</span> ⭐</b></div>
+        <div class="pot"><small>Банк</small><b><span id="pvp-pot">0</span> ★</b></div>
         <div class="timer" id="pvp-timer">Ждём игроков…</div>
       </div>
       <div class="pvp-bar" id="pvp-bar"></div>
@@ -216,7 +243,7 @@
     <div class="bigwin-card">
       <div class="bigwin-label" id="bigwin-label">BIG WIN</div>
       <div class="bigwin-x" id="bigwin-x">×100</div>
-      <div class="bigwin-sum" id="bigwin-sum">+1000 ⭐</div>
+      <div class="bigwin-sum" id="bigwin-sum">+1000 ★</div>
       <button class="btn" id="bigwin-ok">Забрать</button>
     </div>
     <div class="confetti" id="confetti"></div>
