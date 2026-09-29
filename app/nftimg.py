@@ -163,7 +163,7 @@ class NftImages:
         sources: list[tuple[str, Source]] = []
         if number:
             sources.append(("web", lambda: self._fetch(gift_url(collection, number))))
-        if model and self.relayer is not None and getattr(self.relayer, "ready", False):
+        if self.relayer is not None and getattr(self.relayer, "ready", False):
             sources.append(("telegram", lambda: self.relayer.model_image(collection, model)))
         if model:
             sources.append(("web", lambda: self._fetch(model_url(collection, model))))

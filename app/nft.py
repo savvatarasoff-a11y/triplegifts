@@ -18,7 +18,7 @@ from aiogram import Bot
 
 from .config import Config
 from .db import Database
-from .relayer import Relayer, RelayerError
+from .relayer import Relayer
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ async def _notify_admins(bot: Bot, cfg: Config, text: str) -> None:
 
 
 async def deliver(bot: Bot, db: Database, cfg: Config, relayer: Relayer, win_id: int) -> tuple[bool, str]:
-    """Передаёт победителю случайный подарок выигранной модели с аккаунта-релейера."""
+    """Кладёт победителю в «Мои подарки» случайный подарок выигранной модели с аккаунта-релейера."""
     async with db.tx() as c:
         cur = await c.execute(
             "UPDATE nft_wins SET status='sending' WHERE id=? AND status IN ('won','failed','waiting')", (win_id,)
@@ -116,7 +116,6 @@ async def deliver(bot: Bot, db: Database, cfg: Config, relayer: Relayer, win_id:
         return False, "Выигрыш уже передан или не найден"
     win = await db.one("SELECT * FROM nft_wins WHERE id=?", win_id)
     model = await db.one("SELECT * FROM nft_models WHERE id=?", win["model_id"])
-    user = await db.get_user(win["user_id"])
 
     async def set_status(status: str, error: str | None = None) -> None:
         async with db.tx() as c:
@@ -140,41 +139,36 @@ async def deliver(bot: Bot, db: Database, cfg: Config, relayer: Relayer, win_id:
     if not candidates:
         return await fail("у релейера не осталось подарков этой модели")
     item = random.SystemRandom().choice(candidates)
-    try:
-        await relayer.transfer(item, win["user_id"], (user or {}).get("username"))
-    except RelayerError as e:
-        if str(e) == "NEED_CONTACT":
-            # Релейер не может найти игрока без @username — просим игрока написать релейеру
-            await set_status("waiting", "игрок должен написать релейеру")
-            relayer_name = await relayer.username()
-            contact = f"@{relayer_name}" if relayer_name else "аккаунту-релейеру"
-            try:
-                await bot.send_message(
-                    win["user_id"],
-                    f"🎁 Вы выиграли NFT {model.get('emoji') or '💎'} <b>{html.escape(model['collection_name'])}</b> "
-                    f"(модель «{html.escape(model['model'])}»)!\nЧтобы получить его, напишите любое сообщение "
-                    f"{contact} — подарок придёт сразу.",
-                )
-            except Exception:
-                pass
-            return False, "ждём, пока игрок напишет релейеру"
-        return await fail(str(e))
-    except Exception as e:
-        return await fail(str(getattr(e, "message", None) or type(e).__name__))
+    # Выигрыш кладём в «Мои подарки» игрока: оттуда его можно вывести в Telegram, продать или поставить
+    now = time.time()
+    ref = str(item["ref"])
     async with db.tx() as c:
+        values = (win["user_id"], item["collection_id"], item["collection_name"], item["number"], item["model"],
+                  item.get("emoji") or model.get("emoji"), item.get("rarity"), model["price"], model["price_at"] or now,
+                  item.get("transfer_at") or 0)
+        res = await c.execute(
+            "UPDATE user_gifts SET user_id=?, kind='nft', collection_id=?, collection_name=?, number=?, model=?, "
+            "emoji=?, rarity=?, value=?, priced_at=?, transfer_at=?, status='owned', round_id=NULL WHERE ref=?",
+            (*values, ref))
+        if res.rowcount == 0:
+            await c.execute(
+                "INSERT INTO user_gifts(user_id, kind, collection_id, collection_name, number, model, emoji, rarity, "
+                "value, priced_at, transfer_at, status, ref, created_at) VALUES (?,'nft',?,?,?,?,?,?,?,?,?,'owned',?,?)",
+                (*values, ref, now))
         await c.execute("UPDATE nft_wins SET status='sent', owned_gift_id=?, error=NULL, sent_at=? WHERE id=?",
-                        (str(item["ref"]), time.time(), win_id))
+                        (ref, now, win_id))
         await c.execute("UPDATE nft_models SET stock=MAX(stock-1,0), reserved=MAX(reserved-1,0) WHERE id=?",
                         (model["id"],))
     try:
         await bot.send_message(
             win["user_id"],
-            f"🎉 Вам передан NFT из кейса: {model.get('emoji') or '💎'} <b>{html.escape(item['collection_name'])} "
-            f"#{item['number']}</b>, модель «{html.escape(model['model'])}». Он уже в вашем профиле.",
+            f"🎉 Вы выиграли NFT {model.get('emoji') or '💎'} <b>{html.escape(item['collection_name'])} "
+            f"#{item['number']}</b>, модель «{html.escape(model['model'])}»!\nОн уже в профиле → «Мои подарки»: "
+            f"его можно вывести в Telegram, продать казино или поставить.",
         )
     except Exception:
         pass
-    return True, f"Передан {item['collection_name']} #{item['number']}"
+    return True, f"{item['collection_name']} #{item['number']} — в профиле игрока"
 
 
 async def deliver_waiting(bot: Bot, db: Database, cfg: Config, relayer: Relayer, user_id: int) -> None:

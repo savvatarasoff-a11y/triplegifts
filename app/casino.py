@@ -24,6 +24,7 @@ CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 # адрес TON: «дружелюбный» (48 символов base64url) или сырой 0:hex
 TON_ADDRESS_RE = re.compile(r"^(?:[A-Za-z0-9_-]{48}|-?[0-9]:[0-9a-fA-F]{64})$")
 GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
+DEMO_SELL_RATE = 1.0        # выигранный демо-NFT — по полному флору (как выплата, заложенная в RTP игр)
 MAX_GIFTS_PER_BET = 20
 CASE_MAX_COUNT = 5          # сколько кейсов можно открыть за раз
 
@@ -482,8 +483,12 @@ class Casino:
             if value == 64 and target:
                 nft = await self._reserve_nft_near(c, user_id, target)
             if nft and nft.get("demo"):
+                nft["gift_id"] = await self._demo_gift(c, user_id, nft["title"], nft["model"], nft["emoji"],
+                                                       nft.get("rarity"), nft["price"])
                 win = money.stars_to(nft["price"], cur, rate) or 0
-                balance = await self._settle(c, user_id, "slots", bet, win, {**detail, "demo_nft": nft["model"]}, cur)
+                await self.db.log_bet(c, user_id, "slots", bet, win,
+                                      json.dumps({**detail, "demo_nft": nft["model"]}, ensure_ascii=False), cur)
+                balance = await self._balance(c, user_id, cur)
             elif nft:
                 detail["nft_win"] = nft["win_id"]
                 win = money.stars_to(nft["price"], cur, rate) or 0
@@ -514,7 +519,7 @@ class Casino:
         if row["test"]:
             # демо-NFT: подарка у релейера нет — выигрыш сразу платится его флором
             return {"win_id": None, "demo": True, "title": row["collection_name"], "model": row["model"],
-                    "emoji": row["emoji"] or "💎", "price": row["price"]}
+                    "emoji": row["emoji"] or "💎", "price": row["price"], "rarity": row["rarity"]}
         await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=?", (row["id"],))
         cur = await c.execute(
             "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
@@ -565,12 +570,13 @@ class Casino:
                 detail = {"case": case["id"], "prize": amount, "gift": prize["emoji"], "kind": prize["kind"]}
                 item = {"kind": prize["kind"], "prize": amount, "gift": prize["emoji"]}
                 if prize["kind"] == "nft" and prize.get("demo"):
-                    # демо-NFT: подарка нет у релейера — сразу платим его флор в валюте кейса
-                    if amount > 0:
-                        await self.db.change_balance(c, user_id, amount, "win", "case", cur)
+                    # демо-NFT: подарка нет у релейера — кладём демо-подарок в профиль (продаётся по флору)
+                    gift_id = await self._demo_gift(c, user_id, prize["title"], prize["model"], prize["emoji"],
+                                                    prize.get("rarity"), prize["amount"])
                     detail["demo_nft"] = prize["model"]
                     detail["title"] = prize["title"]
-                    item["nft"] = {"win_id": None, "demo": True, "title": prize["title"], "model": prize["model"]}
+                    item["nft"] = {"win_id": None, "demo": True, "title": prize["title"], "model": prize["model"],
+                                   "gift_id": gift_id}
                 elif prize["kind"] == "nft":
                     # Резервируем подарок этой модели у релейера; конкретный NFT выберется при передаче
                     res = await c.execute(
@@ -865,6 +871,10 @@ class Casino:
     # ---------- подарки игроков (прислали релейеру) ----------
 
     @staticmethod
+    def sell_rate(r: dict) -> float:
+        return DEMO_SELL_RATE if r.get("test") else GIFT_SELL_RATE
+
+    @staticmethod
     def gift_title(r: dict) -> str:
         return f"{r['collection_name']} #{r['number']}" if r.get("number") else (r.get("collection_name") or "Подарок")
 
@@ -875,7 +885,7 @@ class Casino:
                 "number": r["number"], "model": r["model"], "emoji": r["emoji"] or "🎁", "rarity": r["rarity"],
                 "value": r["value"],
                 "priced": fresh, "status": r["status"], "demo": bool(r.get("test")),
-                "sell": int(r["value"] * GIFT_SELL_RATE) if fresh else None,
+                "sell": int(r["value"] * cls.sell_rate(r)) if fresh else None,
                 "locked_until": r["transfer_at"] if r["transfer_at"] > now else None}
 
     async def gifts(self, user_id: int) -> list[dict]:
@@ -922,7 +932,7 @@ class Casino:
                 raise GameError("Этот подарок уже поставлен или выведен")
             if not row["value"] or now - (row["priced_at"] or 0) >= NFT_PRICE_MAX_AGE:
                 raise GameError("Цена подарка ещё проверяется на маркете — попробуйте позже")
-            amount = int(row["value"] * GIFT_SELL_RATE)
+            amount = int(row["value"] * self.sell_rate(dict(row)))
             await c.execute("UPDATE user_gifts SET status='sold' WHERE id=?", (gift_id,))
             balance = await self.db.change_balance(c, user_id, amount, "gift_sell", str(gift_id))
         return {"amount": amount, "balance": balance}
@@ -988,6 +998,17 @@ class Casino:
                      m["price"], now, now))
         return models[:gifts_for_admin], models
 
+    @staticmethod
+    async def _demo_gift(c: aiosqlite.Connection, user_id: int, title: str, model: str, emoji: str | None,
+                         rarity: float | None, price: int) -> int:
+        """Выигранный демо-NFT — в «Мои подарки»: продать по флору или поставить (вывести нельзя)."""
+        now = time.time()
+        res = await c.execute(
+            "INSERT INTO user_gifts(user_id, ref, kind, collection_id, collection_name, number, model, emoji, rarity, "
+            "value, priced_at, status, created_at, test) VALUES (?,?,'nft','demo',?,NULL,?,?,?,?,?,'owned',?,1)",
+            (user_id, f"demo:{secrets.token_hex(8)}", title, model, emoji or "💎", rarity, price, now, now))
+        return res.lastrowid
+
     async def demo_clear(self) -> int:
         async with self.db.tx() as c:
             res = await c.execute("DELETE FROM nft_models WHERE test=1")
@@ -1028,10 +1049,11 @@ class Casino:
                                       "roll": round(roll, 4), "gifts": gift_ids}
             nft = None
             if won and target["test"]:
-                # демо-цель: выигрыш — её флор звёздами
-                await self.db.change_balance(c, user_id, target["price"], "win", "upgrade")
+                # демо-цель: выигрыш — демо-подарок в профиль (продаётся по флору)
+                gift_id = await self._demo_gift(c, user_id, target["collection_name"], target["model"],
+                                                target["emoji"], target["rarity"], target["price"])
                 nft = {"win_id": None, "demo": True, "title": target["collection_name"], "model": target["model"],
-                       "emoji": target["emoji"] or "💎", "price": target["price"]}
+                       "emoji": target["emoji"] or "💎", "price": target["price"], "gift_id": gift_id}
             elif won:
                 await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=?", (target["id"],))
                 win = await c.execute(

@@ -22,7 +22,7 @@ from .games import logic as g
 from .cases import CaseCatalog
 from .gifts import withdraw as withdraw_gift
 from .nft import deliver as deliver_nft
-from .nftimg import NftImages, source_url as nft_source_url
+from .nftimg import NftImages
 from .relayer import Relayer
 from .withdraw import GiftCatalog, notify_admins, notify_admins_ton
 
@@ -160,6 +160,14 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         avatars[user_id] = (time.time(), data)
         return data
 
+    async def to_profile(nft: dict) -> None:
+        """Выигранный NFT сразу кладём в «Мои подарки»; не вышло — админ получит уведомление и /nftsend."""
+        try:
+            nft["in_profile"], _ = await deliver_nft(bot, casino.db, cfg, relayer, nft["win_id"])
+        except Exception:
+            log.exception("NFT-выигрыш %s не положен в профиль", nft["win_id"])
+            nft["in_profile"] = False
+
     @routes.get("/health")
     async def health(_: web.Request) -> web.Response:
         return web.json_response({"ok": True})
@@ -191,7 +199,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         known = await casino.db.one(
             "SELECT 1 FROM nft_models WHERE collection_name=? UNION ALL "
             "SELECT 1 FROM user_gifts WHERE collection_name=? LIMIT 1", collection, collection)
-        if not known or not nft_source_url(collection, model, number):
+        if not known:
             raise web.HTTPNotFound()
         img = await images.nft(collection, model, number)
         if not img:
@@ -291,7 +299,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         data = await body(request)
         result = await casino.slots(request[USER_ID], data.get("bet"), cur=data.get("cur"))
         if result.get("nft") and result["nft"].get("win_id"):
-            asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
+            await to_profile(result["nft"])
         return web.json_response(result)
 
     @routes.post("/api/plinko")
@@ -314,7 +322,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         result = await casino.open_case(request[USER_ID], case, data.get("count", 1), data.get("cur"))
         for item in result["items"]:
             if item["kind"] == "nft" and item["nft"].get("win_id"):
-                asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, item["nft"]["win_id"]))
+                await to_profile(item["nft"])
         return web.json_response(result)
 
     @routes.get("/api/mines")
@@ -421,7 +429,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         data = await body(request)
         result = await casino.upgrade(request[USER_ID], data.get("gifts"), data.get("target"))
         if result["nft"] and result["nft"]["win_id"]:
-            asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
+            await to_profile(result["nft"])
         return web.json_response(result)
 
     @routes.get("/api/gifts")

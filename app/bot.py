@@ -148,12 +148,12 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         if r.get("nft") and r["nft"].get("demo"):
             n = r["nft"]
             text = (f"{combo}\n🎉 <b>ДЖЕКПОТ! Демо-NFT {n['emoji']} {html.escape(n['title'])} "
-                    f"«{html.escape(n['model'])}» — выплачено {r['win']} ⭐ по флору</b>")
+                    f"«{html.escape(n['model'])}» (≈ {n['price']} ⭐)</b> — он в профиле → «Мои подарки»")
         elif r.get("nft"):
             n = r["nft"]
-            asyncio.create_task(deliver_nft(message.bot, casino.db, cfg, relayer, n["win_id"]))
+            await deliver_nft(message.bot, casino.db, cfg, relayer, n["win_id"])
             text = (f"{combo}\n🎉 <b>ДЖЕКПОТ! NFT {n['emoji']} {html.escape(n['title'])} "
-                    f"(модель «{html.escape(n['model'])}», ≈ {n['price']} ⭐)</b> — передаём вам в Telegram")
+                    f"(модель «{html.escape(n['model'])}», ≈ {n['price']} ⭐)</b> — он в профиле → «Мои подарки»")
         elif r["win"] > bet:
             text = f"{combo}\n🎉 <b>×{r['multiplier']:g} — выигрыш {r['win']} ⭐</b>"
         elif r["win"] == bet:
@@ -552,7 +552,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                         docs = await relayer.model_documents(c)
                         data = await relayer.model_image(c, m)
                         lines.append(f"Telegram: моделей в коллекции {len(docs)}, модель "
-                                     f"{'найдена' if norm(m) in docs else 'не найдена'}, картинка "
+                                     f"{'найдена' if norm(m) in docs else 'не найдена (берём сам подарок)' if '' in docs else 'не найдена'}"
+                                     f", картинка "
                                      f"{f'{len(data) // 1024} КБ' if data else 'нет'}")
                     except Exception as e:
                         lines.append(f"Telegram: ошибка {type(e).__name__}: {html.escape(str(e))[:120]}")

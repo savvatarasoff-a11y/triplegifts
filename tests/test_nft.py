@@ -4,6 +4,7 @@ import time
 import pytest
 
 from app import nft
+from app.casino import Casino
 from app.config import Config
 from app.db import Database
 from app.relayer import Relayer, RelayerError
@@ -103,43 +104,33 @@ async def test_model_without_fresh_price_not_in_case(env):
     assert [p["model"] for p in case["prizes"] if p["kind"] == "nft"] == ["fresh"]
 
 
-async def test_deliver_random_gift_of_model(env):
+async def test_won_nft_goes_to_profile(env):
     cfg, db = env
     bot = Bot()
     relayer = FakeRelayer([item(1, "100", "Plush Pepe", 1, "Frog"), item(2, "100", "Plush Pepe", 2, "Frog"),
                            item(3, "100", "Plush Pepe", 3, "Toad")])
-    await db.conn.execute("INSERT INTO nft_models(collection_id, collection_name, model, stock, reserved, price) "
-                          "VALUES ('100','Plush Pepe','Frog',2,2,9000)")
+    await db.conn.execute("INSERT INTO nft_models(collection_id, collection_name, model, stock, reserved, price, "
+                          "price_at) VALUES ('100','Plush Pepe','Frog',2,2,9000,?)", (time.time(),))
     await db.conn.execute("INSERT INTO nft_wins(model_id, user_id, price, created_at) "
                           "VALUES (1, 42, 9000, 0), (1, 43, 9000, 0)")
     assert (await nft.deliver(bot, db, cfg, relayer, 1))[0]
     assert (await nft.deliver(bot, db, cfg, relayer, 2))[0]
-    assert sorted(r for r, _ in relayer.transfers) == [1, 2]      # разные подарки одной модели, «Toad» не тронут
-    assert [u for _, u in relayer.transfers] == [42, 43]
+    assert relayer.transfers == []                                # в Telegram сразу не уходит
+    rows = await db.all("SELECT user_id, ref, model, value, status FROM user_gifts ORDER BY user_id")
+    assert [(r["user_id"], r["model"], r["value"], r["status"]) for r in rows] == [
+        (42, "Frog", 9000, "owned"), (43, "Frog", 9000, "owned")]
+    assert sorted(r["ref"] for r in rows) == ["1", "2"]           # разные подарки одной модели, «Toad» не тронут
     assert (await db.one("SELECT stock, reserved FROM nft_models")) == {"stock": 0, "reserved": 0}
+    assert "Мои подарки" in bot.messages[-1][1]
+    casino = Casino(db, cfg)
+    gift = (await casino.gifts(42))[0]
+    assert gift["model"] == "Frog" and not gift["demo"] and gift["sell"] == int(9000 * 0.9)
     assert not (await nft.deliver(bot, db, cfg, relayer, 1))[0]   # повторная выдача невозможна
     # подарков модели не осталось -> админу уведомление с командой повтора
     await db.conn.execute("INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (1, 42, 9000, 0)")
     ok, reason = await nft.deliver(bot, db, cfg, relayer, 3)
     assert not ok and "не осталось" in reason
     assert bot.messages[-1][0] == 7 and "/nftsend 3" in bot.messages[-1][1]
-
-
-async def test_deliver_waits_for_player_without_username(env):
-    cfg, db = env
-    bot = Bot()
-    relayer = FakeRelayer([item(1, "100", "Plush Pepe", 1, "Frog")])
-    await db.conn.execute("INSERT INTO nft_models(collection_id, collection_name, model, stock, reserved, price) "
-                          "VALUES ('100','Plush Pepe','Frog',1,1,9000)")
-    await db.conn.execute("INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (1, 44, 9000, 0)")
-    ok, reason = await nft.deliver(bot, db, cfg, relayer, 1)
-    assert not ok and "напишет" in reason
-    assert (await db.one("SELECT status FROM nft_wins"))["status"] == "waiting"
-    assert bot.messages[-1][0] == 44 and "@svag_relayer" in bot.messages[-1][1]
-    relayer.known.add(44)                                         # игрок написал релейеру
-    await nft.deliver_waiting(bot, db, cfg, relayer, 44)
-    assert (await db.one("SELECT status FROM nft_wins"))["status"] == "sent"
-    assert relayer.transfers == [(1, 44)]
 
 
 async def test_relayer_secrets_encrypted(env):

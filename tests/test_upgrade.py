@@ -79,7 +79,7 @@ async def test_upgrade_rejects(env):
     assert all(x["status"] == "owned" for x in await casino.gifts(42))    # всё откатилось
 
 
-async def test_demo_nfts_visible_to_all_paid_in_stars(env, monkeypatch):
+async def test_demo_nfts_visible_to_all_won_into_profile(env, monkeypatch):
     db, casino = env
     admin = 7
     await db.touch_user(admin, "adm", "Admin")
@@ -99,21 +99,23 @@ async def test_demo_nfts_visible_to_all_paid_in_stars(env, monkeypatch):
     before = (await db.get_user(42))["balance"]
     r = await casino.upgrade(42, ids, frog["id"])
     assert r["won"] and r["nft"]["demo"] and r["nft"]["win_id"] is None
-    assert (await db.get_user(42))["balance"] == before + 9000
+    won = [x for x in await casino.gifts(42) if x["id"] == r["nft"]["gift_id"]][0]   # демо-NFT — в профиль
+    assert won["demo"] and won["model"] == "Frog" and won["sell"] == 9000
+    assert (await casino.gift_sell(42, won["id"]))["balance"] == before + 9000
     assert (await db.one("SELECT COUNT(*) n FROM nft_wins"))["n"] == 0            # передавать нечего
     # дюп админа нельзя вывести, но можно продать
     dupe = (await casino.gifts(admin))[0]
     assert dupe["demo"]
     with pytest.raises(GameError, match="Демо"):
         await casino.gift_withdraw_claim(admin, dupe["id"])
-    assert (await casino.gift_sell(admin, dupe["id"]))["amount"] == int(dupe["value"] * 0.9)
+    assert (await casino.gift_sell(admin, dupe["id"]))["amount"] == dupe["value"]
     # синхронизация релейера не обнуляет демо-модели
     await nft.sync(db, FakeRelayer([]))
     assert (await db.one("SELECT MIN(stock) s FROM nft_models WHERE test=1"))["s"] == 999
     assert await casino.demo_clear() == 3
 
 
-async def test_demo_nft_in_case_paid_in_stars(env):
+async def test_demo_nft_from_case_goes_to_profile(env):
     db, casino = env
     await db.conn.execute("UPDATE users SET balance=1000 WHERE id=42")
     case = {"id": "nft_x", "price": 100, "prizes": [
@@ -121,4 +123,6 @@ async def test_demo_nft_in_case_paid_in_stars(env):
          "weight": 1, "demo": True}]}
     r = await casino.open_case(42, case)
     assert r["kind"] == "nft" and r["nft"]["demo"] and r["nft"]["win_id"] is None
-    assert r["balance"] == 1000 - 100 + 5000
+    assert r["balance"] == 1000 - 100                                   # не звёздами, а подарком в профиль
+    gift = (await casino.gifts(42))[0]
+    assert gift["id"] == r["nft"]["gift_id"] and gift["demo"] and gift["value"] == 5000 and gift["sell"] == 5000

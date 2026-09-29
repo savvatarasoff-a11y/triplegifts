@@ -249,11 +249,10 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
     monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[0])
     r = await client.post("/api/case", headers=auth(8), json={"case": "nft"})
     data = await r.json()
-    assert data["kind"] == "nft" and data["nft"]["model"] == "Frog Prince"
-    import asyncio
-    await asyncio.sleep(0.05)
-    ref, user = client.app[RELAYER].transfers[-1]
-    assert ref in (1, 2) and user == 8
+    assert data["kind"] == "nft" and data["nft"]["model"] == "Frog Prince" and data["nft"]["in_profile"]
+    gifts = await (await client.get("/api/gifts", headers=auth(8))).json()
+    assert [x["model"] for x in gifts["gifts"]] == ["Frog Prince"]     # выигрыш — в «Мои подарки»
+    assert client.app[RELAYER].transfers == []
     assert (await casino.db.one("SELECT status FROM nft_wins"))["status"] == "sent"
     assert (await casino.db.one("SELECT stock, reserved FROM nft_models")) == {"stock": 1, "reserved": 0}
 
@@ -282,9 +281,9 @@ async def test_slots_777_nft_via_api(client, monkeypatch):
     relayer.known = {8}
     monkeypatch.setattr(g, "slots_spin", lambda rng=None: (64, ["seven", "seven", "seven"], 40))
     data = await (await client.post("/api/slots", headers=auth(8), json={"bet": 100})).json()
-    assert data["nft"]["title"] == "Plush Pepe" and data["balance"] == 900
-    await asyncio.sleep(0.05)
-    assert relayer.transfers == [(9, 8)]
+    assert data["nft"]["title"] == "Plush Pepe" and data["balance"] == 900 and data["nft"]["in_profile"]
+    assert [(x["title"], x["model"]) for x in await casino.gifts(8)] == [("Plush Pepe #77", "Frog")]
+    assert relayer.transfers == []
 
 
 async def test_referral_via_start_param_and_pages(client):
