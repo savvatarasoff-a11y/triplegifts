@@ -21,12 +21,15 @@ BOT = web.AppKey("bot", object)
 TOKEN = "123456:TEST-token"
 
 
-def init_data(user_id: int, token: str = TOKEN, auth_date: int | None = None, first_name: str = "Петя") -> str:
+def init_data(user_id: int, token: str = TOKEN, auth_date: int | None = None, first_name: str = "Петя",
+              start_param: str | None = None) -> str:
     fields = {
         "auth_date": str(auth_date or int(time.time())),
         "query_id": "AAH",
         "user": json.dumps({"id": user_id, "first_name": first_name, "username": f"u{user_id}"}),
     }
+    if start_param:
+        fields["start_param"] = start_param
     check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
     secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
     fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
@@ -83,6 +86,9 @@ class FakeBot:
 
     async def send_message(self, chat_id, text, **kwargs):
         self.messages.append((chat_id, text))
+
+    async def get_me(self):
+        return type("Me", (), {"username": "svag_gifts_bot"})()
 
     async def get_user_profile_photos(self, user_id, limit=1):
         size = type("P", (), {"file_id": "f1", "width": 160})()
@@ -279,3 +285,19 @@ async def test_slots_777_nft_via_api(client, monkeypatch):
     assert data["nft"]["title"] == "Plush Pepe" and data["balance"] == 900
     await asyncio.sleep(0.05)
     assert relayer.transfers == [(9, 8)]
+
+
+async def test_referral_via_start_param_and_pages(client):
+    casino, bot = client.app[CASINO], client.app[BOT]
+    await client.get("/api/me", headers={"Authorization": "tma " + init_data(500)})
+    r = await client.get("/api/me", headers={"Authorization": "tma " + init_data(501, start_param="r_500")})
+    assert r.status == 200
+    assert (await casino.db.get_user(501))["referrer_id"] == 500
+    assert bot.messages[-1][0] == 500
+    await casino.db.credit_payment("x", 501, 100)
+    r = await client.get("/api/referrals", headers={"Authorization": "tma " + init_data(500)})
+    data = await r.json()
+    assert data["link"] == "https://t.me/svag_gifts_bot?start=r_500"
+    assert (data["count"], data["earned"]) == (1, 10)
+    r = await client.get("/api/profile", headers={"Authorization": "tma " + init_data(501)})
+    assert (await r.json())["deposited"] == 100

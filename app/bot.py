@@ -21,7 +21,9 @@ from aiogram.types import (
 
 from .casino import Casino, GameError
 from .config import Config
-from .web import DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, parse_deposit_payload
+from .web import (DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, notify_referrer, parse_deposit_payload,
+                  parse_referral, referral_link)
+from .db import REFERRAL_RATE
 from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
 from .relayer import Relayer
 from .withdraw import admin_keyboard, approve, reject
@@ -60,6 +62,9 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     async def start(message: Message, command: CommandObject) -> None:
         user = await register(message)
         arg = (command.args or "").strip()
+        ref = parse_referral(arg)
+        if ref and await casino.db.set_referrer(user["id"], ref):
+            await notify_referrer(message.bot, ref, message.from_user.first_name)
         if arg.startswith("c_"):
             try:
                 amount, balance = await casino.activate_check(user["id"], arg[2:])
@@ -73,7 +78,21 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             f"Вывод — подарками Telegram.\n"
             f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
             f"/slot 10 — слоты прямо в чате (настоящий 🎰)\n"
-            f"/deposit — пополнить звёздами\n/balance — баланс\n/help — правила",
+            f"/deposit — пополнить звёздами\n/balance — баланс\n/ref — пригласить друзей (+10%)\n/help — правила",
+            reply_markup=play_keyboard(cfg),
+        )
+
+    @router.message(Command("ref", "referral"))
+    async def ref(message: Message) -> None:
+        await register(message)
+        me = await message.bot.get_me()
+        info = await casino.referrals(message.from_user.id)
+        await message.answer(
+            f"🤝 <b>Реферальная программа</b>\n\nПриглашайте друзей и получайте "
+            f"<b>{int(REFERRAL_RATE * 100)}%</b> от каждой их покупки звёзд — навсегда.\n"
+            f"Бонус нужно один раз отыграть ставками, как чеки.\n\n"
+            f"Ваша ссылка:\n{referral_link(me.username, message.from_user.id)}\n\n"
+            f"Приглашено: <b>{info['count']}</b> · заработано: <b>{info['earned']} ⭐</b>",
             reply_markup=play_keyboard(cfg),
         )
 
@@ -167,6 +186,14 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             pay.telegram_payment_charge_id, message.from_user.id, pay.total_amount
         )
         user = await casino.db.get_user(message.from_user.id)
+        if credited and user.get("referrer_id") and int(pay.total_amount * REFERRAL_RATE) > 0:
+            try:
+                await message.bot.send_message(
+                    user["referrer_id"],
+                    f"🤝 Ваш реферал пополнил баланс — вам <b>+{int(pay.total_amount * REFERRAL_RATE)} ⭐</b>",
+                )
+            except Exception:
+                pass
         if credited:
             await message.answer(
                 f"✅ Зачислено <b>{pay.total_amount} ⭐</b>\nБаланс: {user['balance']} ⭐",

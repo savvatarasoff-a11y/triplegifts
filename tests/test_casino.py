@@ -381,3 +381,33 @@ async def test_migration_adds_pvp_columns(tmp_path):
     row = await db.one("SELECT game, detail FROM pvp_rounds")
     assert row == {"game": "roulette", "detail": None}
     await db.close()
+
+
+async def test_referral_bonus_and_rules(casino):
+    db = casino.db
+    for uid in (100, 101, 102):
+        await db.touch_user(uid, None, f"U{uid}")
+    assert not await db.set_referrer(100, 100)                    # себя нельзя
+    assert await db.set_referrer(101, 100)
+    assert not await db.set_referrer(101, 102)                    # второй раз нельзя
+    assert not await db.set_referrer(100, 101)                    # по кругу нельзя
+    assert await db.credit_payment("p1", 101, 250)
+    assert (await db.get_user(100))["balance"] == 25              # 10% пригласившему
+    assert not await db.credit_payment("p1", 101, 250)            # повтор апдейта не платит дважды
+    assert (await db.get_user(100))["balance"] == 25
+    await db.credit_payment("p2", 102, 500)                       # чужой игрок — бонуса нет
+    assert (await db.get_user(100))["balance"] == 25
+    assert not await db.set_referrer(102, 100)                    # уже покупал — привязать нельзя
+    info = await casino.referrals(100)
+    assert (info["count"], info["earned"], info["list"][0]["earned"]) == (1, 25, 25)
+    assert (await casino.wager_status(100))["left"] == 25         # бонус нужно отыграть
+    await db.conn.execute("UPDATE users SET created_at=0 WHERE id=102")
+    await db.touch_user(103, None, "old")
+    await db.conn.execute("UPDATE users SET created_at=0 WHERE id=103")
+    assert not await db.set_referrer(103, 100)                    # старый игрок — нельзя
+
+
+async def test_profile(casino):
+    await casino.db.credit_payment("p", 1, 100)
+    p = await casino.profile(1)
+    assert p["deposited"] == 100 and p["games"] == 0 and p["best"] is None

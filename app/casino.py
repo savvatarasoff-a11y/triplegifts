@@ -10,7 +10,7 @@ from typing import Any
 import aiosqlite
 
 from .config import Config
-from .db import Database, InsufficientFunds
+from .db import REFERRAL_RATE, Database, InsufficientFunds
 from .games import logic as g
 from .nft import PRICE_MAX_AGE as NFT_PRICE_MAX_AGE
 
@@ -77,6 +77,45 @@ class Casino:
             user = await self.db.get_user(user_id)
         return user
 
+    async def profile(self, user_id: int) -> dict:
+        """Статистика игрока для страницы профиля."""
+        user = await self.db.get_user(user_id) or {}
+        bets = await self.db.one(
+            "SELECT COUNT(*) n, COALESCE(MAX(win),0) best, COALESCE(SUM(win > bet),0) wins FROM bets WHERE user_id=?",
+            user_id)
+        fav = await self.db.one(
+            "SELECT game, COUNT(*) n FROM bets WHERE user_id=? GROUP BY game ORDER BY n DESC LIMIT 1", user_id)
+        best = await self.db.one(
+            "SELECT game, bet, win FROM bets WHERE user_id=? AND win > 0 ORDER BY win DESC, id LIMIT 1", user_id)
+        withdrawn = await self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM withdrawals WHERE user_id=? AND status='sent'", user_id)
+        return {
+            "id": user_id, "name": display_name(user or None), "username": user.get("username"),
+            "joined": user.get("created_at"), "balance": user.get("balance", 0),
+            "deposited": user.get("deposited", 0), "wagered": user.get("wagered", 0), "won": user.get("won", 0),
+            "withdrawn": withdrawn["s"], "games": bets["n"], "wins": bets["wins"],
+            "favorite": fav["game"] if fav else None,
+            "best": {"game": best["game"], "bet": best["bet"], "win": best["win"]} if best else None,
+            "wager": await self.wager_status(user_id),
+        }
+
+    async def referrals(self, user_id: int) -> dict:
+        """Рефералы игрока и сколько звёзд он с них получил."""
+        rows = await self.db.all(
+            "SELECT u.id, u.username, u.first_name, u.created_at, "
+            "(SELECT COALESCE(SUM(delta),0) FROM ledger l WHERE l.user_id=? AND l.kind='ref_bonus' "
+            " AND l.ref=CAST(u.id AS TEXT)) earned "
+            "FROM users u WHERE u.referrer_id=? ORDER BY earned DESC, u.created_at DESC LIMIT 50",
+            user_id, user_id)
+        total = await self.db.one(
+            "SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE user_id=? AND kind='ref_bonus'", user_id)
+        count = await self.db.one("SELECT COUNT(*) n FROM users WHERE referrer_id=?", user_id)
+        return {
+            "count": count["n"], "earned": total["s"], "rate": REFERRAL_RATE,
+            "list": [{"id": r["id"], "name": display_name(r), "earned": r["earned"], "joined": r["created_at"]}
+                     for r in rows],
+        }
+
     async def big_wins(self, limit: int = 20) -> list[dict]:
         """Лента крупных выигрышей всех игроков (от ×5)."""
         rows = await self.db.all(
@@ -140,7 +179,8 @@ class Casino:
     async def wager_status(self, user_id: int) -> dict:
         """Звёзды из чеков и бонусов нужно отыграть: сумма ставок ≥ полученного бесплатно."""
         free = await self.db.one(
-            "SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE user_id=? AND kind IN ('check','bonus')", user_id
+            "SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE user_id=? AND kind IN ('check','bonus','ref_bonus')",
+            user_id
         )
         user = await self.db.get_user(user_id)
         wagered = user["wagered"] if user else 0

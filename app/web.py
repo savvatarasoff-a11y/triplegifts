@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 import time
@@ -15,6 +16,7 @@ from aiohttp import web
 
 from .casino import GIFT_SELL_RATE, Casino, GameError, display_name
 from .config import Config
+from .db import REFERRAL_RATE
 from .games import logic as g
 from .cases import CaseCatalog
 from .gifts import withdraw as withdraw_gift
@@ -33,6 +35,40 @@ DEPOSIT_MIN, DEPOSIT_MAX = 1, 10000
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 USER_ID = web.RequestKey("user_id", int)
+
+
+def parse_referral(arg: str | None) -> int | None:
+    """Параметр реферальной ссылки r_<id> → id пригласившего."""
+    if arg and arg.startswith("r_") and arg[2:].isdigit() and len(arg) <= 24:
+        return int(arg[2:])
+    return None
+
+
+async def notify_referrer(bot: Bot, referrer_id: int, name: str | None) -> None:
+    try:
+        await bot.send_message(
+            referrer_id,
+            f"🤝 По вашей ссылке пришёл новый игрок{': ' + html.escape(name) if name else ''}. "
+            f"Вы будете получать {int(REFERRAL_RATE * 100)}% от каждой его покупки звёзд.",
+        )
+    except Exception:
+        pass
+
+
+_bot_username: dict[int, str] = {}
+
+
+async def bot_username(bot: Bot) -> str | None:
+    if not _bot_username.get(id(bot)):
+        try:
+            _bot_username[id(bot)] = (await bot.get_me()).username
+        except Exception:
+            return None
+    return _bot_username[id(bot)]
+
+
+def referral_link(username: str | None, user_id: int) -> str | None:
+    return f"https://t.me/{username}?start=r_{user_id}" if username else None
 
 
 def deposit_invoice_kwargs(user_id: int, amount: int) -> dict[str, Any]:
@@ -80,6 +116,9 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             return web.json_response({"error": "Сессия устарела, перезапустите приложение"}, status=401)
         request[USER_ID] = data.user.id
         await casino.register(data.user.id, data.user.username, data.user.first_name)
+        ref = parse_referral(data.start_param)
+        if ref and await casino.db.set_referrer(data.user.id, ref):
+            await notify_referrer(bot, ref, data.user.first_name)
         return await handler(request)
 
     async def body(request: web.Request) -> dict[str, Any]:
@@ -279,6 +318,17 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         data = await body(request)
         return web.json_response(await casino.pvp_bet(request[USER_ID], data.get("amount"), data.get("game", "roulette"),
                                                       data.get("gifts")))
+
+    @routes.get("/api/profile")
+    async def profile(request: web.Request) -> web.Response:
+        return web.json_response(await casino.profile(request[USER_ID]))
+
+    @routes.get("/api/referrals")
+    async def referrals(request: web.Request) -> web.Response:
+        uid = request[USER_ID]
+        info = await casino.referrals(uid)
+        info["link"] = referral_link(await bot_username(bot), uid)
+        return web.json_response(info)
 
     @routes.get("/api/gifts")
     async def my_gifts(request: web.Request) -> web.Response:

@@ -6,10 +6,11 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const STAR = "★";
-const state = { me: null, config: null, screen: "home", busy: false };
+const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null };
 const GAME_NAMES = { slots: "Слоты", dice: "Кости", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей" };
-const TITLES = { wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", dice: "Кости",
+const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
+const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", dice: "Кости",
   cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка", hockey: "PvP-хоккей" };
 // Оттенки фирменного фиолетового и белый: [фон, цвет текста]
 const PVP_COLORS = [["#8B5CF6", "#FFFFFF"], ["#FFFFFF", "#0B0A10"], ["#6D28D9", "#FFFFFF"], ["#C4B5FD", "#0B0A10"],
@@ -207,21 +208,114 @@ function go(screen) {
   if (screen !== "crash") crashLeave();
   if (screen !== "home") tickerStop();
   state.screen = screen;
+  const isTab = TABS.includes(screen);
+  if (isTab) state.tab = screen;
   $$(".screen").forEach((s) => s.classList.toggle("active", s.id === screen));
   const isHome = screen === "home";
   $("#brand").classList.toggle("hidden", !isHome);
   $("#title").classList.toggle("hidden", isHome);
   $("#title").textContent = TITLES[screen] || "";
-  $("#back").classList.toggle("hidden", isHome || !!(tg && tg.BackButton));
-  if (tg && tg.BackButton) isHome ? tg.BackButton.hide() : tg.BackButton.show();
+  $("#back").classList.toggle("hidden", isTab || !!(tg && tg.BackButton));
+  if (tg && tg.BackButton) isTab ? tg.BackButton.hide() : tg.BackButton.show();
+  $("#tabbar").classList.toggle("hidden", !isTab);
+  document.body.classList.toggle("has-tabbar", isTab);
+  $$("#tabbar button").forEach((b) => b.classList.toggle("sel", b.dataset.tab === state.tab));
   window.scrollTo(0, 0);
   const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
-    pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey") };
+    pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter };
   if (enter[screen]) enter[screen]();
 }
 
 function goBack() {
-  go(state.screen === "case" ? "cases" : "home");
+  if (!$("#sheet").classList.contains("hidden")) { $("#sheet").classList.add("hidden"); return; }
+  go(state.screen === "case" ? "cases" : (state.tab || "home"));
+}
+
+// ---------- друзья (реферальная программа) ----------
+
+async function refEnter() {
+  try {
+    const r = await api("/api/referrals");
+    state.refLink = r.link;
+    const rate = Math.round(r.rate * 100);
+    $("#ref-rate").textContent = rate;
+    $$(".ref-rate").forEach((el) => { el.textContent = rate; });
+    $("#ref-link").textContent = r.link || "Ссылка появится, когда бот будет на связи";
+    $("#ref-count").textContent = fmt(r.count);
+    $("#ref-earned").textContent = stars(r.earned);
+    const box = $("#ref-list");
+    box.innerHTML = "";
+    if (!r.list.length) box.innerHTML = '<div class="note">Пока никого — отправьте ссылку другу!</div>';
+    r.list.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = "pl";
+      const nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = p.name;
+      const am = document.createElement("span");
+      am.className = "am";
+      am.textContent = "+" + stars(p.earned);
+      row.append(avatarEl(p, "av", PVP_COLORS[p.id % PVP_COLORS.length]), nm, am);
+      box.append(row);
+    });
+  } catch (e) { toast(e.message, true); }
+}
+
+async function refCopy() {
+  if (!state.refLink) return;
+  try {
+    await navigator.clipboard.writeText(state.refLink);
+    toast("Ссылка скопирована");
+    haptic();
+  } catch (e) {
+    toast("Не удалось скопировать — зажмите ссылку", true);
+  }
+}
+
+function refShare() {
+  if (!state.refLink) return;
+  const text = "Залетай в Svag Gifts — слоты, краш, PvP и NFT-подарки 🎁";
+  const url = `https://t.me/share/url?url=${encodeURIComponent(state.refLink)}&text=${encodeURIComponent(text)}`;
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+  else window.open(url, "_blank");
+}
+
+// ---------- профиль ----------
+
+async function profileEnter() {
+  try {
+    const [p, me] = await Promise.all([api("/api/profile"), loadMe()]);
+    const av = $("#prof-av");
+    av.innerHTML = "";
+    av.append(avatarEl({ id: p.id, name: p.name }, "av", PVP_COLORS[0]));
+    $("#prof-name").textContent = p.name;
+    const since = p.joined ? new Date(p.joined * 1000).toLocaleDateString("ru-RU") : "";
+    $("#prof-sub").textContent = [p.username ? "@" + p.username : null, `ID ${p.id}`, since ? `с ${since}` : null]
+      .filter(Boolean).join(" · ");
+    $("#prof-balance").textContent = stars(p.balance);
+    $("#prof-games").textContent = fmt(p.games);
+    $("#prof-wins").textContent = fmt(p.wins);
+    $("#prof-wagered").textContent = stars(p.wagered);
+    $("#prof-won").textContent = stars(p.won);
+    $("#prof-deposited").textContent = stars(p.deposited);
+    $("#prof-withdrawn").textContent = stars(p.withdrawn);
+    const best = $("#prof-best");
+    best.classList.toggle("hidden", !p.best);
+    if (p.best) {
+      best.innerHTML = "";
+      const l = document.createElement("div");
+      l.innerHTML = "<small>Лучший выигрыш</small>";
+      const g = document.createElement("span");
+      g.textContent = `${GAME_NAMES[p.best.game] || p.best.game} · ставка ${stars(p.best.bet)}`;
+      l.append(g);
+      const b = document.createElement("b");
+      b.textContent = "+" + stars(p.best.win);
+      best.append(l, b);
+    }
+    const w = $("#prof-wager");
+    w.classList.toggle("hidden", !p.wager.left);
+    w.textContent = p.wager.left ? `Бонусы и чеки нужно отыграть: осталось поставить ${stars(p.wager.left)}.` : "";
+  } catch (e) { toast(e.message, true); }
 }
 
 // ---------- ставка ----------
@@ -267,6 +361,7 @@ async function loadMe() {
   setBalance(me.balance);
   $("#hello").textContent = me.user.name;
   renderHistory(me.history);
+  return me;
 }
 
 async function homeEnter() {
@@ -1666,6 +1761,16 @@ function bind() {
   $("#pvp-gifts").addEventListener("click", () => pvpGiftSheet("roulette"));
   $("#hockey-gifts").addEventListener("click", () => pvpGiftSheet("hockey"));
   $("#nft-open").addEventListener("click", openRelayer);
+  $$("#tabbar button").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.tab !== state.screen) { haptic(); go(b.dataset.tab); }
+  }));
+  $$("[data-wallet]").forEach((b) => b.addEventListener("click", () => {
+    haptic();
+    go("wallet");
+    walletTab(b.dataset.wallet);
+  }));
+  $("#ref-copy").addEventListener("click", refCopy);
+  $("#ref-share").addEventListener("click", refShare);
   $("#sheet-cancel").addEventListener("click", () => $("#sheet").classList.add("hidden"));
   $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") $("#sheet").classList.add("hidden"); });
   $("#bigwin-ok").addEventListener("click", () => $("#bigwin").classList.add("hidden"));
@@ -1687,6 +1792,7 @@ async function init() {
     toast("Откройте Svag Gifts через кнопку в Telegram-боте", true);
     return;
   }
+  document.body.classList.add("has-tabbar");
   await homeEnter();
   diceUpdate(false);
   minesPreview();

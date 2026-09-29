@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
     deposited  INTEGER NOT NULL DEFAULT 0,
     wagered    INTEGER NOT NULL DEFAULT 0,
     won        INTEGER NOT NULL DEFAULT 0,
+    referrer_id INTEGER,                      -- кто пригласил (реферальная программа)
     created_at REAL NOT NULL,
     last_seen  REAL NOT NULL
 );
@@ -189,6 +190,10 @@ CREATE TABLE IF NOT EXISTS pvp_bets (
 """
 
 
+REFERRAL_RATE = 0.10   # пригласивший получает 10% от каждой покупки звёзд рефералом
+REFERRAL_WINDOW = 24 * 3600   # привязать можно только новичка: не позже суток после первого входа
+
+
 class InsufficientFunds(Exception):
     pass
 
@@ -218,6 +223,10 @@ class Database:
             await self.conn.execute("ALTER TABLE pvp_rounds ADD COLUMN game TEXT NOT NULL DEFAULT 'roulette'")
         if "detail" not in cols:
             await self.conn.execute("ALTER TABLE pvp_rounds ADD COLUMN detail TEXT")
+        async with self.conn.execute("PRAGMA table_info(users)") as cur:
+            if "referrer_id" not in {r["name"] for r in await cur.fetchall()}:
+                await self.conn.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
+        await self.conn.execute("CREATE INDEX IF NOT EXISTS users_referrer ON users(referrer_id)")
         async with self.conn.execute("PRAGMA table_info(pvp_bets)") as cur:
             if "gifts" not in {r["name"] for r in await cur.fetchall()}:
                 await self.conn.execute("ALTER TABLE pvp_bets ADD COLUMN gifts TEXT")
@@ -330,8 +339,20 @@ class Database:
 
     # ---------- платежи ----------
 
+    async def set_referrer(self, user_id: int, referrer_id: int) -> bool:
+        """Привязывает реферала. Только новичку (первые сутки) без покупок и один раз; себя и «по кругу» пригласить нельзя."""
+        if user_id == referrer_id:
+            return False
+        async with self.tx() as c:
+            cur = await c.execute(
+                "UPDATE users SET referrer_id=? WHERE id=? AND referrer_id IS NULL AND deposited=0 AND created_at > ? "
+                "AND EXISTS (SELECT 1 FROM users r WHERE r.id=? AND (r.referrer_id IS NULL OR r.referrer_id != ?))",
+                (referrer_id, user_id, time.time() - REFERRAL_WINDOW, referrer_id, user_id),
+            )
+        return cur.rowcount == 1
+
     async def credit_payment(self, charge_id: str, user_id: int, amount: int) -> bool:
-        """Зачисляет оплату Stars. Повторный апдейт с тем же charge_id ничего не делает."""
+        """Зачисляет оплату Stars (и 10% пригласившему). Повторный апдейт с тем же charge_id ничего не делает."""
         async with self.tx() as c:
             cur = await c.execute(
                 "INSERT OR IGNORE INTO payments(charge_id, user_id, amount, ts) VALUES (?,?,?,?)",
@@ -345,6 +366,11 @@ class Database:
             )
             await self.change_balance(c, user_id, amount, "deposit", charge_id)
             await c.execute("UPDATE users SET deposited = deposited + ? WHERE id=?", (amount, user_id))
+            async with c.execute("SELECT referrer_id FROM users WHERE id=?", (user_id,)) as q:
+                referrer = (await q.fetchone())["referrer_id"]
+            bonus = int(amount * REFERRAL_RATE)
+            if referrer and bonus > 0:
+                await self.change_balance(c, referrer, bonus, "ref_bonus", str(user_id))
         return True
 
     # ---------- история ----------

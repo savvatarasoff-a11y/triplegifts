@@ -22,6 +22,10 @@
     <symbol id="i-cases" viewBox="0 0 48 48"><rect x="7" y="20" width="34" height="21" rx="4"/><rect x="5" y="13" width="38" height="8" rx="3"/><path d="M24 13v28"/><path d="M24 13c-4-7-12-6-10-1 1 2 6 2 10 1zM24 13c4-7 12-6 10-1-1 2-6 2-10 1z"/></symbol>
     <symbol id="i-pvp" viewBox="0 0 48 48"><path d="M8 8l22 22M40 8L18 30"/><path d="M26 34l8-8M22 34l-8-8"/><path d="M31 37l6 4 4-4-4-6M17 37l-6 4-4-4 4-6"/></symbol>
     <symbol id="i-hockey" viewBox="0 0 48 48"><path d="M30 6L18 30h-8a3 3 0 000 6h12l12-28"/><ellipse cx="34" cy="38" rx="7" ry="3"/><path d="M27 38v2c0 1.7 3.1 3 7 3s7-1.3 7-3v-2"/></symbol>
+    <symbol id="i-home" viewBox="0 0 48 48"><path d="M7 22L24 8l17 14"/><path d="M12 19v20h9V28h6v11h9V19"/></symbol>
+    <symbol id="i-games" viewBox="0 0 48 48"><rect x="6" y="6" width="15" height="15" rx="4"/><rect x="27" y="6" width="15" height="15" rx="4"/><rect x="6" y="27" width="15" height="15" rx="4"/><rect x="27" y="27" width="15" height="15" rx="4"/></symbol>
+    <symbol id="i-ref" viewBox="0 0 48 48"><circle cx="17" cy="16" r="7"/><path d="M4 40c1-8 6-12 13-12s12 4 13 12"/><path d="M36 14v14M29 21h14"/></symbol>
+    <symbol id="i-user" viewBox="0 0 48 48"><circle cx="24" cy="16" r="9"/><path d="M8 42c1.5-9 8-14 16-14s14.5 5 16 14"/></symbol>
     <symbol id="i-out" viewBox="0 0 48 48"><path d="M24 30V8M15 17l9-9 9 9"/><path d="M8 28v8a4 4 0 004 4h24a4 4 0 004-4v-8"/></symbol>
   </svg>
 
@@ -53,15 +57,19 @@
 
       <div class="ticker" id="ticker"><div class="ticker-track" id="ticker-track"></div></div>
 
+      <div class="sec-head"><span>Популярное</span><button data-go="games">Все игры ›</button></div>
       <div class="games">
-        <button class="game" data-go="slots"><svg class="gi"><use href="#i-slots"/></svg><span class="gx">777 — NFT ×40</span><span class="gn">Слоты</span></button>
         <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10000</span><span class="gn">Краш</span></button>
-        <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×1000+</span><span class="gn">Мины</span></button>
-        <button class="game" data-go="dice"><svg class="gi"><use href="#i-dice"/></svg><span class="gx">до ×9500</span><span class="gn">Кости</span></button>
-        <button class="game wide" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">до ×100</span><span class="gn">Кейсы</span></button>
-        <button class="game accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">PvP</span><span class="gn">Рулетка</span></button>
-        <button class="game accent" data-go="hockey"><svg class="gi"><use href="#i-hockey"/></svg><span class="gx">PvP</span><span class="gn">Хоккей</span></button>
+        <button class="game" data-go="slots"><svg class="gi"><use href="#i-slots"/></svg><span class="gx">777 — NFT ×40</span><span class="gn">Слоты</span></button>
+        <button class="game accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">PvP · подарки</span><span class="gn">Рулетка</span></button>
+        <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT внутри</span><span class="gn">Кейсы</span></button>
       </div>
+
+      <button class="promo" data-go="ref">
+        <span class="promo-x">10%</span>
+        <span class="promo-t"><b>Приглашай друзей</b><small>и получай 10% от их пополнений</small></span>
+        <span class="promo-go">›</span>
+      </button>
 
       <div class="panel">
         <div class="panel-title">Активировать чек</div>
@@ -71,12 +79,98 @@
         </div>
       </div>
 
+      <p class="note">Слоты можно крутить и прямо в чате с ботом: /slot 10 — настоящий 🎰 Telegram.</p>
+      <p class="note">Пополнение — Telegram Stars, вывод — подарками Telegram. Играйте ответственно. 18+</p>
+    </section>
+
+    <!-- Игры -->
+    <section class="screen" id="games">
+      <div class="page-head"><h1>Игры</h1><p>Выберите режим — ставки в звёздах, выигрыши сразу на баланс.</p></div>
+      <div class="sec-head"><span>Казино</span></div>
+      <div class="games">
+        <button class="game" data-go="slots"><svg class="gi"><use href="#i-slots"/></svg><span class="gx">777 — NFT ×40</span><span class="gn">Слоты</span></button>
+        <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10000</span><span class="gn">Краш</span></button>
+        <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×1000+</span><span class="gn">Мины</span></button>
+        <button class="game" data-go="dice"><svg class="gi"><use href="#i-dice"/></svg><span class="gx">до ×9500</span><span class="gn">Кости</span></button>
+        <button class="game wide" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">подарки и NFT</span><span class="gn">Кейсы</span></button>
+      </div>
+      <div class="sec-head"><span>PvP — против игроков</span></div>
+      <div class="games">
+        <button class="game accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">ставки подарками</span><span class="gn">Рулетка</span></button>
+        <button class="game accent" data-go="hockey"><svg class="gi"><use href="#i-hockey"/></svg><span class="gx">ставки подарками</span><span class="gn">Хоккей</span></button>
+      </div>
+      <p class="note">В PvP шанс пропорционален ставке, казино берёт лишь комиссию 5%. Слоты можно крутить и в чате: /slot 10.</p>
+    </section>
+
+    <!-- Рефералы -->
+    <section class="screen" id="ref">
+      <div class="ref-hero">
+        <div class="ref-x"><span id="ref-rate">10</span>%</div>
+        <div class="ref-t">от каждого пополнения друзей — вам на баланс, навсегда</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Ваша ссылка</div>
+        <div class="ref-link" id="ref-link">—</div>
+        <div class="row">
+          <button class="btn" id="ref-copy">Копировать</button>
+          <button class="btn big" id="ref-share">Пригласить друга</button>
+        </div>
+      </div>
+      <div class="stats two">
+        <div class="stat"><small>Приглашено</small><b id="ref-count">0</b></div>
+        <div class="stat"><small>Заработано</small><b id="ref-earned">0 ★</b></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Как это работает</div>
+        <ol class="steps">
+          <li>Отправьте другу свою ссылку.</li>
+          <li>Друг запускает бота по ней — он становится вашим рефералом.</li>
+          <li>Каждый раз, когда он покупает звёзды, вы получаете <b><span class="ref-rate">10</span>%</b> от суммы.</li>
+        </ol>
+        <p class="note left">Бонус нужно один раз отыграть ставками, как звёзды из чеков. Пригласить можно только новых игроков.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Мои рефералы</div>
+        <div class="plist" id="ref-list"></div>
+      </div>
+    </section>
+
+    <!-- Профиль -->
+    <section class="screen" id="profile">
+      <div class="prof-head">
+        <div class="prof-av" id="prof-av"></div>
+        <div class="prof-id">
+          <div class="prof-name" id="prof-name">—</div>
+          <div class="prof-sub" id="prof-sub"></div>
+        </div>
+      </div>
+      <div class="prof-bal">
+        <div><small>Баланс</small><b id="prof-balance">0 ★</b></div>
+        <div class="prof-acts">
+          <button class="btn" data-wallet="dep">Пополнить</button>
+          <button class="btn small" data-wallet="out">Вывести</button>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><small>Игр сыграно</small><b id="prof-games">0</b></div>
+        <div class="stat"><small>Побед</small><b id="prof-wins">0</b></div>
+        <div class="stat"><small>Поставлено</small><b id="prof-wagered">0</b></div>
+        <div class="stat"><small>Выиграно</small><b id="prof-won">0</b></div>
+        <div class="stat"><small>Пополнено</small><b id="prof-deposited">0</b></div>
+        <div class="stat"><small>Выведено</small><b id="prof-withdrawn">0</b></div>
+      </div>
+      <div class="panel best hidden" id="prof-best"></div>
+      <div class="wager hidden" id="prof-wager"></div>
+      <button class="promo slim" data-wallet="nft">
+        <span class="promo-x">🎁</span>
+        <span class="promo-t"><b>Мои подарки</b><small>NFT, которые можно ставить в PvP</small></span>
+        <span class="promo-go">›</span>
+      </button>
       <div class="panel">
         <div class="panel-title">Мои игры</div>
         <div id="history" class="history"></div>
       </div>
-      <p class="note">Слоты можно крутить и прямо в чате с ботом: /slot 10 — настоящий 🎰 Telegram.</p>
-      <p class="note">Пополнение — Telegram Stars, вывод — подарками Telegram. Играйте ответственно. 18+</p>
+      <p class="note">Играйте ответственно. 18+</p>
     </section>
 
     <!-- Кошелёк: пополнение и вывод -->
@@ -262,6 +356,13 @@
     </div>
     <div class="confetti" id="confetti"></div>
   </div>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="home" class="sel"><svg><use href="#i-home"/></svg><span>Главная</span></button>
+    <button data-tab="games"><svg><use href="#i-games"/></svg><span>Игры</span></button>
+    <button data-tab="ref"><svg><use href="#i-ref"/></svg><span>Друзья</span></button>
+    <button data-tab="profile"><svg><use href="#i-user"/></svg><span>Профиль</span></button>
+  </nav>
 
   <div class="sheet hidden" id="sheet">
     <div class="sheet-box">
