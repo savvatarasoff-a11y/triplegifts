@@ -96,7 +96,8 @@ class CaseCatalog:
         models = [m for m in models if m["price"] >= price * g.NFT_CASE_MIN_PRICE_SHARE]
         if not models:
             return None
-        probs = g.nft_case_weights(price, [m["price"] for m in models], [x["stars"] for x in regular], share=d.share)
+        probs = g.nft_case_weights(price, [m["price"] for m in models], [x["stars"] for x in regular],
+                                   target_rtp=d.rtp, share=d.share)
         if probs is None:
             return None
         p_nft, p_gift = probs
@@ -109,16 +110,17 @@ class CaseCatalog:
             {"kind": "gift", "emoji": x["emoji"], "gift_id": x["id"], "amount": x["stars"], "weight": p}
             for x, p in zip(regular, p_gift) if p > 0
         ]
-        return self._finish(d.id, d.name, d.emoji, price, prizes)
+        return self._finish(d.id, d.name, d.emoji, price, prizes, min_rtp=d.rtp - g.CASE_RTP_TOLERANCE)
 
     @staticmethod
-    def _finish(case_id: str, name: str, emoji: str, price: int, prizes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    def _finish(case_id: str, name: str, emoji: str, price: int, prizes: list[dict[str, Any]],
+                min_rtp: float = g.CASE_MIN_RTP) -> dict[str, Any] | None:
         total = sum(p["weight"] for p in prizes)
         rtp = g.expected_value([(p["amount"], p["weight"]) for p in prizes]) / price
         if rtp > g.CASE_MAX_RTP:
             log.warning("Кейс %s выключен: с текущими ценами RTP %.1f%% выше допустимого", case_id, rtp * 100)
             return None
-        if rtp < g.CASE_MIN_RTP:
+        if rtp < min_rtp:
             log.info("Кейс %s скрыт: с текущими ценами RTP %.1f%% — слишком невыгоден игрокам", case_id, rtp * 100)
             return None
         for p in prizes:

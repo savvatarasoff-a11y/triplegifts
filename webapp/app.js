@@ -2277,7 +2277,7 @@ function openCaseScreen(c) {
   hero.append(caseIcon(c, "case-ic big"));
   const nftCh = caseNftChance(c);
   $("#case-meta").innerHTML = "";
-  [`RTP ${(c.rtp * 100).toFixed(1)}%`, nftCh ? `шанс NFT ${nftCh.toFixed(nftCh < 1 ? 2 : 1)}%` : null,
+  [c.rtp != null ? `RTP ${(c.rtp * 100).toFixed(1)}%` : null, nftCh ? `шанс NFT ${nftCh.toFixed(nftCh < 1 ? 2 : 1)}%` : null,
     `${c.prizes.length} призов`].filter(Boolean).forEach((txt) => {
     const s = document.createElement("span");
     s.textContent = txt;

@@ -309,7 +309,9 @@ async def test_gift_cases_get_nft_jackpot(client):
     await casino.db.conn.execute(
         "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at) VALUES "
         "('1','Lol Pop','Pink','🍭',5,400,?), ('2','Plush Pepe','Frog','🐸',1,9000,?)", (_t.time(), _t.time()))
-    cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(3))).json())["config"]["cases"]}
+    player = (await (await client.get("/api/me", headers=auth(3))).json())["config"]["cases"]
+    assert all("rtp" not in c for c in player)                           # игроки RTP не видят
+    cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(777))).json())["config"]["cases"]}
     lux = cases["lux"]
     assert max(p["amount"] for p in lux["prizes"]) > lux["price"]          # есть ради чего открывать
     jackpot = [p for p in lux["prizes"] if p["kind"] == "nft"]

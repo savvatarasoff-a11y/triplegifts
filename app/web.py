@@ -239,6 +239,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.get("/api/me")
     async def me(request: web.Request) -> web.Response:
         uid = request[USER_ID]
+        is_admin = uid in cfg.admin_ids          # RTP кейсов видит только админ
         user = await casino.db.get_user(uid)
         return web.json_response({
             "user": {"id": uid, "name": display_name(user)},
@@ -257,7 +258,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "plinko": {"rows": list(g.PLINKO_ROWS), "risks": list(g.PLINKO_RISKS),
                            "tables": {f"{r}:{k}": t for (r, k), t in g.PLINKO_TABLES.items()}},
                 "cases": [
-                    {**{k: c[k] for k in ("id", "name", "emoji", "price", "rtp")},
+                    {**{k: c[k] for k in ("id", "name", "emoji", "price")},
+                     **({"rtp": c["rtp"]} if is_admin else {}),
                      "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity",
                                                        "demo", "gift_id")}
                                 for p in c["prizes"]]}

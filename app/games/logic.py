@@ -204,16 +204,18 @@ class NftCaseDef:
     emoji: str
     price: int | None     # None — цена из настройки NFT_CASE_PRICE
     share: float          # доля цены, которая в среднем уходит на NFT
+    rtp: float = 0.87     # сколько кейс в среднем возвращает: чем дороже NFT внутри, тем меньше
 
 
 NFT_CASE_DEFS = [
-    NftCaseDef("nft_starter", "NFT Starter", "🍀", 50, 0.4),
-    NftCaseDef("nft_mini", "NFT Mini", "🎲", 100, 0.5),
-    NftCaseDef(NFT_CASE_ID, "NFT-кейс", "💎", None, 0.7),
-    NftCaseDef("nft_gold", "NFT Gold", "🏆", 500, 0.8),
-    NftCaseDef("nft_premium", "NFT Premium", "👑", 1000, 0.85),
-    NftCaseDef("nft_legend", "NFT Legend", "🐉", 2500, 0.85),
+    NftCaseDef("nft_starter", "NFT Starter", "🍀", 50, 0.4, 0.87),
+    NftCaseDef("nft_mini", "NFT Mini", "🎲", 100, 0.5, 0.86),
+    NftCaseDef(NFT_CASE_ID, "NFT-кейс", "💎", None, 0.6, 0.83),
+    NftCaseDef("nft_gold", "NFT Gold", "🏆", 500, 0.62, 0.79),
+    NftCaseDef("nft_premium", "NFT Premium", "👑", 1000, 0.66, 0.76),
+    NftCaseDef("nft_legend", "NFT Legend", "🐉", 2500, 0.66, 0.72),
 ]
+CASE_RTP_TOLERANCE = 0.07   # кейс, который с текущими ценами отдаёт меньше (rtp − 7%), не показываем
 
 
 def pick_weighted(items: Sequence[Any], weights: Sequence[float], rng: random.Random = RNG) -> Any:

@@ -145,10 +145,13 @@ def test_nft_cases_share_and_rtp():
     gifts = [15, 15, 25, 25, 50, 50, 50, 50, 100, 100, 100]
     for d in g.NFT_CASE_DEFS:
         price = d.price or 250
-        p_nft, p_gift = g.nft_case_weights(price, [3000, 8000, 20000], gifts, share=d.share)
+        p_nft, p_gift = g.nft_case_weights(price, [3000, 8000, 20000], gifts, target_rtp=d.rtp, share=d.share)
         ev = sum(p * v for p, v in zip(p_nft, [3000, 8000, 20000])) + sum(p * v for p, v in zip(p_gift, gifts))
         assert sum(p_nft) + sum(p_gift) == pytest.approx(1)
-        assert g.CASE_MIN_RTP <= ev / price <= g.CASE_MAX_RTP, d.id          # и Premium за 1000 ★ отдаёт ~87%
+        assert d.rtp - g.CASE_RTP_TOLERANCE <= ev / price <= min(d.rtp + 0.01, g.CASE_MAX_RTP), d.id
+    # чем дороже NFT-кейс, тем меньше он возвращает
+    rtps = [d.rtp for d in sorted(g.NFT_CASE_DEFS, key=lambda d: d.price or 250)]
+    assert rtps == sorted(rtps, reverse=True) and rtps[-1] < rtps[0]
 
 
 def test_house_edge_everywhere_even_with_max_rakeback():
