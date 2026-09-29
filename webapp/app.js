@@ -443,7 +443,7 @@ async function loadMe() {
   setTimeout(() => nftPreload((me.config.cases || []).flatMap((c) => c.prizes.map(prizePic).filter(Boolean))), 800);
   state.bal = { stars: me.balance, ton: me.ton || 0 };
   renderBalance();
-  $("#hello").textContent = me.user.name;
+  if ($("#hello")) $("#hello").textContent = me.user.name;
   renderHistory(me.history);
   return me;
 }

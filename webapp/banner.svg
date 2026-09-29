@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+<defs>
+  <radialGradient id="bg" cx="50%" cy="46%" r="75%">
+    <stop offset="0" stop-color="#3A2A0B"/><stop offset=".45" stop-color="#16120B"/><stop offset="1" stop-color="#060608"/>
+  </radialGradient>
+  <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+    <stop offset="0" stop-color="#FFC94D" stop-opacity=".55"/><stop offset="1" stop-color="#FFC94D" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FFEBB0"/><stop offset=".4" stop-color="#F7BE45"/><stop offset="1" stop-color="#C98010"/>
+  </linearGradient>
+  <linearGradient id="goldv" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#FFF3CF"/><stop offset="1" stop-color="#F0A92A"/>
+  </linearGradient>
+  <linearGradient id="reel" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#050505"/><stop offset=".5" stop-color="#1A160E"/><stop offset="1" stop-color="#050505"/>
+  </linearGradient>
+  <linearGradient id="coin" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FFE9A6"/><stop offset=".6" stop-color="#EFAF33"/><stop offset="1" stop-color="#B8740A"/>
+  </linearGradient>
+  <filter id="soft"><feGaussianBlur stdDeviation="3"/></filter>
+  <filter id="blur"><feGaussianBlur stdDeviation="8"/></filter>
+  <symbol id="c" viewBox="-50 -50 100 100"><circle r="46" fill="url(#coin)"/><circle r="34" fill="none" stroke="#9A6408" stroke-width="5" opacity=".5"/><path d="M-10-18h20v6H4v26h-8v-26h-6z" fill="#8A5A06" opacity=".7"/></symbol>
+  <symbol id="g" viewBox="-60 -60 120 120"><rect x="-44" y="-18" width="88" height="62" rx="12" fill="url(#gold)"/><rect x="-52" y="-34" width="104" height="24" rx="9" fill="url(#goldv)"/><rect x="-8" y="-34" width="16" height="78" fill="#1A1305"/><path d="M0-34c-10-24-40-26-40-8 0 12 22 14 40 8zM0-34c10-24 40-26 40-8 0 12-22 14-40 8z" fill="#FFF3CF"/></symbol>
+  <symbol id="s" viewBox="-20 -20 40 40"><path d="M0-20l5 15 15 5-15 5-5 15-5-15-15-5 15-5z" fill="#FFE3A3"/></symbol>
+</defs>
+<rect width="1280" height="640" fill="url(#bg)"/>
+<!-- лучи -->
+<g opacity=".10" fill="#FFD166">
+  <path d="M640 300L200 -40h120z"/><path d="M640 300L520 -40h100z"/><path d="M640 300L760 -40h100z"/><path d="M640 300L1080 -40h120z"/>
+  <path d="M640 300L-40 120v110z"/><path d="M640 300L1320 120v110z"/>
+</g>
+<ellipse cx="640" cy="300" rx="420" ry="260" fill="url(#glow)"/>
+<!-- размытые монеты на фоне -->
+<g filter="url(#blur)" opacity=".7">
+  <use href="#c" x="120" y="60" width="90" height="90"/><use href="#c" x="1090" y="420" width="110" height="110"/>
+  <use href="#c" x="980" y="40" width="70" height="70"/>
+</g>
+<!-- слот-машина 777 -->
+<g transform="translate(640 290)">
+  <rect x="-330" y="-150" width="660" height="300" rx="70" fill="url(#gold)"/>
+  <rect x="-330" y="-150" width="660" height="300" rx="70" fill="none" stroke="#FFF3CF" stroke-opacity=".6" stroke-width="4"/>
+  <g>
+    <rect x="-300" y="-120" width="184" height="240" rx="40" fill="url(#reel)"/>
+    <rect x="-92" y="-120" width="184" height="240" rx="40" fill="url(#reel)"/>
+    <rect x="116" y="-120" width="184" height="240" rx="40" fill="url(#reel)"/>
+  </g>
+  <g font-family="'DejaVu Sans','Arial Black',Arial,sans-serif" font-weight="900" font-size="190" text-anchor="middle" fill="url(#goldv)">
+    <text x="-208" y="66">7</text><text x="0" y="66">7</text><text x="208" y="66">7</text>
+  </g>
+  <rect x="-330" y="-4" width="660" height="8" fill="#FFD166" opacity=".45"/>
+  <!-- ручка -->
+  <rect x="338" y="-60" width="22" height="130" rx="11" fill="url(#gold)"/><circle cx="349" cy="-78" r="30" fill="url(#goldv)"/>
+</g>
+<!-- подарки и монеты вокруг -->
+<use href="#g" x="150" y="170" width="190" height="190" transform="rotate(-12 245 265)"/>
+<use href="#g" x="1030" y="190" width="160" height="160" transform="rotate(14 1110 270)"/>
+<use href="#c" x="290" y="40" width="80" height="80"/>
+<use href="#c" x="900" y="380" width="90" height="90"/>
+<use href="#c" x="360" y="400" width="70" height="70"/>
+<use href="#c" x="1110" y="90" width="64" height="64"/>
+<g><use href="#s" x="250" y="110" width="36" height="36"/><use href="#s" x="1010" y="120" width="44" height="44"/>
+<use href="#s" x="470" y="70" width="28" height="28"/><use href="#s" x="820" y="60" width="34" height="34"/>
+<use href="#s" x="110" y="380" width="30" height="30"/><use href="#s" x="1160" y="330" width="34" height="34"/></g>
+<!-- единственная подпись -->
+<text x="640" y="560" font-family="'DejaVu Sans','Arial Black',Arial,sans-serif" font-weight="900" font-size="58" letter-spacing="14"
+      text-anchor="middle" fill="url(#goldv)">TRIPLE GIFTS</text>
+</svg>

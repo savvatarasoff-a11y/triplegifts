@@ -54,44 +54,12 @@ def welcome_text() -> str:
     )
 
 
-def _font(size: int, bold: bool = True):
-    from PIL import ImageFont
-    for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else
-                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                 "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"):
-        if os.path.exists(path):
-            return ImageFont.truetype(path, size)
-    return ImageFont.load_default(size=size)
+BANNER = Path(__file__).resolve().parent.parent / "webapp" / "banner.png"
 
 
 def banner() -> bytes:
-    """Баннер 1280×640 в фирменном стиле: тёмный фон, фиолетовое свечение, логотип и название."""
-    from PIL import Image, ImageDraw, ImageFilter
-    w, h = 1280, 640
-    img = Image.new("RGB", (w, h), (11, 10, 16))
-    glow = Image.new("RGB", (w, h), (0, 0, 0))
-    ImageDraw.Draw(glow).ellipse((-100, -60, 760, 760), fill=(201, 133, 18))
-    ImageDraw.Draw(glow).ellipse((820, 380, 1400, 900), fill=(122, 79, 8))
-    img = Image.blend(img, glow.filter(ImageFilter.GaussianBlur(160)), 0.38)
-    logo = Image.open(AVATAR).convert("RGB").resize((420, 420))
-    mask = Image.new("L", logo.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, *logo.size), radius=96, fill=255)
-    img.paste(logo, (90, 110), mask)
-    d = ImageDraw.Draw(img)
-    d.text((580, 165), "TRIPLE", font=_font(82), fill=(245, 185, 60))
-    d.text((580 + d.textlength("TRIPLE ", font=_font(82)), 165), "GIFTS", font=_font(82), fill=(255, 255, 255))
-    d.text((584, 270), "Казино на подарках Telegram", font=_font(40, bold=False), fill=(255, 227, 163))
-    x = 584
-    for chip in ("Слоты", "Краш", "Кейсы", "NFT", "PvP"):
-        f = _font(27)
-        tw = d.textlength(chip, font=f)
-        d.rounded_rectangle((x, 352, x + tw + 30, 398), radius=23, fill=(245, 185, 60))
-        d.text((x + 15, 360), chip, font=f, fill=(26, 19, 5))
-        x += tw + 42
-    d.text((584, 450), "Stars  ·  TON  ·  NFT-подарки", font=_font(34, bold=False), fill=(255, 209, 102))
-    out = io.BytesIO()
-    img.save(out, "PNG")
-    return out.getvalue()
+    """Баннер канала 1280×640: слот «777», подарки и монеты, одна подпись TRIPLE GIFTS (исходник — webapp/banner.svg)."""
+    return BANNER.read_bytes()
 
 
 def play_keyboard(bot_username: str | None) -> InlineKeyboardMarkup | None:
