@@ -971,6 +971,18 @@ class Casino:
 
     # ---------- демо-NFT (пока идёт разработка) ----------
 
+    async def demo_fill(self, models: list[dict]) -> int:
+        """Автопополнение демо-моделей (без дюпов админу) — чтобы NFT в кейсах было больше."""
+        now = time.time()
+        async with self.db.tx() as c:
+            for m in models:
+                await c.execute(
+                    "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at, "
+                    "test) VALUES (?,?,?,?,?,999,?,?,1) ON CONFLICT(collection_id, model) DO UPDATE SET stock=999, "
+                    "price=excluded.price, price_at=excluded.price_at, enabled=1, test=1",
+                    (f"demo:{m['title']}", m["title"], m["model"], m.get("rarity"), m["emoji"], m["price"], now))
+        return len(models)
+
     async def demo_add(self, admin_id: int, models: list[dict], gifts_for_admin: int = 3) -> tuple[list[dict], list[dict]]:
         """Демо-NFT: настоящие модели с MRKT и их флор. Видны всем: в кейсах, на 777, в апгрейде.
 

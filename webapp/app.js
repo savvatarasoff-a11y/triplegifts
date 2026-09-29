@@ -2015,7 +2015,6 @@ async function crashAction() {
 // ---------- кейсы ----------
 
 let currentCase = null;
-let casesFilter = "all";
 const caseLive = { timer: 0, seen: new Set() };
 
 const caseNft = (p) => ({ collection: p.title, model: p.model, emoji: p.emoji });
@@ -2048,7 +2047,7 @@ function renderCases() {
   const all = state.config ? state.config.cases : [];
   // картинки всех NFT из кейсов качаем заранее — к открытию они уже в кэше
   nftPreload(all.flatMap((c) => c.prizes.map(prizePic).filter(Boolean)));
-  const cases = all.filter((c) => casesFilter === "all" || (casesFilter === "nft") === c.id.startsWith("nft"));
+  const cases = all;
   if (!all.length) box.innerHTML = '<div class="note">Кейсы временно недоступны — обновляем цены подарков.</div>';
   cases.forEach((c) => {
     const b = document.createElement("button");
@@ -2286,7 +2285,7 @@ function caseDropsList(r) {
     } else {
       const gid = giftIdByEmoji(it.gift);
       if (gid) s.append(nftIcon({ gift_id: gid, emoji: it.gift }, "nft-inline"), ` ${money(it.prize, r.cur)}`);
-      else s.textContent = `${it.gift} ${money(it.prize, r.cur)}`;
+      else s.textContent = it.kind === "stars" ? money(it.prize, r.cur) : `${it.gift} ${money(it.prize, r.cur)}`;
     }
     if (it.kind === "nft" || it.prize >= r.price) s.className = "good";
     drops.append(s);
@@ -2323,7 +2322,7 @@ async function openCase() {
           ? (nfts[0].nft.demo
             ? `Демо-NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}» — в профиле → «Мои подарки»`
             : `NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}»! Он в профиле → «Мои подарки»`)
-          : `${r.gift} ${money(r.prize, r.cur)}`;
+          : (r.kind === "stars" ? `+${money(r.prize, r.cur)}` : `${r.gift} ${money(r.prize, r.cur)}`);
       } else {
         res.textContent = `Выпало на ${money(r.total, r.cur)}` + (nfts.length ? " · NFT в профиле → «Мои подарки»" : "");
         caseDropsList(r);
@@ -2698,11 +2697,7 @@ function bind() {
   $("#case-demo").addEventListener("click", caseDemo);
   caseSetFast(!!store("case:fast"));
   $("#case-fast").addEventListener("click", () => caseSetFast(!caseFast));
-  $$("#cases-filter button").forEach((b) => b.addEventListener("click", () => {
-    casesFilter = b.dataset.f;
-    $$("#cases-filter button").forEach((x) => x.classList.toggle("sel", x === b));
-    renderCases();
-  }));
+
   caseCount = Math.min(5, Math.max(1, parseInt(store("case:count"), 10) || 1));
   $$("#case-count button").forEach((b) => b.addEventListener("click", () => {
     haptic();

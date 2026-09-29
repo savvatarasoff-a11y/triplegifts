@@ -226,6 +226,10 @@ def expected_value(prizes: Sequence[tuple[float, float]]) -> float:
     return sum(v * w for v, w in prizes) / total
 
 
+# звёздные призы NFT-кейсов (доли цены кейса): вероятность делится между двумя соседними уровнями
+CASE_STAR_FILLERS = (0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75)
+
+
 def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequence[int],
                      target_rtp: float = CASE_TARGET_RTP, share: float = NFT_SHARE
                      ) -> tuple[list[float], list[float]] | None:
@@ -248,6 +252,17 @@ def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequenc
     nft_ev = sum(p * pn for p, pn in zip(p_nft, nft_prices))
     need_mean = (target_rtp * price - nft_ev) / q
     p_gift = [0.0] * len(gift_prices)
+    if levels[0] < need_mean < levels[-1] and len(levels) == len(gift_prices):
+        # плавное распределение по всем уровням: веса ∝ v^(−a), a подбираем под нужное среднее
+        def mean(a: float) -> float:
+            w = [v ** -a for v in gift_prices]
+            return sum(x * v for x, v in zip(w, gift_prices)) / sum(w)
+        lo_a, hi_a = -8.0, 8.0                   # mean(a) убывает по a
+        for _ in range(80):
+            mid = (lo_a + hi_a) / 2
+            lo_a, hi_a = (mid, hi_a) if mean(mid) > need_mean else (lo_a, mid)
+        w = [v ** -hi_a for v in gift_prices]    # hi_a: среднее не выше нужного — RTP не превысит цель
+        return p_nft, [q * x / sum(w) for x in w]
     if need_mean <= levels[0]:
         lo = hi = levels[0]
         share_hi = 0.0

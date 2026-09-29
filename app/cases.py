@@ -19,53 +19,28 @@ class CaseCatalog:
         self.db = db
         self.nft_case_price = nft_case_price
 
-    async def _gift_prices(self) -> dict[str, dict[str, Any]]:
-        """Самый дешёвый обычный подарок для каждого эмодзи: {эмодзи: {id, stars}}."""
-        prices: dict[str, dict[str, Any]] = {}
-        for gift in await self.gifts.list():
-            known = prices.get(gift["emoji"])
-            if known is None or gift["stars"] < known["stars"]:
-                prices[gift["emoji"]] = gift
-        return prices
-
     async def list(self) -> list[dict[str, Any]]:
-        """Доступные кейсы с призами и вероятностями (в процентах)."""
-        try:
-            prices = await self._gift_prices()
-        except Exception:
-            log.warning("Каталог подарков недоступен — кейсы временно выключены")
-            return []
-        cases = []
-        for case in g.CASE_DEFS:
-            if any(emoji not in prices for emoji, _ in case.items):
-                log.warning("Кейс %s выключен: не все подарки есть в каталоге", case.id)
-                continue
-            prizes = [
-                {"kind": "gift", "emoji": emoji, "gift_id": prices[emoji]["id"], "amount": prices[emoji]["stars"],
-                 "weight": w}
-                for emoji, w in case.items
-            ]
-            cases.append(self._finish(case.id, case.name, case.emoji, case.price, prizes))
-        for nft_def in g.NFT_CASE_DEFS:
-            cases.append(await self._nft_case(prices, nft_def))
+        """Доступные кейсы с призами и вероятностями (в процентах). Только NFT-кейсы: NFT + звёзды."""
+        cases = [await self._nft_case(d) for d in g.NFT_CASE_DEFS]
         return [c for c in cases if c is not None]
 
-    async def _nft_case(self, prices: dict[str, dict[str, Any]], d: g.NftCaseDef) -> dict[str, Any] | None:
+    async def _nft_case(self, d: g.NftCaseDef) -> dict[str, Any] | None:
         """NFT-кейс из моделей, которые есть у релейера и чья цена проверена на маркете не позже часа назад."""
         models = await self.db.all(
             "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
             "ORDER BY price DESC",
             time.time() - PRICE_MAX_AGE,
         )
-        if not models or not prices:
+        if not models:
             return None
-        regular = sorted(prices.values(), key=lambda x: x["stars"])
         price = d.price or self.nft_case_price
+        # утешительные призы — звёзды (обычных подарков в кейсах нет)
+        fillers = sorted({max(1, round(price * k)) for k in g.CASE_STAR_FILLERS})
         # в дорогом кейсе — только NFT не дешевле половины его цены (иначе дешёвые NFT «съедают» шансы)
         models = [m for m in models if m["price"] >= price * g.NFT_CASE_MIN_PRICE_SHARE]
         if not models:
             return None
-        probs = g.nft_case_weights(price, [m["price"] for m in models], [x["stars"] for x in regular], share=d.share)
+        probs = g.nft_case_weights(price, [m["price"] for m in models], fillers, share=d.share)
         if probs is None:
             return None
         p_nft, p_gift = probs
@@ -75,8 +50,8 @@ class CaseCatalog:
             for m, p in zip(models, p_nft)
         ]
         prizes += [
-            {"kind": "gift", "emoji": x["emoji"], "gift_id": x["id"], "amount": x["stars"], "weight": p}
-            for x, p in zip(regular, p_gift) if p > 0
+            {"kind": "stars", "emoji": "⭐", "amount": amount, "weight": p}
+            for amount, p in zip(fillers, p_gift) if p > 0
         ]
         return self._finish(d.id, d.name, d.emoji, price, prizes)
 

@@ -94,6 +94,19 @@ async def prewarm_images(casino: Casino, images: NftImages) -> None:
     log.info("Картинки NFT: готово %s из %s (источники: %s)", ready, len(items), images.stats)
 
 
+DEMO_TARGET = 40   # сколько разных NFT-моделей держать в кейсах (демо — с MRKT, пока идёт разработка)
+
+
+async def top_up_demo(casino: Casino, relayer: Relayer) -> None:
+    if not relayer.ready:
+        return
+    have = (await casino.db.one("SELECT COUNT(*) n FROM nft_models WHERE test=1 AND enabled=1"))["n"]
+    if have >= DEMO_TARGET:
+        return
+    added = await casino.demo_fill(await relayer.market.sample_models(min(20, DEMO_TARGET - have)))
+    log.info("Демо-NFT: было %s, добавлено %s", have, added)
+
+
 async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, images: NftImages | None = None) -> None:
     """Каждые 10 минут обновляет запас моделей у релейера и цены с маркета."""
     while True:
@@ -105,6 +118,10 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, imag
             await reprice_demo(casino.db, relayer)
         except Exception:
             log.warning("Не удалось обновить цены демо-NFT")
+        try:
+            await top_up_demo(casino, relayer)
+        except Exception as e:
+            log.warning("Не удалось добавить демо-NFT: %s", type(e).__name__)
         if images is not None:
             try:
                 await prewarm_images(casino, images)
