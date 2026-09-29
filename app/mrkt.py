@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from typing import Any
 from urllib.parse import unquote
@@ -23,8 +24,22 @@ API = "https://api.tgmrkt.io/api/v1"
 NANO = 1_000_000_000
 PRICE_TTL = 15 * 60
 TOKEN_TTL = 12 * 3600
-RATE_TTL = 10 * 60
-STAR_USD = 0.015          # во сколько долларов обходится звезда — для автокурса TON → звёзды
+RATE_TTL = 5 * 60
+STAR_USD = 0.015          # во сколько долларов обходится звезда — для курса TON → звёзды по цене TON в $
+PRICE_CHANNEL = "tonprices"   # канал с актуальной ценой TON в долларах (обновляется раз в 5 минут)
+USD_RE = (re.compile(r"\$\s*(\d+(?:[.,]\d+)?)"), re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:\$|usd|usdt)", re.I))
+
+
+def parse_usd(text: str) -> float | None:
+    """Цена в долларах из текста вида «TON $5.43», «5,43$», «1 TON = 5.43 USD»."""
+    for rx in USD_RE:
+        for m in rx.finditer(text or ""):
+            value = float(m.group(1).replace(",", "."))
+            if 0.01 <= value <= 10_000:
+                return value
+    return None
+
+
 TON_USD_URL = "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd"
 HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -61,6 +76,7 @@ class Mrkt:
         self._token_at = 0.0
         self._prices: dict[tuple[str, str], tuple[float, float | None]] = {}
         self._rate: tuple[float, float] | None = None
+        self.rate_source: str | None = None
         self._session: aiohttp.ClientSession | None = None
 
     async def _http(self) -> aiohttp.ClientSession:
@@ -147,25 +163,50 @@ class Mrkt:
 
     # ---------- курс TON → звёзды ----------
 
+    async def ton_usd_channel(self) -> tuple[float, str] | None:
+        """Цена TON в долларах из канала @tonprices (название канала и последние посты) — через релейер."""
+        if not self.relayer.ready:
+            return None
+        client = self.relayer.client
+        entity = await client.get_entity(PRICE_CHANNEL)
+        texts = [getattr(entity, "title", "") or ""]
+        texts += [m.message or "" for m in await client.get_messages(entity, limit=5)]
+        for text in texts:
+            usd = parse_usd(text)
+            if usd:
+                return usd, text.strip()[:120]
+        return None
+
     async def ton_rate(self) -> float | None:
-        """Сколько звёзд стоит 1 TON: ручной курс админа или автокурс по цене TON."""
+        """Сколько звёзд стоит 1 TON: ручной курс админа или по цене TON из @tonprices (запасной — CoinGecko)."""
         manual = await self.relayer.db.kv_get("mrkt:ton_stars")
         if manual:
             return float(manual)
         if self._rate and time.time() - self._rate[0] < RATE_TTL:
             return self._rate[1]
+        usd, source = None, None
         try:
-            session = await self._http()
-            async with session.get(TON_USD_URL, headers={"Accept": "application/json"}) as r:
-                usd = float((await r.json())["the-open-network"]["usd"])
-            rate = usd / STAR_USD
-            self._rate = (time.time(), rate)
-            await self.relayer.db.kv_set("mrkt:ton_stars_auto", str(rate))
-            return rate
+            found = await self.ton_usd_channel()
+            if found:
+                usd, source = found[0], f"@{PRICE_CHANNEL}: {found[1]}"
         except Exception as e:
-            log.warning("Курс TON недоступен: %s", type(e).__name__)
+            log.warning("Канал @%s недоступен: %s", PRICE_CHANNEL, type(e).__name__)
+        if usd is None:
+            try:
+                session = await self._http()
+                async with session.get(TON_USD_URL, headers={"Accept": "application/json"}) as r:
+                    usd = float((await r.json())["the-open-network"]["usd"])
+                source = "CoinGecko"
+            except Exception as e:
+                log.warning("Курс TON недоступен: %s", type(e).__name__)
+        if usd is None:
             last = await self.relayer.db.kv_get("mrkt:ton_stars_auto")
             return float(last) if last else None
+        rate = usd / STAR_USD
+        self._rate = (time.time(), rate)
+        self.rate_source = f"{source} — ${usd:g}"
+        await self.relayer.db.kv_set("mrkt:ton_stars_auto", str(rate))
+        return rate
 
     async def floor_stars(self, collection: str, model: str) -> int | None:
         ton = await self.floor_ton(collection, model)

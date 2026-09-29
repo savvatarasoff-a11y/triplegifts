@@ -24,6 +24,7 @@ from .config import Config
 from .web import (DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, notify_referrer, parse_deposit_payload,
                   parse_referral, referral_link)
 from .db import REFERRAL_RATE
+from .mrkt import STAR_USD
 from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
 from .relayer import Relayer
 from . import money, ton
@@ -538,7 +539,9 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         rate = await relayer.market.ton_rate() if relayer is not None else None
         manual = await casino.db.kv_get("mrkt:ton_stars")
         await message.answer(
-            f"💱 Курс для цен MRKT: 1 TON = <b>{rate:.0f} ⭐</b> ({'задан вручную' if manual else 'авто по цене TON'})\n"
+            f"💱 Курс: 1 TON = <b>{rate:.0f} ⭐</b> ("
+            + ("задан вручную" if manual else html.escape(relayer.market.rate_source or "по цене TON из @tonprices"))
+            + f", звезда = ${STAR_USD})\n"
             "Задать: <code>/tonrate 200</code>, вернуть авто: <code>/tonrate auto</code>" if rate else
             "Курс TON недоступен — задайте вручную: <code>/tonrate 200</code>")
 

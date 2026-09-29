@@ -266,3 +266,36 @@ async def test_relayer_received_parses_senders_and_regular_gifts(env):
     assert (gift["kind"], gift["from_user"], gift["emoji"], gift["convert_stars"], gift["date"]) == (
         "gift", 42, "🧸", 13, when.timestamp())
     assert await relayer.inventory() == []                         # обычные подарки не передаются как NFT
+
+
+def test_parse_ton_usd():
+    from app.mrkt import parse_usd
+    assert parse_usd("💎 TON $5.43") == 5.43
+    assert parse_usd("TON: 5,12$ 📈") == 5.12
+    assert parse_usd("1 TON = 3.9 USD") == 3.9
+    assert parse_usd("Toncoin 📉 -2%") is None
+
+
+async def test_ton_rate_from_channel(env):
+    from app.mrkt import STAR_USD, Mrkt
+    _, db = env
+
+    class Msg:
+        def __init__(self, text):
+            self.message = text
+
+    class Client:
+        async def get_entity(self, name):
+            assert name == "tonprices"
+            return type("E", (), {"title": "TON Price"})()
+
+        async def get_messages(self, entity, limit):
+            return [Msg("💎 TON: $6.00"), Msg("old $1")]
+
+    relayer = Relayer(db, "1:x")
+    relayer.client = Client()
+    market = Mrkt(relayer)
+    assert await market.ton_rate() == pytest.approx(6.0 / STAR_USD)             # 1 TON = 400 ⭐
+    assert "@tonprices" in market.rate_source
+    await db.kv_set("mrkt:ton_stars", "250")
+    assert await market.ton_rate() == 250                                         # ручной курс важнее
