@@ -155,3 +155,34 @@ async def test_case_drops_feed(web_env):
     drops = (await r.json())["drops"]
     assert drops[0]["nft"] == {"title": "Plush Pepe", "model": "Frog", "demo": True}
     assert drops[0]["good"] and drops[0]["name"] and drops[0]["prize"] == 5000
+
+
+async def test_regular_gift_picture(tmp_path):
+    cfg = Config(bot_token=TOKEN, admin_ids=frozenset(), webapp_url="", db_path=str(tmp_path / "g.db"),
+                 port=0, min_bet=1, max_bet=1000, start_bonus=0, log_level="INFO")
+    db = Database(cfg.db_path)
+    await db.connect()
+    bot = FakeBot()
+
+    class Sticker:
+        emoji, file_id = "🧸", "sticker-file"
+
+    async def download(file_id):
+        assert file_id == "sticker-file"
+        return io.BytesIO(png())
+
+    orig = bot.get_available_gifts
+
+    async def gifts():
+        res = await orig()
+        for gift in res.gifts:
+            gift.sticker = Sticker()
+        return res
+
+    bot.get_available_gifts, bot.download = gifts, download
+    app = build_app(cfg, Casino(db, cfg), bot, None, NftImages(tmp_path / "img"))
+    async with TestClient(TestServer(app)) as c:
+        r = await c.get("/giftimg", params={"id": "id🧸"})
+        assert r.status == 200 and r.content_type == "image/webp"
+        assert (await c.get("/giftimg", params={"id": "nope"})).status == 404
+    await db.close()

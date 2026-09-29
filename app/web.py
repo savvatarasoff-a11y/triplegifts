@@ -22,7 +22,7 @@ from .games import logic as g
 from .cases import CaseCatalog
 from .gifts import withdraw as withdraw_gift
 from .nft import deliver as deliver_nft
-from .nftimg import NftImages
+from .nftimg import NftImages, render_tgs
 from .relayer import Relayer
 from .withdraw import GiftCatalog, notify_admins, notify_admins_ton
 
@@ -207,6 +207,26 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         return web.Response(body=img[0], content_type=img[1],
                             headers={"Cache-Control": "public, max-age=2592000, immutable"})
 
+    @routes.get("/giftimg")
+    async def gift_image(request: web.Request) -> web.Response:
+        """Картинка обычного подарка Telegram (стикер из каталога бота, отрисованный в WebP)."""
+        gift = await catalog.get(request.query.get("id", ""))
+        if not gift or not gift.get("file_id"):
+            raise web.HTTPNotFound()
+
+        async def from_bot() -> bytes | None:
+            buf = await bot.download(gift["file_id"])
+            data = buf.read() if buf else None
+            if data and data[:2] == b"\x1f\x8b":                 # TGS — анимированный стикер
+                return await asyncio.to_thread(render_tgs, data)
+            return data
+
+        img = await images.get(f"g|{gift['id']}", [("telegram", from_bot)])
+        if not img:
+            raise web.HTTPNotFound(headers={"Cache-Control": "public, max-age=300"})
+        return web.Response(body=img[0], content_type=img[1],
+                            headers={"Cache-Control": "public, max-age=2592000, immutable"})
+
     @routes.get("/")
     async def index(_: web.Request) -> web.FileResponse:
         return web.FileResponse(WEBAPP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
@@ -234,7 +254,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "cases": [
                     {**{k: c[k] for k in ("id", "name", "emoji", "price", "rtp")},
                      "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity",
-                                                       "demo")}
+                                                       "demo", "gift_id")}
                                 for p in c["prizes"]]}
                     for c in await cases.list()
                 ],

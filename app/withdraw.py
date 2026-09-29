@@ -40,6 +40,7 @@ class GiftCatalog:
                 "id": gift.id,
                 "stars": gift.star_count,
                 "emoji": (gift.sticker.emoji if gift.sticker else None) or "🎁",
+                "file_id": getattr(gift.sticker, "file_id", None),
             })
         items.sort(key=lambda g: (g["stars"], g["id"]))
         self._cache, self._ts = items, time.time()

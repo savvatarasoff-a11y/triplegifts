@@ -439,7 +439,7 @@ async function loadMe() {
   state.me = me;
   state.config = me.config;
   // картинки NFT из кейсов начинают качаться сразу после входа
-  setTimeout(() => nftPreload((me.config.cases || []).flatMap((c) => c.prizes.filter((p) => p.kind === "nft").map(caseNft))), 800);
+  setTimeout(() => nftPreload((me.config.cases || []).flatMap((c) => c.prizes.map(prizePic).filter(Boolean))), 800);
   state.bal = { stars: me.balance, ton: me.ton || 0 };
   renderBalance();
   $("#hello").textContent = me.user.name;
@@ -836,6 +836,7 @@ const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится" }
 // ---------- картинки NFT: превью с нашего сервера (ужатые и закэшированные) ----------
 
 function nftImgUrl(o) {
+  if (o && o.gift_id) return `/giftimg?id=${encodeURIComponent(o.gift_id)}`;   // обычный подарок Telegram
   if (!o || !o.collection) return null;
   if (o.number) {
     return `/nftimg?c=${encodeURIComponent(o.collection)}&n=${o.number}` + (o.model ? `&m=${encodeURIComponent(o.model)}` : "");
@@ -2018,13 +2019,23 @@ let casesFilter = "all";
 const caseLive = { timer: 0, seen: new Set() };
 
 const caseNft = (p) => ({ collection: p.title, model: p.model, emoji: p.emoji });
+// Картинка приза: NFT — модель, обычный подарок — его стикер
+const prizePic = (p) => (p.kind === "nft" ? (p.title ? caseNft(p) : null) : (p.gift_id ? { gift_id: p.gift_id, emoji: p.emoji } : null));
+// эмодзи обычного подарка → его id (для дропов, где сервер отдаёт только эмодзи)
+function giftIdByEmoji(emoji) {
+  for (const c of (state.config && state.config.cases) || []) {
+    const p = c.prizes.find((x) => x.kind === "gift" && x.emoji === emoji && x.gift_id);
+    if (p) return p.gift_id;
+  }
+  return null;
+}
 const caseTop = (c) => c.prizes.reduce((a, p) => (p.amount > a.amount ? p : a), c.prizes[0]);
 const caseNftChance = (c) => c.prizes.filter((p) => p.kind === "nft").reduce((a, p) => a + p.chance, 0);
 
 // Иконка кейса: картинка самого дорогого NFT внутри, иначе эмодзи кейса
 function caseIcon(c, cls) {
-  const top = caseTop(c);
-  if (top.kind === "nft" && top.title) return nftIcon(caseNft(top), cls);
+  const pic = prizePic(caseTop(c));
+  if (pic) return nftIcon(pic, cls);
   const e = document.createElement("span");
   e.className = cls;
   e.textContent = c.emoji;
@@ -2036,7 +2047,7 @@ function renderCases() {
   box.innerHTML = "";
   const all = state.config ? state.config.cases : [];
   // картинки всех NFT из кейсов качаем заранее — к открытию они уже в кэше
-  nftPreload(all.flatMap((c) => c.prizes.filter((p) => p.kind === "nft").map(caseNft)));
+  nftPreload(all.flatMap((c) => c.prizes.map(prizePic).filter(Boolean)));
   const cases = all.filter((c) => casesFilter === "all" || (casesFilter === "nft") === c.id.startsWith("nft"));
   if (!all.length) box.innerHTML = '<div class="note">Кейсы временно недоступны — обновляем цены подарков.</div>';
   cases.forEach((c) => {
@@ -2067,7 +2078,9 @@ function renderCases() {
 function caseDropEl(d) {
   const el = document.createElement("div");
   el.className = "ld" + (d.good ? " good" : "") + (d.nft ? " nft" : "");
+  const gid = !d.nft && giftIdByEmoji(d.emoji);
   const ic = d.nft && d.nft.title ? nftIcon({ collection: d.nft.title, model: d.nft.model, emoji: d.emoji }, "ld-ic")
+    : gid ? nftIcon({ gift_id: gid, emoji: d.emoji }, "ld-ic")
     : Object.assign(document.createElement("span"), { className: "ld-ic", textContent: d.emoji });
   const t = document.createElement("div");
   t.className = "ld-t";
@@ -2128,7 +2141,7 @@ function prizeTier(p, price) {
 function prizeItem(p, price) {
   const t = prizeTier(p, price);
   return { em: p.emoji, sub: p.label || (p.kind === "nft" ? (p.model || "NFT") : casePriceText(p.amount)), bg: t.bg, fg: t.fg,
-    cls: t.cls, nft: p.kind === "nft" && p.title ? caseNft(p) : null };
+    cls: t.cls, nft: prizePic(p) };
 }
 
 function pickPrize(c) {
@@ -2162,7 +2175,8 @@ function openCaseScreen(c) {
     d.className = tier.cls;
     const e = document.createElement("span");
     e.className = "em";
-    if (p.kind === "nft") e.append(nftIcon(caseNft(p), "nft-inline big"));
+    const pic = prizePic(p);
+    if (pic) e.append(nftIcon(pic, "nft-inline big"));
     else e.textContent = p.emoji;
     const sm = document.createElement("small");
     sm.textContent = (p.chance < 0.1 ? p.chance.toFixed(3) : p.chance.toFixed(2)) + "%";
@@ -2270,7 +2284,9 @@ function caseDropsList(r) {
       s.append(nftIcon({ collection: it.nft.title, model: it.nft.model, emoji: it.gift }, "nft-inline"),
         ` «${it.nft.model}»`);
     } else {
-      s.textContent = `${it.gift} ${money(it.prize, r.cur)}`;
+      const gid = giftIdByEmoji(it.gift);
+      if (gid) s.append(nftIcon({ gift_id: gid, emoji: it.gift }, "nft-inline"), ` ${money(it.prize, r.cur)}`);
+      else s.textContent = `${it.gift} ${money(it.prize, r.cur)}`;
     }
     if (it.kind === "nft" || it.prize >= r.price) s.className = "good";
     drops.append(s);
@@ -2293,7 +2309,7 @@ async function openCase() {
       $("#case-drops").classList.add("hidden");
       $("#case-result").className = "result";
       $("#case-result").textContent = n > 1 ? `Открываем ${n} кейса…` : "Открываем…";
-      await caseSpin(r.items.map((it) => ({ kind: it.kind, emoji: it.gift,
+      await caseSpin(r.items.map((it) => ({ kind: it.kind, emoji: it.gift, gift_id: it.kind === "gift" ? giftIdByEmoji(it.gift) : null,
         label: it.kind === "nft" ? (it.nft && it.nft.model) || "NFT" : money(it.prize, r.cur),
         title: it.nft && it.nft.title, model: it.nft && it.nft.model,
         amount: r.cur === "ton" ? Math.round(it.prize / NANO * (tonRate() || 0)) : it.prize })));
@@ -2309,7 +2325,7 @@ async function openCase() {
             : `NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}»! Он в профиле → «Мои подарки»`)
           : `${r.gift} ${money(r.prize, r.cur)}`;
       } else {
-        res.textContent = `Выпало на ${money(r.total, r.cur)} из ${money(r.cost, r.cur)}` + (nfts.length ? " · NFT в профиле → «Мои подарки»" : "");
+        res.textContent = `Выпало на ${money(r.total, r.cur)}` + (nfts.length ? " · NFT в профиле → «Мои подарки»" : "");
         caseDropsList(r);
       }
       haptic(good ? "win" : "lose");
