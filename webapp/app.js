@@ -582,7 +582,12 @@ async function loadMyGifts(quiet) {
     if (!data.gifts.length) box.textContent = "Пока пусто. Отправьте подарок — и он появится здесь.";
     data.gifts.forEach((gift) => {
       const card = giftCard(gift);
-      if (gift.status === "owned") {
+      if (gift.status === "owned" && gift.test) {
+        const note = document.createElement("div");
+        note.className = "s acts-note";
+        note.textContent = "Тестовая заглушка — только для апгрейда";
+        card.append(note);
+      } else if (gift.status === "owned") {
         const acts = document.createElement("div");
         acts.className = "acts";
         const sell = document.createElement("button");
@@ -649,7 +654,7 @@ async function pvpGiftSheet(game) {
   await guard(async () => {
     const data = await api("/api/gifts");
     myGifts.relayer = data.relayer;
-    const usable = data.gifts.filter((g) => g.status === "owned");
+    const usable = data.gifts.filter((g) => g.status === "owned" && !g.test);   // заглушки — не для PvP
     const list = $("#sheet-list");
     list.innerHTML = "";
     const chosen = new Set();
@@ -826,7 +831,8 @@ async function upgradeGo() {
       await sleep(4300);
       res.className = "result reveal " + (r.won ? "win" : "lose");
       if (r.won) {
-        res.textContent = `Апгрейд! ${r.nft.emoji} ${r.nft.title} «${r.nft.model}» — передаём вам в Telegram`;
+        res.textContent = `Апгрейд! ${r.nft.emoji} ${r.nft.title} «${r.nft.model}» — `
+          + (r.nft.test ? "тестовый NFT в «Моих подарках»" : "передаём вам в Telegram");
         haptic("win");
         celebrate(r.stake, r.target, $("#upg-needle"));
         fxBurstAt($(".upg-wheel"), { count: 60, speed: 6 });

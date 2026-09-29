@@ -227,6 +227,10 @@ class Database:
             if "referrer_id" not in {r["name"] for r in await cur.fetchall()}:
                 await self.conn.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
         await self.conn.execute("CREATE INDEX IF NOT EXISTS users_referrer ON users(referrer_id)")
+        for table in ("user_gifts", "nft_models"):   # тестовые NFT-заглушки для админа
+            async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
+                if "test" not in {r["name"] for r in await cur.fetchall()}:
+                    await self.conn.execute(f"ALTER TABLE {table} ADD COLUMN test INTEGER NOT NULL DEFAULT 0")
         async with self.conn.execute("PRAGMA table_info(pvp_bets)") as cur:
             if "gifts" not in {r["name"] for r in await cur.fetchall()}:
                 await self.conn.execute("ALTER TABLE pvp_bets ADD COLUMN gifts TEXT")

@@ -216,6 +216,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/nfts — модели NFT у релейера и их цены с маркета\n"
             "/nftoff, /nfton <code>номер</code> — убрать/вернуть модель в NFT-кейс\n"
             "/nftsend <code>номер выигрыша</code> — повторить передачу NFT\n"
+            "/testnft — выдать себе тестовые NFT-заглушки (для апгрейда), /testnft_clear — удалить\n"
             "/stars — звёзды релейера (из них отправляются подарки при выводе)\n"
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
@@ -440,7 +441,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             await status.edit_text(f"⚠️ Не удалось обновить: {html.escape(type(e).__name__)}: "
                                    f"{html.escape(str(e)[:300])}")
             return
-        rows = await casino.db.all("SELECT * FROM nft_models WHERE stock > 0 OR reserved > 0 ORDER BY price DESC")
+        rows = await casino.db.all("SELECT * FROM nft_models WHERE test=0 AND (stock > 0 OR reserved > 0) "
+                                   "ORDER BY price DESC")
         if not rows:
             text = f"⚠️ {html.escape(error)}" if error else "У релейера нет NFT-подарков, которые можно передать."
             await status.edit_text(text)
@@ -470,6 +472,22 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     @admin.message(Command("nfton"))
     async def nft_on(message: Message, command: CommandObject) -> None:
         await toggle_model(message, command, True)
+
+    @admin.message(Command("testnft"))
+    async def test_nft(message: Message) -> None:
+        count = await casino.test_nfts_add(message.from_user.id)
+        await message.answer(
+            f"🧪 Выдано {count} тестовых NFT — они в мини-приложении: Кошелёк → Подарки.\n"
+            "В апгрейде появились тестовые цели (видите только вы). Выигрыш — новая заглушка в «Моих подарках».\n\n"
+            "Заглушки не дают звёзд и настоящих подарков: их нельзя продать, вывести или поставить в PvP, "
+            "они не попадают в кейсы и статистику. Удалить все: /testnft_clear",
+            reply_markup=play_keyboard(cfg),
+        )
+
+    @admin.message(Command("testnft_clear"))
+    async def test_nft_clear(message: Message) -> None:
+        count = await casino.test_nfts_clear()
+        await message.answer(f"🧹 Удалено тестовых NFT: {count}. Тестовые цели апгрейда тоже убраны.")
 
     @admin.message(Command("nftsend"))
     async def nft_send(message: Message, command: CommandObject, bot: Bot) -> None:

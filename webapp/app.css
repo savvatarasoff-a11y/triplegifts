@@ -458,3 +458,4 @@ body.has-tabbar { padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
 .case-drops span { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px;
   font-weight: 800; font-size: 13px; animation: pop .3s; }
 .case-drops span.good { border-color: var(--accent); color: var(--accent-soft); }
+.mg .acts-note { grid-column: 1 / -1; color: var(--accent-soft); }

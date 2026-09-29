@@ -77,3 +77,41 @@ async def test_upgrade_rejects(env):
     with pytest.raises(GameError, match="дороже"):
         await casino.upgrade(42, ids, 1)
     assert all(x["status"] == "owned" for x in await casino.gifts(42))    # всё откатилось
+
+
+async def test_admin_test_nfts_are_sandboxed(env, monkeypatch):
+    db, casino = env
+    admin = 7
+    await db.touch_user(admin, "adm", "Admin")
+    with pytest.raises(GameError):
+        await casino.test_nfts_add(42)                                    # не админ
+    assert await casino.test_nfts_add(admin) == 3
+    mine = await casino.gifts(admin)
+    assert len(mine) == 3 and all(x["test"] and x["priced"] and x["sell"] is None for x in mine)
+    # тестовые цели видит только админ, в кейсы и 777 они не попадают
+    assert not any(t["test"] for t in await casino.upgrade_targets(42))
+    targets = [t for t in await casino.upgrade_targets(admin) if t["test"]]
+    assert [t["price"] for t in targets] == [500, 3000, 12000]
+    with pytest.raises(GameError, match="продать"):
+        await casino.gift_sell(admin, mine[0]["id"])
+    with pytest.raises(GameError, match="вывести"):
+        await casino.gift_withdraw_claim(admin, mine[0]["id"])
+    with pytest.raises(GameError, match="PvP"):
+        await casino.pvp_bet(admin, None, "roulette", [mine[0]["id"]])
+    real = next(t for t in await casino.upgrade_targets(admin) if not t["test"])
+    with pytest.raises(GameError, match="тестовые цели"):
+        await casino.upgrade(admin, [mine[0]["id"]], real["id"])          # заглушкой — в настоящую цель нельзя
+    # выигрыш тестового апгрейда — новая заглушка, без передачи релейером и без записи в статистику
+    monkeypatch.setattr(g, "upgrade_roll", lambda rng=None: 0.0)
+    cheap = min(mine, key=lambda x: x["value"])                          # 150 → 3000
+    r = await casino.upgrade(admin, [cheap["id"]], targets[1]["id"])
+    assert r["won"] and r["nft"]["test"] and r["nft"]["win_id"] is None
+    assert (await db.one("SELECT COUNT(*) n FROM nft_wins"))["n"] == 0
+    assert (await db.one("SELECT COUNT(*) n FROM bets WHERE game='upgrade'"))["n"] == 0
+    after = await casino.gifts(admin)
+    assert len(after) == 3 and any(x["value"] == 3000 for x in after)
+    # настоящая синхронизация релейера не трогает тестовые модели
+    await nft.sync(db, FakeRelayer([]))
+    assert (await db.one("SELECT stock FROM nft_models WHERE test=1 LIMIT 1"))["stock"] == 999
+    assert await casino.test_nfts_clear() == 3
+    assert await casino.gifts(admin) == [] and not any(t["test"] for t in await casino.upgrade_targets(admin))

@@ -22,6 +22,10 @@ PVP_IDLE_REFUND = 600       # одиночную ставку возвращае
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
 MAX_GIFTS_PER_BET = 20
+TEST_PRICE_UNTIL = 4_102_444_800   # 2100 год: цены тестовых NFT всегда «свежие»
+TEST_MODELS = [("Test Pepe", "Frog", "🐸", 2.5, 500), ("Test Cap", "Gold", "🧢", 1.0, 3000),
+               ("Test Star", "Diamond", "💎", 0.3, 12000)]
+TEST_GIFTS = [("Test Bear", "Brown", "🧸", 150), ("Test Rose", "Red", "🌹", 400), ("Test Ring", "Silver", "💍", 1200)]
 CASE_MAX_COUNT = 5          # сколько кейсов можно открыть за раз
 
 
@@ -294,7 +298,7 @@ class Casino:
         """Резервирует у релейера модель с ценой ближе всего к target (±SLOT_NFT_TOLERANCE)."""
         lo, hi = target * (1 - g.SLOT_NFT_TOLERANCE), target * (1 + g.SLOT_NFT_TOLERANCE)
         async with c.execute(
-            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price BETWEEN ? AND ? "
+            "SELECT * FROM nft_models WHERE enabled=1 AND test=0 AND stock > reserved AND price BETWEEN ? AND ? "
             "AND price_at > ? ORDER BY ABS(price - ?) LIMIT 1",
             (lo, hi, time.time() - NFT_PRICE_MAX_AGE, target),
         ) as q:
@@ -610,9 +614,11 @@ class Casino:
     @classmethod
     def _gift_view(cls, r: dict, now: float) -> dict:
         fresh = bool(r["value"]) and now - (r["priced_at"] or 0) < NFT_PRICE_MAX_AGE
-        return {"id": r["id"], "kind": r["kind"], "title": cls.gift_title(r), "model": r["model"],
-                "emoji": r["emoji"] or "🎁", "rarity": r["rarity"], "value": r["value"], "priced": fresh,
-                "status": r["status"], "sell": int(r["value"] * GIFT_SELL_RATE) if fresh else None,
+        test = bool(r.get("test"))
+        return {"id": r["id"], "kind": r["kind"], "title": ("🧪 " if test else "") + cls.gift_title(r),
+                "model": r["model"], "emoji": r["emoji"] or "🎁", "rarity": r["rarity"], "value": r["value"],
+                "priced": fresh, "status": r["status"], "test": test,
+                "sell": int(r["value"] * GIFT_SELL_RATE) if fresh and not test else None,
                 "locked_until": r["transfer_at"] if r["transfer_at"] > now else None}
 
     async def gifts(self, user_id: int) -> list[dict]:
@@ -631,7 +637,7 @@ class Casino:
         return sorted(set(gifts))
 
     async def _take_gifts(self, c: aiosqlite.Connection, user_id: int, ids: list[int],
-                          round_id: int | None) -> list[dict]:
+                          round_id: int | None, allow_test: bool = False) -> list[dict]:
         now = time.time()
         taken = []
         for gift_id in ids:
@@ -640,6 +646,8 @@ class Casino:
                 row = await q.fetchone()
             if not row or row["status"] != "owned":
                 raise GameError("Этот подарок уже поставлен или выведен")
+            if row["test"] and not allow_test:
+                raise GameError("Тестовые NFT работают только в апгрейде — в PvP против живых игроков их ставить нельзя")
             if not row["value"] or now - (row["priced_at"] or 0) >= NFT_PRICE_MAX_AGE:
                 raise GameError(f"Цена {self.gift_title(dict(row))} ещё проверяется на маркете — попробуйте позже")
             await c.execute("UPDATE user_gifts SET status='staked', round_id=? WHERE id=?", (round_id, gift_id))
@@ -657,6 +665,8 @@ class Casino:
                 row = await q.fetchone()
             if not row or row["status"] != "owned":
                 raise GameError("Этот подарок уже поставлен или выведен")
+            if row["test"]:
+                raise GameError("Тестовый NFT нельзя продать")
             if not row["value"] or now - (row["priced_at"] or 0) >= NFT_PRICE_MAX_AGE:
                 raise GameError("Цена подарка ещё проверяется на маркете — попробуйте позже")
             amount = int(row["value"] * GIFT_SELL_RATE)
@@ -673,6 +683,8 @@ class Casino:
                 row = await q.fetchone()
             if not row or row["status"] != "owned":
                 raise GameError("Этот подарок уже поставлен или выведен")
+            if row["test"]:
+                raise GameError("Тестовый NFT нельзя вывести — это заглушка")
             if row["transfer_at"] > time.time():
                 raise GameError("Telegram пока не даёт передать этот подарок — попробуйте позже")
             await c.execute("UPDATE user_gifts SET status='withdrawing' WHERE id=?", (gift_id,))
@@ -685,13 +697,46 @@ class Casino:
 
     # ---------- апгрейд NFT ----------
 
-    async def upgrade_targets(self) -> list[dict]:
-        """NFT-модели казино, на которые можно апгрейдиться: есть свободный подарок и свежая цена."""
+    async def upgrade_targets(self, user_id: int | None = None) -> list[dict]:
+        """NFT-модели казино, на которые можно апгрейдиться: есть свободный подарок и свежая цена.
+
+        Тестовые модели видит только админ.
+        """
         rows = await self.db.all(
             "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
-            "ORDER BY price", time.time() - NFT_PRICE_MAX_AGE)
-        return [{"id": r["id"], "title": r["collection_name"], "model": r["model"], "emoji": r["emoji"] or "💎",
-                 "rarity": r["rarity"], "price": r["price"]} for r in rows]
+            "AND (test=0 OR ?) ORDER BY test, price", time.time() - NFT_PRICE_MAX_AGE, int(user_id in self.cfg.admin_ids))
+        return [{"id": r["id"], "title": ("🧪 " if r["test"] else "") + r["collection_name"], "model": r["model"],
+                 "emoji": r["emoji"] or "💎", "rarity": r["rarity"], "price": r["price"], "test": bool(r["test"])}
+                for r in rows]
+
+    # ---------- тестовые NFT (заглушки для админа) ----------
+
+    async def test_nfts_add(self, admin_id: int) -> int:
+        """Выдаёт админу тестовые NFT и создаёт тестовые цели апгрейда. Звёзд и реальных подарков они не дают."""
+        if admin_id not in self.cfg.admin_ids:
+            raise GameError("Только для админа")
+        now = time.time()
+        async with self.db.tx() as c:
+            for name, model, emoji, rarity, price in TEST_MODELS:
+                await c.execute(
+                    "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at, "
+                    "test) VALUES ('test',?,?,?,?,999,?,?,1) ON CONFLICT(collection_id, model) DO UPDATE SET stock=999, "
+                    "price=excluded.price, price_at=excluded.price_at, enabled=1, test=1",
+                    (name, model, rarity, emoji, price, TEST_PRICE_UNTIL))
+            for name, model, emoji, price in TEST_GIFTS:
+                await c.execute(
+                    "INSERT INTO user_gifts(user_id, ref, kind, collection_id, collection_name, number, model, emoji, "
+                    "rarity, value, priced_at, status, created_at, test) "
+                    "VALUES (?,?,'nft','test',?,?,?,?,1.0,?,?,'owned',?,1)",
+                    (admin_id, f"test:{secrets.token_hex(8)}", name, secrets.randbelow(9000) + 1000, model, emoji,
+                     price, TEST_PRICE_UNTIL, now))
+        return len(TEST_GIFTS)
+
+    async def test_nfts_clear(self) -> int:
+        async with self.db.tx() as c:
+            cur = await c.execute("DELETE FROM user_gifts WHERE test=1")
+            await c.execute("DELETE FROM nft_models WHERE test=1")
+        return cur.rowcount
 
     async def upgrade(self, user_id: int, gifts: Any, target_id: Any) -> dict:
         """Ставка — только свои NFT, цель — модель казино подороже.
@@ -710,9 +755,11 @@ class Casino:
                 (target_id, now - NFT_PRICE_MAX_AGE),
             ) as q:
                 target = await q.fetchone()
-            if not target:
+            if not target or (target["test"] and user_id not in self.cfg.admin_ids):
                 raise GameError("Этой цели сейчас нет — выберите другую")
-            staked = await self._take_gifts(c, user_id, gift_ids, None)
+            staked = await self._take_gifts(c, user_id, gift_ids, None, allow_test=True)
+            if any(bool(x["test"]) != bool(target["test"]) for x in staked):
+                raise GameError("Тестовые NFT апгрейдятся только в тестовые цели, настоящие — только в настоящие")
             stake = sum(x["value"] for x in staked)
             if stake >= target["price"]:
                 raise GameError("Цель должна стоить дороже ставки")
@@ -726,7 +773,17 @@ class Casino:
             detail: dict[str, Any] = {"target": target["id"], "model": target["model"], "chance": round(chance, 4),
                                       "roll": round(roll, 4), "gifts": gift_ids}
             nft = None
-            if won:
+            if won and target["test"]:
+                # заглушка: вместо передачи релейером — новый тестовый NFT в «Мои подарки»
+                await c.execute(
+                    "INSERT INTO user_gifts(user_id, ref, kind, collection_id, collection_name, number, model, emoji, "
+                    "rarity, value, priced_at, status, created_at, test) "
+                    "VALUES (?,?,'nft','test',?,?,?,?,?,?,?,'owned',?,1)",
+                    (user_id, f"test:{secrets.token_hex(8)}", target["collection_name"], secrets.randbelow(9000) + 1000,
+                     target["model"], target["emoji"], target["rarity"], target["price"], TEST_PRICE_UNTIL, now))
+                nft = {"win_id": None, "test": True, "title": "🧪 " + target["collection_name"], "model": target["model"],
+                       "emoji": target["emoji"] or "💎", "price": target["price"]}
+            elif won:
                 await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=?", (target["id"],))
                 win = await c.execute(
                     "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
@@ -735,8 +792,12 @@ class Casino:
                 detail["nft_win"] = win.lastrowid
                 nft = {"win_id": win.lastrowid, "title": target["collection_name"], "model": target["model"],
                        "emoji": target["emoji"] or "💎", "price": target["price"]}
-            await self.db.log_bet(c, user_id, "upgrade", stake, target["price"] if won else 0,
-                                  json.dumps(detail, ensure_ascii=False))
+            if target["test"]:
+                await c.execute(f"DELETE FROM user_gifts WHERE test=1 AND id IN ({','.join('?' * len(gift_ids))})",
+                                gift_ids)       # заглушки не пополняют запас казино и не пишутся в статистику
+            else:
+                await self.db.log_bet(c, user_id, "upgrade", stake, target["price"] if won else 0,
+                                      json.dumps(detail, ensure_ascii=False))
         return {"won": won, "chance": chance, "roll": roll, "stake": stake, "target": target["price"], "nft": nft}
 
     # ---------- PvP-рулетка ----------
