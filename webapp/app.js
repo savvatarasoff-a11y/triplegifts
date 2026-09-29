@@ -14,12 +14,12 @@ const TABS = ["home", "games", "ref", "profile"];   // страницы нижн
 const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko",
   cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного фиолетового и белый: [фон, цвет текста]
-const PVP_COLORS = [["#8B5CF6", "#FFFFFF"], ["#FFFFFF", "#0B0A10"], ["#6D28D9", "#FFFFFF"], ["#C4B5FD", "#0B0A10"],
-  ["#4C1D95", "#FFFFFF"], ["#EDE9FE", "#0B0A10"], ["#7C3AED", "#FFFFFF"], ["#A78BFA", "#0B0A10"]];
+const PVP_COLORS = [["#F5B93C", "#FFFFFF"], ["#FFFFFF", "#0A0A0D"], ["#C98512", "#FFFFFF"], ["#FFE3A3", "#0A0A0D"],
+  ["#7A4F08", "#FFFFFF"], ["#FFF4DC", "#0A0A0D"], ["#E0A020", "#FFFFFF"], ["#FFD166", "#0A0A0D"]];
 const WD_STATUS = { pending: "на проверке", sending: "отправляется", sent: "отправлен", rejected: "отклонён" };
 const BIG_WIN_X = 10;
-const COLOR = { accent: "#8B5CF6", soft: "#A78BFA", pale: "#EDE9FE", deep: "#6D28D9", white: "#FFFFFF", muted: "#5E5977", bg: "#0B0A10" };
-const FX_COLORS = [COLOR.accent, COLOR.soft, COLOR.white, COLOR.deep, "#C4B5FD"];
+const COLOR = { accent: "#F5B93C", soft: "#FFD166", pale: "#FFF4DC", deep: "#C98512", white: "#FFFFFF", muted: "#6A665C", bg: "#0A0A0D" };
+const FX_COLORS = [COLOR.accent, COLOR.soft, COLOR.white, COLOR.deep, "#FFE3A3"];
 
 // ---------- утилиты ----------
 
@@ -1594,11 +1594,11 @@ function plkGeom(w, h) {
 }
 
 function plkColor(m) {
-  if (m >= 10) return ["#FFFFFF", "#0B0A10"];
-  if (m >= 3) return ["#C4B5FD", "#0B0A10"];
-  if (m >= 1.2) return ["#8B5CF6", "#FFFFFF"];
-  if (m >= 1) return ["#6D28D9", "#FFFFFF"];
-  return ["#2A2440", "#C4B5FD"];
+  if (m >= 10) return ["#FFFFFF", "#0A0A0D"];
+  if (m >= 3) return ["#FFE3A3", "#0A0A0D"];
+  if (m >= 1.2) return ["#F5B93C", "#FFFFFF"];
+  if (m >= 1) return ["#C98512", "#FFFFFF"];
+  return ["#2C2A24", "#FFE3A3"];
 }
 
 function plkDraw(now) {
@@ -1641,7 +1641,7 @@ function plkDraw(now) {
   plk.balls.forEach((b) => {
     const pos = plkBallPos(b, now, G);
     ctx.fillStyle = "#FFFFFF";
-    ctx.shadowColor = "rgba(167, 139, 250, .9)";
+    ctx.shadowColor = "rgba(255, 209, 102, .9)";
     ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, Math.max(4, G.gap * 0.17), 0, Math.PI * 2);
@@ -2248,11 +2248,11 @@ function casePriceText(starsAmount, up) {
 // Редкость приза по отношению к цене кейса
 function prizeTier(p, price) {
   const ratio = p.amount / price;
-  if (p.kind === "nft" || ratio >= 20) return { cls: "t-leg", name: "легендарный", bg: "#FFFFFF", fg: "#0B0A10" };
-  if (ratio >= 3) return { cls: "t-epic", name: "эпический", bg: "#A78BFA", fg: "#0B0A10" };
-  if (ratio >= 1.5) return { cls: "t-rare", name: "редкий", bg: "#8B5CF6", fg: "#FFFFFF" };
-  if (ratio >= 1) return { cls: "t-unc", name: "окупает", bg: "#6D28D9", fg: "#FFFFFF" };
-  return { cls: "t-com", name: "обычный", bg: "#242033", fg: "#FFFFFF" };
+  if (p.kind === "nft" || ratio >= 20) return { cls: "t-leg", name: "легендарный", bg: "#FFFFFF", fg: "#0A0A0D" };
+  if (ratio >= 3) return { cls: "t-epic", name: "эпический", bg: "#FFD166", fg: "#0A0A0D" };
+  if (ratio >= 1.5) return { cls: "t-rare", name: "редкий", bg: "#F5B93C", fg: "#FFFFFF" };
+  if (ratio >= 1) return { cls: "t-unc", name: "окупает", bg: "#C98512", fg: "#FFFFFF" };
+  return { cls: "t-com", name: "обычный", bg: "#26252E", fg: "#FFFFFF" };
 }
 
 function prizeItem(p, price) {
@@ -2644,7 +2644,7 @@ function zonesFromPlayers(players) {
 function hockeyDrawField(players, zones, highlight) {
   const { ctx, k, c } = hockeyCtx();
   ctx.clearRect(0, 0, c.width, c.height);
-  ctx.fillStyle = "#0E0C16";
+  ctx.fillStyle = "#0F0E12";
   ctx.fillRect(0, 0, c.width, c.height);
   (players || []).forEach((p, i) => {
     const [y0, y1] = zones[i];
@@ -2880,7 +2880,7 @@ async function init() {
   if (tg) {
     tg.ready();
     tg.expand();
-    try { tg.setHeaderColor("#0B0A10"); tg.setBackgroundColor("#0B0A10"); } catch (e) { /* старые клиенты */ }
+    try { tg.setHeaderColor("#0A0A0D"); tg.setBackgroundColor("#0A0A0D"); } catch (e) { /* старые клиенты */ }
   }
   betBoxes();
   bind();
