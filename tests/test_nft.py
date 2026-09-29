@@ -204,7 +204,7 @@ async def test_relayer_inventory_and_paid_transfer(env):
     def saved(num, msg_id, transfer=0, locked=False):
         gift = T.StarGiftUnique(id=num, gift_id=100, title="Plush Pepe", slug=f"pp-{num}", num=num,
                                 attributes=[model], availability_issued=1, availability_total=1)
-        until = datetime.now(timezone.utc) + timedelta(days=1) if locked else None
+        until = int((datetime.now(timezone.utc) + timedelta(days=1)).timestamp()) if locked else None  # в MTProto — int
         return T.SavedStarGift(date=None, gift=gift, msg_id=msg_id, transfer_stars=transfer, can_transfer_at=until)
 
     calls = []

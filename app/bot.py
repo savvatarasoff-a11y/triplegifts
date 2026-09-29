@@ -427,7 +427,9 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         try:
             count, error = await sync_nfts(casino.db, relayer)
         except Exception as e:
-            await status.edit_text(f"⚠️ Не удалось обновить: {html.escape(type(e).__name__)}")
+            log.exception("Не удалось обновить NFT-модели")
+            await status.edit_text(f"⚠️ Не удалось обновить: {html.escape(type(e).__name__)}: "
+                                   f"{html.escape(str(e)[:300])}")
             return
         rows = await casino.db.all("SELECT * FROM nft_models WHERE stock > 0 OR reserved > 0 ORDER BY price DESC")
         if not rows:

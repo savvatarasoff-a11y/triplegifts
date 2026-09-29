@@ -25,6 +25,15 @@ class RelayerError(Exception):
     pass
 
 
+def _ts(value: Any) -> float:
+    """Время из MTProto: где-то это datetime (date), где-то unix-число (can_transfer_at)."""
+    if not value:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    return value.timestamp()
+
+
 def _fernet(bot_token: str) -> Fernet:
     return Fernet(base64.urlsafe_b64encode(hashlib.sha256(("relayer:" + bot_token).encode()).digest()))
 
@@ -197,8 +206,8 @@ class Relayer:
                 base = {
                     "ref": saved.msg_id,
                     "from_user": saved.from_id.user_id if isinstance(saved.from_id, PeerUser) else None,
-                    "date": saved.date.timestamp() if saved.date else 0.0,
-                    "transfer_at": saved.can_transfer_at.timestamp() if saved.can_transfer_at else 0.0,
+                    "date": _ts(saved.date),
+                    "transfer_at": _ts(saved.can_transfer_at),
                     "transfer_stars": saved.transfer_stars or 0,
                 }
                 if isinstance(gift, StarGiftUnique):
