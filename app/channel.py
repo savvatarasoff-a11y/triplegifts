@@ -1,4 +1,4 @@
-"""Канал проекта (@A_giftss): оформление, приветственный пост и автопостинг крупных выигрышей.
+"""Канал проекта (@TripleGifts): оформление, приветственный пост и автопостинг крупных выигрышей.
 
 Бот должен быть админом канала с правами «публикация», «изменение профиля канала» и «закрепление».
 """
@@ -20,7 +20,7 @@ from .db import Database
 
 log = logging.getLogger(__name__)
 
-CHANNEL = os.getenv("CHANNEL", "").strip() or "@A_giftss"
+CHANNEL = os.getenv("CHANNEL", "").strip() or "@TripleGifts"
 TITLE = "Triple Gifts — казино на подарках"
 DESCRIPTION = ("🎁 Казино на подарках Telegram: слоты, краш, мины, кейсы с NFT, апгрейд и PvP.\n"
                "Пополнение — ⭐ Stars и 💎 TON, вывод — подарками и NFT.\n"

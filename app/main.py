@@ -198,12 +198,12 @@ async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
             log.warning("Имя бота не обновлено")
         try:
             await bot.set_my_short_description("🎁 Казино на подарках Telegram: слоты, краш, кейсы с NFT, "
-                                               "апгрейд и PvP. Новости — @A_giftss")
+                                               "апгрейд и PvP. Новости — @TripleGifts")
             await bot.set_my_description(
                 "🎁 Triple Gifts — казино на подарках Telegram.\n\n"
                 "🎰 Слоты · 🚀 Краш · 💣 Мины · 🟣 Plinko · 📦 Кейсы с NFT · ⬆️ Апгрейд · ⚔️ PvP\n"
                 "💸 Пополнение — Stars и TON, вывод — подарками и NFT.\n\n"
-                "Нажмите «Старт» и откройте мини-приложение. Канал: @A_giftss. 18+")
+                "Нажмите «Старт» и откройте мини-приложение. Канал: @TripleGifts. 18+")
         except Exception:
             log.warning("Описание бота не обновлено")
         if cfg.webapp_url:

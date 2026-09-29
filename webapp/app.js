@@ -2789,7 +2789,7 @@ function bind() {
   $("#check-btn").addEventListener("click", activateCheck);
   $("#chk-create").addEventListener("click", createCheck);
   $("#channel-btn").addEventListener("click", () => {
-    const url = `https://t.me/${(state.config && state.config.channel) || "A_giftss"}`;
+    const url = `https://t.me/${(state.config && state.config.channel) || "TripleGifts"}`;
     if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
     else window.open(url, "_blank");
   });
