@@ -50,13 +50,40 @@ class Relayer:
 
     async def _get(self, key: str) -> str | None:
         raw = await self.db.kv_get(f"relayer:{key}")
-        if raw is None:
-            return None
-        try:
-            return self._f.decrypt(raw.encode()).decode()
-        except InvalidToken:
+        if raw is not None:
+            try:
+                return self._f.decrypt(raw.encode()).decode()
+            except InvalidToken:
+                pass
+        # бот сменили: настройки заранее перешифрованы под новый токен (/rekey) — переносим их
+        staged = await self.db.kv_get(f"relayer_next:{key}")
+        if staged is not None:
+            try:
+                value = self._f.decrypt(staged.encode()).decode()
+            except InvalidToken:
+                value = None
+            if value is not None:
+                await self._set(key, value)
+                await self.db.kv_set(f"relayer_next:{key}", None)
+                log.info("Настройки релейера (%s) перенесены под новый токен бота", key)
+                return value
+        if raw is not None:
             log.warning("Не удалось расшифровать настройки релейера (сменился токен бота?)")
-            return None
+        return None
+
+    async def stage_rekey(self, new_token: str) -> int:
+        """Перед сменой бота: копия настроек релейера, зашифрованная ключом нового токена.
+
+        Текущие настройки не трогаем — старый бот продолжает работать; новый бот подхватит копию при запуске.
+        """
+        f = _fernet(new_token)
+        done = 0
+        for key in ("api_id", "api_hash", "session"):
+            value = await self._get(key)
+            if value is not None:
+                await self.db.kv_set(f"relayer_next:{key}", f.encrypt(value.encode()).decode())
+                done += 1
+        return done
 
     async def _set(self, key: str, value: str | None) -> None:
         await self.db.kv_set(f"relayer:{key}", None if value is None else self._f.encrypt(value.encode()).decode())

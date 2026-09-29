@@ -559,6 +559,35 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         count = await casino.demo_clear()
         await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
 
+    @admin.message(Command("rekey"))
+    async def rekey(message: Message, command: CommandObject) -> None:
+        """Подготовка к переезду на нового бота: релейер перешифровывается под новый токен (без повторного входа)."""
+        import re
+        token = (command.args or "").strip()
+        try:
+            await message.delete()                 # токен не должен висеть в чате
+        except Exception:
+            pass
+        if not re.fullmatch(r"\d+:[A-Za-z0-9_-]{30,}", token):
+            await message.answer("Формат: <code>/rekey токен_нового_бота</code>")
+            return
+        probe = Bot(token)
+        try:
+            new_me = await probe.get_me()
+        except Exception:
+            await message.answer("⚠️ Telegram не принял этот токен — проверьте его в @BotFather")
+            return
+        finally:
+            await probe.session.close()
+        if relayer is None:
+            await message.answer("Релейер не настроен — переносить нечего.")
+            return
+        count = await relayer.stage_rekey(token)
+        await message.answer(
+            f"✅ Релейер подготовлен для @{new_me.username} ({count} из 3 настроек).\n"
+            "Теперь замените секрет <b>BOT_TOKEN</b> в GitHub на новый токен и перезапустите хостинг — "
+            "новый бот подхватит релейер без повторного входа. Сообщение с токеном я удалил.")
+
     @admin.message(Command("rebrand"))
     async def rebrand(message: Message, command: CommandObject, bot: Bot) -> None:
         """Переименование в Triple Gifts: бот (имя) и аккаунт-релейер (имя, описание, аватарка, юзернейм)."""

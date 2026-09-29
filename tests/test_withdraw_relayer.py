@@ -118,3 +118,21 @@ async def test_relayer_send_gift_mtproto(tmp_path):
     with pytest.raises(RelayerError, match="NEED_CONTACT"):
         await relayer.send_gift("1", 44, None)
     await db.close()
+
+
+async def test_relayer_survives_bot_token_change(tmp_path):
+    """Смена бота: /rekey кладёт копию настроек под новый токен, новый бот её подхватывает."""
+    from app.db import Database
+    from app.relayer import Relayer
+    db = Database(str(tmp_path / "r.db"))
+    await db.connect()
+    old = Relayer(db, "111:old-token")
+    await old.set_api(12345, "hash")
+    await old._set("session", "SESSION")
+    assert await old.stage_rekey("222:new-token") == 3
+    assert await old._get("session") == "SESSION"                 # старый бот продолжает работать
+    new = Relayer(db, "222:new-token")
+    assert await new._get("session") == "SESSION" and await new._get("api_id") == "12345"
+    assert await db.kv_get("relayer_next:session") is None         # копия перенесена в основные настройки
+    assert await Relayer(db, "222:new-token")._get("api_hash") == "hash"
+    await db.close()
