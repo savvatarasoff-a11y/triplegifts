@@ -540,3 +540,4 @@ button { -webkit-user-select: none; user-select: none; }
 .result.reveal { animation: pop .35s; }
 .screen.active { animation: rise .28s cubic-bezier(.2, .8, .3, 1); }
 ::-webkit-scrollbar { width: 0; height: 0; }
+.controls .row .btn.big { flex: 1; width: auto; min-width: 0; }

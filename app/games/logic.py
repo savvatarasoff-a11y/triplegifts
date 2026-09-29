@@ -154,9 +154,36 @@ CASE_DEFS = [
         ("🧸", 12), ("💝", 10), ("🌹", 16), ("🎁", 12), ("🎂", 12), ("🚀", 12), ("🍾", 10),
         ("🏆", 7), ("💍", 5), ("💎", 4),
     )),
+    CaseDef("heart", "Сердечко", "💝", 20, (
+        ("💝", 47), ("🧸", 40), ("🌹", 7), ("🎁", 3), ("🎂", 1), ("🚀", 1), ("💎", 1),
+    )),
+    CaseDef("party", "Праздник", "🎂", 60, (
+        ("🧸", 10), ("💝", 8), ("🌹", 8), ("🎁", 6), ("🎂", 14), ("💐", 12), ("🍾", 10), ("🚀", 10),
+        ("🏆", 8), ("💍", 8), ("💎", 7),
+    )),
+    CaseDef("lux", "Люкс", "💍", 105, (
+        ("🎂", 5), ("💐", 5), ("🍾", 4), ("🚀", 4), ("🏆", 28), ("💍", 27), ("💎", 27),
+    )),
 ]
+CASE_MIN_RTP = 0.8       # кейс, который с текущими ценами отдаёт игрокам меньше 80%, не показываем
 NFT_CASE_ID = "nft"
 NFT_SHARE = 0.5          # доля цены NFT-кейса, которая в среднем уходит на NFT
+
+
+@dataclass(frozen=True)
+class NftCaseDef:
+    id: str
+    name: str
+    emoji: str
+    price: int | None     # None — цена из настройки NFT_CASE_PRICE
+    share: float          # доля цены, которая в среднем уходит на NFT
+
+
+NFT_CASE_DEFS = [
+    NftCaseDef("nft_mini", "NFT Mini", "🎲", 100, 0.5),
+    NftCaseDef(NFT_CASE_ID, "NFT-кейс", "💎", None, NFT_SHARE),
+    NftCaseDef("nft_premium", "NFT Premium", "👑", 1000, 0.8),
+]
 
 
 def pick_weighted(items: Sequence[Any], weights: Sequence[float], rng: random.Random = RNG) -> Any:
@@ -170,7 +197,8 @@ def expected_value(prizes: Sequence[tuple[float, float]]) -> float:
 
 
 def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequence[int],
-                     target_rtp: float = CASE_TARGET_RTP) -> tuple[list[float], list[float]] | None:
+                     target_rtp: float = CASE_TARGET_RTP, share: float = NFT_SHARE
+                     ) -> tuple[list[float], list[float]] | None:
     """Вероятности для NFT-кейса: (вероятности NFT, вероятности обычных подарков).
 
     Каждый NFT в среднем «съедает» равную часть NFT_SHARE·цены: p_i = NFT_SHARE·C / (n·P_i).
@@ -181,7 +209,7 @@ def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequenc
         return None
     levels = sorted(set(gift_prices))
     n = len(nft_prices)
-    p_nft = [NFT_SHARE * price / (n * pn) for pn in nft_prices]
+    p_nft = [share * price / (n * pn) for pn in nft_prices]
     total_nft = sum(p_nft)
     if total_nft > 0.5:                        # NFT слишком дешёвые относительно кейса
         p_nft = [p * 0.5 / total_nft for p in p_nft]

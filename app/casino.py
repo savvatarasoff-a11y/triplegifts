@@ -621,26 +621,49 @@ class Casino:
                     await c.execute(
                         "UPDATE crash_bets SET win=0 WHERE round_id=? AND user_id=?", (rnd["id"], bet["user_id"])
                     )
+                    await self._crash_gifts_settle(c, bet, bet["user_id"], won=False)
                     await self.db.log_bet(
                         c, bet["user_id"], "crash", bet["bet"], 0,
                         json.dumps({"round": rnd["id"], "point": point, "cashout": None}), bet["cur"],
                     )
 
+    @staticmethod
+    async def _crash_gifts_settle(c: aiosqlite.Connection, bet: dict, user_id: int, won: bool) -> int:
+        """NFT из ставки в краше: успел вывести — NFT возвращаются, не успел — уходят казино. Возвращает их стоимость."""
+        gifts = json.loads(bet["gifts"]) if bet.get("gifts") else []
+        if not gifts:
+            return 0
+        ids = [x["id"] for x in gifts]
+        await c.execute(f"UPDATE user_gifts SET status=? WHERE user_id=? AND status='staked' AND id IN "
+                        f"({','.join('?' * len(ids))})", ("owned" if won else "lost", user_id, *ids))
+        return sum(x["value"] for x in gifts)
+
     async def _crash_pay(self, c: aiosqlite.Connection, rnd: dict, bet: dict, multiplier: float) -> int:
+        """Вывод: выигрыш = ставка × множитель. Поставленные NFT возвращаются, остальное — звёздами."""
         win = g.payout(bet["bet"], multiplier)
         await c.execute(
             "UPDATE crash_bets SET cashout=?, win=? WHERE round_id=? AND user_id=?",
             (multiplier, win, rnd["id"], bet["user_id"]),
         )
-        balance = await self._settle(
-            c, bet["user_id"], "crash", bet["bet"], win,
-            {"round": rnd["id"], "point": rnd["point"], "cashout": multiplier}, bet["cur"],
-        )
-        return balance
+        gifts_value = await self._crash_gifts_settle(c, bet, bet["user_id"], won=True)
+        detail = {"round": rnd["id"], "point": rnd["point"], "cashout": multiplier}
+        if not gifts_value:
+            return await self._settle(c, bet["user_id"], "crash", bet["bet"], win, detail, bet["cur"])
+        profit = max(0, win - gifts_value)
+        if profit:
+            await self.db.change_balance(c, bet["user_id"], profit, "win", "crash", bet["cur"])
+        await self.db.log_bet(c, bet["user_id"], "crash", bet["bet"], win,
+                              json.dumps({**detail, "gifts": gifts_value}, ensure_ascii=False), bet["cur"])
+        return await self._balance(c, bet["user_id"], bet["cur"])
 
-    async def crash_bet(self, user_id: int, bet: Any, auto: Any = None, cur: Any = money.STARS) -> dict:
+    async def crash_bet(self, user_id: int, bet: Any, auto: Any = None, cur: Any = money.STARS,
+                        gifts: Any = None) -> dict:
+        """Ставка звёздами/TON и (на звёзды) NFT по флору: при выводе NFT вернутся, прибыль — звёздами."""
         cur = self._cur(cur)
-        bet = self._check_bet(bet, cur)
+        gift_ids = self._gift_ids(gifts)
+        if gift_ids and cur != money.STARS:
+            raise GameError("NFT ставятся на звёзды — переключите валюту на ★")
+        bet = 0 if gift_ids and bet in (None, 0) else self._check_bet(bet, cur)
         if auto is not None:
             if not isinstance(auto, (int, float)) or isinstance(auto, bool) or not 1.01 <= auto <= g.CRASH_MAX:
                 raise GameError("Автовывод — от 1.01×")
@@ -655,12 +678,17 @@ class Casino:
             ) as q:
                 if await q.fetchone():
                     raise GameError("Вы уже сделали ставку в этом раунде")
-            balance = await self._take(c, user_id, bet, "crash", cur)
+            staked = []
+            for gift in (await self._take_gifts(c, user_id, gift_ids, None)) if gift_ids else []:
+                staked.append({"id": gift["id"], "value": gift["value"], "emoji": gift["emoji"], "title": gift["title"],
+                               "collection": gift["collection_name"], "model": gift["model"], "number": gift["number"]})
+            stake = bet + sum(x["value"] for x in staked)
+            balance = await self._take(c, user_id, bet, "crash", cur) if bet else await self._balance(c, user_id, cur)
             await c.execute(
-                "INSERT INTO crash_bets(round_id, user_id, bet, auto, placed_at, cur) VALUES (?,?,?,?,?,?)",
-                (rnd["id"], user_id, bet, auto, now, cur),
+                "INSERT INTO crash_bets(round_id, user_id, bet, auto, placed_at, cur, gifts) VALUES (?,?,?,?,?,?,?)",
+                (rnd["id"], user_id, stake, auto, now, cur, json.dumps(staked, ensure_ascii=False) if staked else None),
             )
-        return {"round": rnd["id"], "bet": bet, "auto": auto, "balance": balance, "cur": cur}
+        return {"round": rnd["id"], "bet": stake, "auto": auto, "balance": balance, "cur": cur, "gifts": staked}
 
     async def crash_cashout(self, user_id: int) -> dict:
         now = time.time()
@@ -689,13 +717,14 @@ class Casino:
         if not rnd:
             return {"round": None, "history": history, "growth": g.CRASH_GROWTH}
         rows = await self.db.all(
-            "SELECT b.user_id, b.bet, b.auto, b.cashout, b.win, b.cur, u.first_name, u.username FROM crash_bets b "
+            "SELECT b.user_id, b.bet, b.auto, b.cashout, b.win, b.cur, b.gifts, u.first_name, u.username FROM crash_bets b "
             "LEFT JOIN users u ON u.id=b.user_id WHERE b.round_id=? ORDER BY b.bet DESC",
             rnd["id"],
         )
         players = [
             {"id": r["user_id"], "name": display_name({"id": r["user_id"], **r}), "bet": r["bet"],
-             "cashout": r["cashout"], "win": r["win"], "cur": r["cur"]}
+             "cashout": r["cashout"], "win": r["win"], "cur": r["cur"],
+             "gifts": json.loads(r["gifts"]) if r["gifts"] else []}
             for r in rows
         ]
         mine = next((dict(r) for r in rows if r["user_id"] == user_id), None)
@@ -712,7 +741,7 @@ class Casino:
             "round": view,
             "players": players,
             "my": {"bet": mine["bet"], "auto": mine["auto"], "cashout": mine["cashout"], "win": mine["win"],
-                   "cur": mine["cur"]}
+                   "cur": mine["cur"], "gifts": json.loads(mine["gifts"]) if mine["gifts"] else []}
             if mine else None,
             "history": history,
             "growth": g.CRASH_GROWTH,

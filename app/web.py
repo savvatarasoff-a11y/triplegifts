@@ -312,7 +312,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def crash_bet(request: web.Request) -> web.Response:
         data = await body(request)
         return web.json_response(await casino.crash_bet(request[USER_ID], data.get("bet"), data.get("auto"),
-                                                        data.get("cur")))
+                                                        data.get("cur"), data.get("gifts")))
 
     @routes.post("/api/crash/cashout")
     async def crash_cashout(request: web.Request) -> web.Response:

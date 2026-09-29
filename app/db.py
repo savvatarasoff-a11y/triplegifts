@@ -257,6 +257,7 @@ class Database:
                                           "ton_won": "INTEGER NOT NULL DEFAULT 0"})
         for table in ("ledger", "bets", "payments", "mines_games", "crash_bets", "pvp_rounds"):
             await self._add_columns(table, {"cur": "TEXT NOT NULL DEFAULT 'stars'"})
+        await self._add_columns("crash_bets", {"gifts": "TEXT"})   # JSON: NFT, поставленные в краш
         await self.conn.executescript(TON_SCHEMA)
 
     async def _add_columns(self, table: str, columns: dict[str, str]) -> None:

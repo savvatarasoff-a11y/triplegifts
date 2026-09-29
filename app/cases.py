@@ -46,12 +46,11 @@ class CaseCatalog:
                 for emoji, w in case.items
             ]
             cases.append(self._finish(case.id, case.name, case.emoji, case.price, prizes))
-        nft_case = await self._nft_case(prices)
-        if nft_case:
-            cases.append(nft_case)
+        for nft_def in g.NFT_CASE_DEFS:
+            cases.append(await self._nft_case(prices, nft_def))
         return [c for c in cases if c is not None]
 
-    async def _nft_case(self, prices: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    async def _nft_case(self, prices: dict[str, dict[str, Any]], d: g.NftCaseDef) -> dict[str, Any] | None:
         """NFT-кейс из моделей, которые есть у релейера и чья цена проверена на маркете не позже часа назад."""
         models = await self.db.all(
             "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
@@ -61,7 +60,8 @@ class CaseCatalog:
         if not models or not prices:
             return None
         regular = sorted(prices.values(), key=lambda x: x["stars"])
-        probs = g.nft_case_weights(self.nft_case_price, [m["price"] for m in models], [x["stars"] for x in regular])
+        price = d.price or self.nft_case_price
+        probs = g.nft_case_weights(price, [m["price"] for m in models], [x["stars"] for x in regular], share=d.share)
         if probs is None:
             return None
         p_nft, p_gift = probs
@@ -74,7 +74,7 @@ class CaseCatalog:
             {"kind": "gift", "emoji": x["emoji"], "gift_id": x["id"], "amount": x["stars"], "weight": p}
             for x, p in zip(regular, p_gift) if p > 0
         ]
-        return self._finish(g.NFT_CASE_ID, "NFT-кейс", "💎", self.nft_case_price, prizes)
+        return self._finish(d.id, d.name, d.emoji, price, prizes)
 
     @staticmethod
     def _finish(case_id: str, name: str, emoji: str, price: int, prizes: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -82,6 +82,9 @@ class CaseCatalog:
         rtp = g.expected_value([(p["amount"], p["weight"]) for p in prizes]) / price
         if rtp > g.CASE_MAX_RTP:
             log.warning("Кейс %s выключен: с текущими ценами RTP %.1f%% выше допустимого", case_id, rtp * 100)
+            return None
+        if rtp < g.CASE_MIN_RTP:
+            log.info("Кейс %s скрыт: с текущими ценами RTP %.1f%% — слишком невыгоден игрокам", case_id, rtp * 100)
             return None
         for p in prizes:
             p["chance"] = round(p["weight"] / total * 100, 3)

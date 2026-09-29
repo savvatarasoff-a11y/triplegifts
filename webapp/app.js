@@ -836,10 +836,33 @@ async function withdrawGift(gift) {
 }
 
 // Выбор подарков для ставки в PvP
+// NFT в краш: при выводе вернутся, прибыль — звёздами; не успели — уходят казино
+async function crashGiftSheet() {
+  if (state.cur !== "stars") { toast("NFT ставятся на звёзды — переключите валюту на ★", true); return; }
+  await giftSheet("Поставить в краш", async (ids) => {
+    await guard(async () => {
+      const autoRaw = $("#crash-auto").value.trim().replace(",", ".");
+      const body = { bet: 0, gifts: ids, cur: "stars" };
+      if (autoRaw) body.auto = parseFloat(autoRaw);
+      await api("/api/crash/bet", body);
+      toast("NFT в ракете! Успейте вывести");
+      haptic();
+      fxBurstAt($("#crash-btn"), { count: 20, speed: 4 });
+      clearTimeout(crash.timer);
+      crashPoll();
+    });
+  });
+}
+
 async function pvpGiftSheet(game) {
+  await giftSheet("Поставить подарки", (ids) => pvpBet(game, ids));
+}
+
+async function giftSheet(title, onPick) {
   await guard(async () => {
     const data = await api("/api/gifts");
     myGifts.relayer = data.relayer;
+    $("#sheet .panel-title").textContent = title;
     const usable = data.gifts.filter((g) => g.status === "owned");
     const list = $("#sheet-list");
     list.innerHTML = "";
@@ -875,7 +898,7 @@ async function pvpGiftSheet(game) {
     ok.onclick = async () => {
       const ids = Array.from(chosen);
       $("#sheet").classList.add("hidden");
-      await pvpBet(game, ids);
+      await onPick(ids);
     };
     $("#sheet").classList.remove("hidden");
   });
@@ -1606,6 +1629,12 @@ function crashRenderPlayers(s) {
     const am = document.createElement("span");
     am.className = "am";
     am.textContent = money(p.bet, p.cur);
+    if (p.gifts && p.gifts.length) {
+      const gl = document.createElement("span");
+      gl.className = "gl";
+      p.gifts.slice(0, 3).forEach((g) => gl.append(nftIcon(g, "nft-inline")));
+      nm.append(gl);
+    }
     const st = document.createElement("span");
     st.className = "st";
     if (p.cashout) { st.classList.add("win"); st.textContent = `${fmtX(p.cashout)} · +${fmt(p.win)}`; }
@@ -1730,7 +1759,7 @@ function renderCases() {
   if (!cases.length) box.innerHTML = '<div class="note">Кейсы временно недоступны — обновляем цены подарков.</div>';
   cases.forEach((c) => {
     const b = document.createElement("button");
-    b.className = "case-card" + (c.id === "nft" ? " nft" : "");
+    b.className = "case-card" + (c.id.startsWith("nft") ? " nft" : "");
     const top = c.prizes.reduce((a, p) => (p.amount > a.amount ? p : a), c.prizes[0]);
     b.innerHTML = '<div class="e"></div><div class="n"></div><div class="j"></div><div class="p"></div>';
     b.querySelector(".e").textContent = c.emoji;
@@ -2244,6 +2273,7 @@ function bind() {
   $("#pvp-btn").addEventListener("click", () => pvpBet("roulette"));
   $("#hockey-btn").addEventListener("click", () => pvpBet("hockey"));
   $("#pvp-gifts").addEventListener("click", () => pvpGiftSheet("roulette"));
+  $("#crash-gifts").addEventListener("click", crashGiftSheet);
   $("#hockey-gifts").addEventListener("click", () => pvpGiftSheet("hockey"));
   $("#nft-open").addEventListener("click", openRelayer);
   $$("#tabbar button").forEach((b) => b.addEventListener("click", () => {

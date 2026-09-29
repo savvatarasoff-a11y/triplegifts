@@ -141,7 +141,7 @@ async def test_me_and_start_bonus(client):
     data = await r.json()
     assert data["balance"] == 25 and data["user"]["name"] == "Петя"
     cases = {c["id"]: c for c in data["config"]["cases"]}
-    assert set(cases) == {"bear", "rocket"}                       # NFT-кейса нет, пока нет NFT с ценой
+    assert set(cases) == {"bear", "rocket", "heart", "party", "lux"}   # NFT-кейсов нет, пока нет NFT с ценой
     bear = cases["bear"]["prizes"]
     assert {p["emoji"]: p["amount"] for p in bear}["🧸"] == 15    # реальная цена из каталога
     assert sum(p["chance"] for p in bear) == pytest.approx(100, abs=0.01)
@@ -261,7 +261,7 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
 async def test_case_disabled_when_real_prices_too_generous(client):
     client.app[BOT].prices = {"🧸": 60}      # подарок «подорожал» до первого запроса каталога
     cases = [c["id"] for c in (await (await client.get("/api/me", headers=auth(9))).json())["config"]["cases"]]
-    assert cases == []                       # с такой ценой оба кейса убыточны — выключены
+    assert cases == ["lux"]                  # кейсы с подорожавшим 🧸 убыточны — выключены, «Люкс» без него
     r = await client.post("/api/case", headers=auth(9), json={"case": "bear"})
     assert r.status == 400
 

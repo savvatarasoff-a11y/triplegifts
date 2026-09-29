@@ -170,3 +170,32 @@ async def test_withdraw_gift(env):
     assert (await gifts.withdraw(casino, relayer, 42, gift_id))["ok"]
     assert relayer.transfers == [(1, 42)]
     assert await casino.gifts(42) == []
+
+
+async def test_crash_with_gift_stake(env, monkeypatch):
+    from app.games import logic as g
+    cfg, db, casino = env
+    relayer = FakeRelayer([sent(1, 42), sent(2, 43, number=2)], {"Frog": 1000})
+    await gifts.scan(db, cfg, relayer)
+    await db.conn.execute("UPDATE users SET balance=100 WHERE id IN (42, 43)")
+    monkeypatch.setattr(g, "crash_point", lambda rng=None: 2.0)
+    await casino.crash_tick(now=0)                                         # раунд приёма ставок
+    await db.conn.execute("UPDATE crash_rounds SET betting_until=?", (time.time() + 60,))
+    g42 = (await casino.gifts(42))[0]["id"]
+    g43 = (await casino.gifts(43))[0]["id"]
+    with pytest.raises(GameError, match="★"):
+        await casino.crash_bet(42, None, None, "ton", [g42])               # NFT — только на звёзды
+    r = await casino.crash_bet(42, 50, None, "stars", [g42])
+    assert r["bet"] == 1050 and r["gifts"][0]["value"] == 1000 and r["balance"] == 50
+    await casino.crash_bet(43, None, None, "stars", [g43])
+    state = await casino.crash_state(42)
+    assert state["my"]["gifts"][0]["id"] == g42 and state["players"][0]["gifts"]
+    await db.conn.execute("UPDATE crash_rounds SET status='running', started_at=?", (time.time() - 5,))
+    out = await casino.crash_cashout(42)                                    # вывел примерно на ×1.4
+    assert out["win"] > 1050
+    assert (await casino.gifts(42))[0]["status"] == "owned"                 # NFT вернулся
+    assert (await db.get_user(42))["balance"] == 50 + out["win"] - 1000     # прибыль — звёздами
+    await db.conn.execute("UPDATE crash_rounds SET started_at=?", (time.time() - 100,))
+    await casino.crash_tick()                                               # ракета взорвалась
+    assert await casino.gifts(43) == []                                     # не успел — NFT ушёл казино
+    assert (await db.one("SELECT status FROM user_gifts WHERE id=?", g43))["status"] == "lost"
