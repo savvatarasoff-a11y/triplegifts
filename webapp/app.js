@@ -2128,9 +2128,28 @@ const caseTop = (c) => c.prizes.reduce((a, p) => (p.amount > a.amount ? p : a), 
 const caseNftChance = (c) => c.prizes.filter((p) => p.kind === "nft").reduce((a, p) => a + p.chance, 0);
 
 // Иконка кейса: картинка самого дорогого NFT внутри, иначе эмодзи кейса
+// Картинка кейса. Кейс с подарками — подарок из названия (Мишка — 🧸, Ракета — 🚀…).
+// NFT-кейс — случайная модель по цене кейса (от 0.5 до 20 цен кейса); выбор запоминается на сеанс.
+const casePicChoice = {};
+function casePics(c) {
+  if (!c.id.startsWith("nft")) {
+    const own = c.prizes.find((p) => p.kind === "gift" && p.emoji === c.emoji);
+    return own ? [prizePic(own)].filter(Boolean) : [];
+  }
+  const nfts = c.prizes.filter((p) => p.kind === "nft" && p.title);
+  if (!nfts.length) return [];
+  let fit = nfts.filter((p) => p.amount >= c.price * 0.5 && p.amount <= c.price * 20);
+  if (!fit.length) fit = nfts.slice().sort((a, b) => a.amount - b.amount).slice(0, 5);   // самые близкие к цене
+  const key = c.id + ":" + fit.map((p) => p.model).join(",");
+  if (!casePicChoice[key]) {
+    const order = fit.slice().sort(() => Math.random() - 0.5);
+    casePicChoice[key] = order.map(prizePic);
+  }
+  return casePicChoice[key];   // если первая картинка не загрузится, picIcon возьмёт следующую
+}
+
 function caseIcon(c, cls) {
-  // самые дорогие призы с картинкой: если первая не загрузилась — берём следующую
-  const pics = c.prizes.slice().sort((a, b) => b.amount - a.amount).map(prizePic).filter(Boolean).slice(0, 6);
+  const pics = casePics(c);
   if (pics.length) return picIcon(pics, cls, c.emoji);
   const e = document.createElement("span");
   e.className = cls;
