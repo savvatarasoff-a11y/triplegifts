@@ -328,3 +328,25 @@ main { padding: 0 16px; max-width: 520px; margin: 0 auto; }
 .paytable .combo .sym.seven { font-size: 22px; -webkit-text-stroke: 1px #fff; }
 .paytable .combo small { color: var(--muted); font-size: 11px; margin-left: 4px; }
 .paytable { grid-template-columns: 1fr; }
+
+/* ---------- подарки игроков ---------- */
+.seg.three { grid-template-columns: repeat(3, 1fr); }
+.mygifts { display: flex; flex-direction: column; gap: 8px; }
+.mg { display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: center; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 14px; padding: 10px; text-align: left; width: 100%; color: inherit; }
+.mg .em { font-size: 30px; text-align: center; }
+.mg .t { font-weight: 800; font-size: 14px; }
+.mg .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.mg .v { font-weight: 800; color: var(--accent-soft); white-space: nowrap; }
+.mg .acts { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mg .acts .btn { padding: 9px; font-size: 13px; }
+.mg.sel { border-color: var(--accent); background: linear-gradient(90deg, rgba(139, 92, 246, .22), var(--surface-2)); }
+.mg.off { opacity: .45; }
+.row .gift-btn { flex: 0 0 auto; width: 64px; font-size: 24px; padding: 0; background: #fff; }
+.pl .gl { font-size: 13px; margin-left: 4px; }
+.sheet { position: fixed; inset: 0; z-index: 60; background: rgba(5, 4, 10, .7); display: flex; align-items: flex-end; }
+.sheet.hidden { display: none; }
+.sheet-box { width: 100%; max-height: 80vh; overflow-y: auto; background: var(--surface); border-radius: 22px 22px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); animation: sheetUp .25s ease-out; }
+.sheet-box .row { margin-top: 12px; }
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: none; } }

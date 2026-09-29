@@ -239,3 +239,28 @@ async def test_relayer_inventory_and_paid_transfer(env):
     assert calls[-3:] == ["TransferStarGiftRequest", "GetPaymentFormRequest", "SendStarsFormRequest"]
     with pytest.raises(RelayerError, match="NEED_CONTACT"):
         await relayer.transfer(inv[0], 44, None)
+
+
+async def test_relayer_received_parses_senders_and_regular_gifts(env):
+    from datetime import datetime, timezone
+
+    from telethon.tl import types as T
+
+    sticker = T.Document(id=2, access_hash=0, file_reference=b"", date=None, mime_type="", size=0, dc_id=1,
+                         attributes=[T.DocumentAttributeSticker(alt="🧸", stickerset=T.InputStickerSetEmpty())])
+    when = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    class Client:
+        async def __call__(self, req):
+            regular = T.StarGift(id=5, sticker=sticker, stars=15, convert_stars=13, title=None)
+            return T.payments.SavedStarGifts(count=1, gifts=[
+                T.SavedStarGift(date=when, gift=regular, msg_id=21, from_id=T.PeerUser(user_id=42), convert_stars=13)],
+                chats=[], users=[])
+
+    _, db = env
+    relayer = Relayer(db, "1:x")
+    relayer.client = Client()
+    [gift] = await relayer.received()
+    assert (gift["kind"], gift["from_user"], gift["emoji"], gift["convert_stars"], gift["date"]) == (
+        "gift", 42, "🧸", 13, when.timestamp())
+    assert await relayer.inventory() == []                         # обычные подарки не передаются как NFT

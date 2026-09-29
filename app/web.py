@@ -13,10 +13,11 @@ from aiogram.types import LabeledPrice
 from aiogram.utils.web_app import safe_parse_webapp_init_data
 from aiohttp import web
 
-from .casino import Casino, GameError, display_name
+from .casino import GIFT_SELL_RATE, Casino, GameError, display_name
 from .config import Config
 from .games import logic as g
 from .cases import CaseCatalog
+from .gifts import withdraw as withdraw_gift
 from .nft import deliver as deliver_nft
 from .relayer import Relayer
 from .withdraw import GiftCatalog, notify_admins
@@ -275,7 +276,29 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.post("/api/pvp/bet")
     async def pvp_bet(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.pvp_bet(request[USER_ID], data.get("amount"), data.get("game", "roulette")))
+        return web.json_response(await casino.pvp_bet(request[USER_ID], data.get("amount"), data.get("game", "roulette"),
+                                                      data.get("gifts")))
+
+    @routes.get("/api/gifts")
+    async def my_gifts(request: web.Request) -> web.Response:
+        name = None
+        if relayer is not None and relayer.ready:
+            try:
+                name = await relayer.username()
+            except Exception:
+                name = None
+        return web.json_response({"gifts": await casino.gifts(request[USER_ID]), "relayer": name,
+                                  "sell_rate": GIFT_SELL_RATE})
+
+    @routes.post("/api/gifts/sell")
+    async def gift_sell(request: web.Request) -> web.Response:
+        return web.json_response(await casino.gift_sell(request[USER_ID], (await body(request)).get("id")))
+
+    @routes.post("/api/gifts/withdraw")
+    async def gift_withdraw(request: web.Request) -> web.Response:
+        if relayer is None:
+            raise GameError("Вывод подарков временно недоступен")
+        return web.json_response(await withdraw_gift(casino, relayer, request[USER_ID], (await body(request)).get("id")))
 
     app = web.Application(middlewares=[errors, auth], client_max_size=64 * 1024)
     app.add_routes(routes)

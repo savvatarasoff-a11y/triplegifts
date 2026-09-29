@@ -20,6 +20,8 @@ PVP_ROUND_SECONDS = 30
 PVP_GAMES = ("roulette", "hockey")      # сколько длится раунд после второго игрока
 PVP_IDLE_REFUND = 600       # одиночную ставку возвращаем через 10 минут
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
+GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
+MAX_GIFTS_PER_BET = 20
 
 
 class GameError(Exception):
@@ -549,6 +551,87 @@ class Casino:
             "growth": g.CRASH_GROWTH,
         }
 
+    # ---------- подарки игроков (прислали релейеру) ----------
+
+    @staticmethod
+    def gift_title(r: dict) -> str:
+        return f"{r['collection_name']} #{r['number']}" if r.get("number") else (r.get("collection_name") or "Подарок")
+
+    @classmethod
+    def _gift_view(cls, r: dict, now: float) -> dict:
+        fresh = bool(r["value"]) and now - (r["priced_at"] or 0) < NFT_PRICE_MAX_AGE
+        return {"id": r["id"], "kind": r["kind"], "title": cls.gift_title(r), "model": r["model"],
+                "emoji": r["emoji"] or "🎁", "rarity": r["rarity"], "value": r["value"], "priced": fresh,
+                "status": r["status"], "sell": int(r["value"] * GIFT_SELL_RATE) if fresh else None,
+                "locked_until": r["transfer_at"] if r["transfer_at"] > now else None}
+
+    async def gifts(self, user_id: int) -> list[dict]:
+        now = time.time()
+        rows = await self.db.all("SELECT * FROM user_gifts WHERE user_id=? AND kind='nft' AND status IN "
+                                 "('owned','staked','withdrawing') ORDER BY value DESC, id", user_id)
+        return [self._gift_view(r, now) for r in rows]
+
+    @staticmethod
+    def _gift_ids(gifts: Any) -> list[int]:
+        if not gifts:
+            return []
+        if not isinstance(gifts, list) or len(gifts) > MAX_GIFTS_PER_BET or not all(
+                isinstance(i, int) and not isinstance(i, bool) for i in gifts):
+            raise GameError("Некорректный список подарков")
+        return sorted(set(gifts))
+
+    async def _take_gifts(self, c: aiosqlite.Connection, user_id: int, ids: list[int], round_id: int) -> list[dict]:
+        now = time.time()
+        taken = []
+        for gift_id in ids:
+            async with c.execute("SELECT * FROM user_gifts WHERE id=? AND user_id=? AND kind='nft'",
+                                 (gift_id, user_id)) as q:
+                row = await q.fetchone()
+            if not row or row["status"] != "owned":
+                raise GameError("Этот подарок уже поставлен или выведен")
+            if not row["value"] or now - (row["priced_at"] or 0) >= NFT_PRICE_MAX_AGE:
+                raise GameError(f"Цена {self.gift_title(dict(row))} ещё проверяется на маркете — попробуйте позже")
+            await c.execute("UPDATE user_gifts SET status='staked', round_id=? WHERE id=?", (round_id, gift_id))
+            taken.append({**dict(row), "title": self.gift_title(dict(row))})
+        return taken
+
+    async def gift_sell(self, user_id: int, gift_id: Any) -> dict:
+        """Казино выкупает NFT игрока за GIFT_SELL_RATE от пола маркета — звёзды можно ставить в любые игры."""
+        if not isinstance(gift_id, int) or isinstance(gift_id, bool):
+            raise GameError("Подарок не найден")
+        now = time.time()
+        async with self.db.tx() as c:
+            async with c.execute("SELECT * FROM user_gifts WHERE id=? AND user_id=? AND kind='nft'",
+                                 (gift_id, user_id)) as q:
+                row = await q.fetchone()
+            if not row or row["status"] != "owned":
+                raise GameError("Этот подарок уже поставлен или выведен")
+            if not row["value"] or now - (row["priced_at"] or 0) >= NFT_PRICE_MAX_AGE:
+                raise GameError("Цена подарка ещё проверяется на маркете — попробуйте позже")
+            amount = int(row["value"] * GIFT_SELL_RATE)
+            await c.execute("UPDATE user_gifts SET status='sold' WHERE id=?", (gift_id,))
+            balance = await self.db.change_balance(c, user_id, amount, "gift_sell", str(gift_id))
+        return {"amount": amount, "balance": balance}
+
+    async def gift_withdraw_claim(self, user_id: int, gift_id: Any) -> dict:
+        if not isinstance(gift_id, int) or isinstance(gift_id, bool):
+            raise GameError("Подарок не найден")
+        async with self.db.tx() as c:
+            async with c.execute("SELECT * FROM user_gifts WHERE id=? AND user_id=? AND kind='nft'",
+                                 (gift_id, user_id)) as q:
+                row = await q.fetchone()
+            if not row or row["status"] != "owned":
+                raise GameError("Этот подарок уже поставлен или выведен")
+            if row["transfer_at"] > time.time():
+                raise GameError("Telegram пока не даёт передать этот подарок — попробуйте позже")
+            await c.execute("UPDATE user_gifts SET status='withdrawing' WHERE id=?", (gift_id,))
+        return dict(row)
+
+    async def gift_withdraw_finish(self, gift_id: int, ok: bool) -> None:
+        async with self.db.tx() as c:
+            await c.execute("UPDATE user_gifts SET status=? WHERE id=? AND status='withdrawing'",
+                            ("withdrawn" if ok else "owned", gift_id))
+
     # ---------- PvP-рулетка ----------
 
     @staticmethod
@@ -568,21 +651,37 @@ class Casino:
         async with c.execute("SELECT * FROM pvp_rounds WHERE id=?", (cur.lastrowid,)) as q:
             return dict(await q.fetchone())
 
-    async def pvp_bet(self, user_id: int, amount: Any, game: Any = "roulette") -> dict:
+    async def pvp_bet(self, user_id: int, amount: Any, game: Any = "roulette", gifts: Any = None) -> dict:
+        """Ставка звёздами и/или NFT-подарками (подарок идёт в банк по цене пола маркета)."""
         game = self._pvp_game(game)
-        amount = self._check_bet(amount)
+        gift_ids = self._gift_ids(gifts)
+        if gift_ids and amount in (None, 0):
+            amount = 0
+        else:
+            amount = self._check_bet(amount)
         now = time.time()
         async with self.db.tx() as c:
             rnd = await self._open_round(c, game)
             if rnd["ends_at"] and now >= rnd["ends_at"] - 1:
                 raise GameError("Раунд уже крутится, подождите следующий")
-            await self._take(c, user_id, amount, game)
+            stake = amount
+            staked = []
+            if gift_ids:
+                for gift in await self._take_gifts(c, user_id, gift_ids, rnd["id"]):
+                    stake += gift["value"]
+                    staked.append({"emoji": gift["emoji"], "title": gift["title"], "value": gift["value"]})
+            if amount:
+                await self._take(c, user_id, amount, game)
+            async with c.execute("SELECT gifts FROM pvp_bets WHERE round_id=? AND user_id=?",
+                                 (rnd["id"], user_id)) as q:
+                prev = await q.fetchone()
+            all_gifts = (json.loads(prev["gifts"]) if prev and prev["gifts"] else []) + staked
             await c.execute(
-                "INSERT INTO pvp_bets(round_id, user_id, amount, joined) VALUES (?,?,?,?) "
-                "ON CONFLICT(round_id, user_id) DO UPDATE SET amount = amount + excluded.amount",
-                (rnd["id"], user_id, amount, now),
+                "INSERT INTO pvp_bets(round_id, user_id, amount, joined, gifts) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(round_id, user_id) DO UPDATE SET amount = amount + excluded.amount, gifts=excluded.gifts",
+                (rnd["id"], user_id, stake, now, json.dumps(all_gifts, ensure_ascii=False) if all_gifts else None),
             )
-            await c.execute("UPDATE pvp_rounds SET pot = pot + ? WHERE id=?", (amount, rnd["id"]))
+            await c.execute("UPDATE pvp_rounds SET pot = pot + ? WHERE id=?", (stake, rnd["id"]))
             async with c.execute("SELECT COUNT(*) n FROM pvp_bets WHERE round_id=?", (rnd["id"],)) as q:
                 players = (await q.fetchone())["n"]
             if players >= 2 and not rnd["ends_at"]:
@@ -605,12 +704,21 @@ class Casino:
                     winner, ticket = g.pvp_pick_winner([(b["user_id"], b["amount"]) for b in bets])
                     pot = sum(b["amount"] for b in bets)
                     prize = g.pvp_payout(pot)
+                    # Подарки из банка целиком уходят победителю, звёзды — остаток выигрыша
+                    async with c.execute("SELECT COALESCE(SUM(value),0) v FROM user_gifts WHERE round_id=? "
+                                         "AND status='staked'", (rnd["id"],)) as q:
+                        gifts_value = (await q.fetchone())["v"]
+                    await c.execute("UPDATE user_gifts SET user_id=?, status='owned', round_id=NULL "
+                                    "WHERE round_id=? AND status='staked'", (winner, rnd["id"]))
+                    stars_prize = max(0, prize - gifts_value)
                     detail = None
                     if rnd["game"] == "hockey":
                         zones = g.hockey_zones([b["amount"] for b in bets])
                         winner_idx = next(i for i, b in enumerate(bets) if b["user_id"] == winner)
                         detail = {"zones": [list(z) for z in zones], **g.hockey_shot(zones[winner_idx])}
-                    await self.db.change_balance(c, winner, prize, "pvp_win", str(rnd["id"]))
+                    if stars_prize:
+                        await self.db.change_balance(c, winner, stars_prize, "pvp_win", str(rnd["id"]))
+                    prize = stars_prize + gifts_value
                     for b in bets:
                         win = prize if b["user_id"] == winner else 0
                         game_name = "hockey" if rnd["game"] == "hockey" else "pvp"
@@ -621,9 +729,17 @@ class Casino:
                         (winner, pot, prize, ticket, now, json.dumps(detail) if detail else None, rnd["id"]),
                     )
                     results.append({"round": rnd["id"], "game": rnd["game"], "winner": winner, "pot": pot,
-                                    "payout": prize, "players": [b["user_id"] for b in bets]})
+                                    "payout": prize, "stars": stars_prize, "gifts_value": gifts_value,
+                                    "players": [b["user_id"] for b in bets]})
                 elif len(bets) == 1 and not rnd["ends_at"] and now - bets[0]["joined"] > PVP_IDLE_REFUND:
-                    await self.db.change_balance(c, bets[0]["user_id"], bets[0]["amount"], "pvp_refund", str(rnd["id"]))
+                    async with c.execute("SELECT COALESCE(SUM(value),0) v FROM user_gifts WHERE round_id=? "
+                                         "AND status='staked'", (rnd["id"],)) as q:
+                        gifts_value = (await q.fetchone())["v"]
+                    await c.execute("UPDATE user_gifts SET status='owned', round_id=NULL "
+                                    "WHERE round_id=? AND status='staked'", (rnd["id"],))
+                    if bets[0]["amount"] > gifts_value:
+                        await self.db.change_balance(c, bets[0]["user_id"], bets[0]["amount"] - gifts_value,
+                                                     "pvp_refund", str(rnd["id"]))
                     await c.execute(
                         "UPDATE pvp_rounds SET status='refunded', finished_at=? WHERE id=?", (now, rnd["id"])
                     )
@@ -631,14 +747,14 @@ class Casino:
 
     async def _round_players(self, round_id: int) -> list[dict]:
         rows = await self.db.all(
-            "SELECT b.user_id, b.amount, u.first_name, u.username FROM pvp_bets b "
+            "SELECT b.user_id, b.amount, b.gifts, u.first_name, u.username FROM pvp_bets b "
             "LEFT JOIN users u ON u.id=b.user_id WHERE b.round_id=? ORDER BY b.joined",
             round_id,
         )
         total = sum(r["amount"] for r in rows) or 1
         return [
             {"id": r["user_id"], "name": display_name({"id": r["user_id"], **r}), "amount": r["amount"],
-             "chance": round(r["amount"] / total * 100, 2)}
+             "chance": round(r["amount"] / total * 100, 2), "gifts": json.loads(r["gifts"]) if r["gifts"] else []}
             for r in rows
         ]
 

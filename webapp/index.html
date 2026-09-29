@@ -81,8 +81,8 @@
 
     <!-- Кошелёк: пополнение и вывод -->
     <section class="screen" id="wallet">
-      <div class="seg two tabs" id="wallet-tabs">
-        <button data-tab="dep" class="sel">Пополнить</button><button data-tab="out">Вывести</button>
+      <div class="seg three tabs" id="wallet-tabs">
+        <button data-tab="dep" class="sel">Пополнить</button><button data-tab="nft">Подарки</button><button data-tab="out">Вывести</button>
       </div>
       <div class="panel center" id="tab-dep">
         <div class="big-star">★</div>
@@ -93,6 +93,19 @@
           <button class="btn" id="dep-btn">Пополнить</button>
         </div>
         <p class="note">Зачисление мгновенно.</p>
+      </div>
+      <div class="hidden" id="tab-nft">
+        <div class="panel center">
+          <div class="big-star">🎁</div>
+          <div class="panel-title">Ставьте свои подарки</div>
+          <p class="note" id="nft-howto">Отправьте NFT или подарок в Telegram аккаунту казино — он появится здесь через несколько секунд.</p>
+          <button class="btn" id="nft-open">Отправить подарок</button>
+          <p class="note">NFT оценивается по полу маркета своей модели: его можно поставить в PvP, продать казино за <span id="nft-rate">90</span>% или вывести обратно. Обычные подарки сразу зачисляются звёздами.</p>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Мои подарки</div>
+          <div class="mygifts" id="mygifts"></div>
+        </div>
       </div>
       <div class="hidden" id="tab-out">
         <div class="panel">
@@ -212,7 +225,10 @@
       <div class="plist" id="pvp-players"></div>
       <div class="panel controls">
         <div class="betbox" data-bet="pvp"></div>
-        <button class="btn big" id="pvp-btn">Сделать ставку</button>
+        <div class="row">
+          <button class="btn big" id="pvp-btn">Сделать ставку</button>
+          <button class="btn gift-btn" id="pvp-gifts" aria-label="Поставить подарки">🎁</button>
+        </div>
       </div>
       <p class="note">Шанс на победу пропорционален ставке. Победитель забирает банк за вычетом комиссии <span class="pvp-fee">5</span>%.</p>
     </section>
@@ -228,7 +244,10 @@
       <div class="plist" id="hockey-players"></div>
       <div class="panel controls">
         <div class="betbox" data-bet="hockey"></div>
-        <button class="btn big" id="hockey-btn">Сделать ставку</button>
+        <div class="row">
+          <button class="btn big" id="hockey-btn">Сделать ставку</button>
+          <button class="btn gift-btn" id="hockey-gifts" aria-label="Поставить подарки">🎁</button>
+        </div>
       </div>
       <p class="note">Поле делится на зоны пропорционально ставкам. Шайба вылетает из центра в случайную сторону с сильным ударом — чья зона, где она остановится, тот и забирает банк (комиссия <span class="pvp-fee">5</span>%).</p>
     </section>
@@ -242,6 +261,17 @@
       <button class="btn" id="bigwin-ok">Забрать</button>
     </div>
     <div class="confetti" id="confetti"></div>
+  </div>
+
+  <div class="sheet hidden" id="sheet">
+    <div class="sheet-box">
+      <div class="panel-title">Поставить подарки</div>
+      <div class="mygifts pick" id="sheet-list"></div>
+      <div class="row">
+        <button class="btn" id="sheet-cancel">Отмена</button>
+        <button class="btn big" id="sheet-ok">Поставить</button>
+      </div>
+    </div>
   </div>
 
   <canvas class="fx" id="fx"></canvas>

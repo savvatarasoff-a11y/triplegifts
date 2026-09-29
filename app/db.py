@@ -158,11 +158,32 @@ CREATE TABLE IF NOT EXISTS pvp_rounds (
     ticket      INTEGER,
     finished_at REAL
 );
+CREATE TABLE IF NOT EXISTS user_gifts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    ref             TEXT NOT NULL UNIQUE,        -- msg_id подарка на аккаунте релейера
+    kind            TEXT NOT NULL,               -- nft | gift
+    collection_id   TEXT,
+    collection_name TEXT,
+    number          INTEGER,
+    model           TEXT,
+    emoji           TEXT,
+    rarity          REAL,
+    value           INTEGER,                     -- цена в звёздах (NFT — пол маркета модели)
+    priced_at       REAL,
+    transfer_at     REAL NOT NULL DEFAULT 0,     -- раньше этого времени Telegram не даёт передать
+    status          TEXT NOT NULL,               -- owned | staked | withdrawing | withdrawn | sold | credited | stock (прислал админ)
+    round_id        INTEGER,
+    from_user       INTEGER,
+    created_at      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS user_gifts_user ON user_gifts(user_id, status);
 CREATE TABLE IF NOT EXISTS pvp_bets (
     round_id INTEGER NOT NULL,
     user_id  INTEGER NOT NULL,
-    amount   INTEGER NOT NULL,
+    amount   INTEGER NOT NULL,             -- звёзды + стоимость поставленных подарков
     joined   REAL NOT NULL,
+    gifts    TEXT,                         -- JSON: поставленные подарки (для показа)
     PRIMARY KEY (round_id, user_id)
 );
 """
@@ -197,6 +218,9 @@ class Database:
             await self.conn.execute("ALTER TABLE pvp_rounds ADD COLUMN game TEXT NOT NULL DEFAULT 'roulette'")
         if "detail" not in cols:
             await self.conn.execute("ALTER TABLE pvp_rounds ADD COLUMN detail TEXT")
+        async with self.conn.execute("PRAGMA table_info(pvp_bets)") as cur:
+            if "gifts" not in {r["name"] for r in await cur.fetchall()}:
+                await self.conn.execute("ALTER TABLE pvp_bets ADD COLUMN gifts TEXT")
 
     async def close(self) -> None:
         if self._conn:

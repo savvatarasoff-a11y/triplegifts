@@ -25,11 +25,25 @@ log = logging.getLogger(__name__)
 PRICE_MAX_AGE = 3600   # модель без проверенной за час цены в кейс не попадает
 
 
+async def casino_stock(db: Database, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Оставляет только подарки казино: не присланные игроками (они принадлежат игрокам, см. gifts.py).
+
+    Подарок, полученный после включения приёма подарков, считается запасом, только когда сканер
+    его учёл (прислал админ или игрок продал казино) — иначе его могли бы отдать до зачисления.
+    """
+    since = await db.kv_get("gifts:since")
+    since_ts = float(since) if since is not None else float("inf")
+    status = {r["ref"]: r["status"] for r in await db.all("SELECT ref, status FROM user_gifts")}
+    return [i for i in items
+            if status.get(str(i["ref"])) in ("stock", "sold")
+            or (str(i["ref"]) not in status and (not i.get("from_user") or i.get("date", 0) < since_ts))]
+
+
 async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
     """Пересчитывает запас моделей у релейера и обновляет их рыночные цены. Возвращает (моделей, ошибка)."""
     if not relayer.ready:
         return 0, "Релейер не подключён — выполните вход: /relayer"
-    inventory = await relayer.inventory()
+    inventory = await casino_stock(db, await relayer.inventory())
     groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for item in inventory:
         groups[(item["collection_id"], item["model"])].append(item)
@@ -105,7 +119,7 @@ async def deliver(bot: Bot, db: Database, cfg: Config, relayer: Relayer, win_id:
         return await fail(f"не удалось получить подарки релейера: {type(e).__name__}")
     busy = {r["owned_gift_id"] for r in await db.all(
         "SELECT owned_gift_id FROM nft_wins WHERE status='sent' AND owned_gift_id IS NOT NULL")}
-    candidates = [i for i in inventory if (i["collection_id"], i["model"]) == (model["collection_id"], model["model"])
+    candidates = [i for i in await casino_stock(db, inventory) if (i["collection_id"], i["model"]) == (model["collection_id"], model["model"])
                   and str(i["ref"]) not in busy]
     if not candidates:
         return await fail("у релейера не осталось подарков этой модели")

@@ -17,6 +17,7 @@ from .casino import Casino
 from .config import Config, ConfigError
 from .db import Database
 from .logging_setup import setup_logging
+from .gifts import notify_deposits, scan as gifts_scan
 from .nft import deliver_waiting, sync as sync_nfts
 from .relayer import Relayer
 from .web import build_app
@@ -64,7 +65,9 @@ async def background(casino: Casino, bot: Bot) -> None:
                     await bot.send_message(
                         result["winner"],
                         f"🏆 Вы выиграли раунд {'PvP-хоккея' if result['game'] == 'hockey' else 'PvP-рулетки'} "
-                        f"№{result['round']}: <b>+{result['payout']} ⭐</b>",
+                        f"№{result['round']}: <b>+{result['stars']} ⭐</b>"
+                        + (f" и подарки на {result['gifts_value']} ⭐ (раздел «Мои подарки»)"
+                           if result.get("gifts_value") else ""),
                     )
                 except Exception:
                     pass
@@ -81,6 +84,20 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> N
         except Exception:
             log.warning("Не удалось обновить NFT-модели")
         await asyncio.sleep(600)
+
+
+async def gifts_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> None:
+    """Каждые 20 секунд зачисляет подарки, которые игроки прислали релейеру."""
+    while True:
+        await scan_gifts(bot, cfg, casino, relayer)
+        await asyncio.sleep(20)
+
+
+async def scan_gifts(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> None:
+    try:
+        await notify_deposits(bot, await gifts_scan(casino.db, cfg, relayer))
+    except Exception:
+        log.warning("Не удалось проверить подарки игроков", exc_info=True)
 
 
 async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
@@ -120,8 +137,14 @@ async def run() -> None:
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
     relayer = Relayer(db, cfg.bot_token)
+
+    async def on_relayer_message(user_id: int) -> None:
+        # игрок написал релейеру или прислал подарок: отдаём ждущие NFT и зачисляем подарки
+        await deliver_waiting(bot, db, cfg, relayer, user_id)
+        await scan_gifts(bot, cfg, casino, relayer)
+
     if await relayer.start():
-        relayer.on_private_message(lambda user_id: deliver_waiting(bot, db, cfg, relayer, user_id))
+        relayer.on_private_message(on_relayer_message)
 
     runner = web.AppRunner(build_app(cfg, casino, bot, relayer), access_log=None)
     await runner.setup()
@@ -129,12 +152,13 @@ async def run() -> None:
     dp = Dispatcher()
     dp.include_router(build_router(
         cfg, casino, relayer,
-        on_relayer_ready=lambda: relayer.on_private_message(lambda uid: deliver_waiting(bot, db, cfg, relayer, uid)),
+        on_relayer_ready=lambda: relayer.on_private_message(on_relayer_message),
     ))
     await setup_bot_ui(bot, cfg)
     bg = asyncio.create_task(background(casino, bot))
     crash_task = asyncio.create_task(crash_loop(casino))
     nft_task = asyncio.create_task(nft_loop(bot, cfg, casino, relayer))
+    gifts_task = asyncio.create_task(gifts_loop(bot, cfg, casino, relayer))
 
     try:
         me = await bot.get_me()
@@ -153,6 +177,7 @@ async def run() -> None:
         bg.cancel()
         crash_task.cancel()
         nft_task.cancel()
+        gifts_task.cancel()
         await relayer.stop()
         await runner.cleanup()
         await db.close()

@@ -179,39 +179,58 @@ class Relayer:
 
     # ---------- инвентарь и передача (MTProto) ----------
 
-    async def inventory(self) -> list[dict[str, Any]]:
-        """NFT-подарки на аккаунте релейера, которые можно передать прямо сейчас."""
+    async def _saved(self) -> list[dict[str, Any]]:
+        """Все подарки на аккаунте релейера: NFT и обычные, с отправителем и датой."""
         if not self.ready:
             raise RelayerError("Релейер не подключён")
         from telethon.tl.functions.payments import GetSavedStarGiftsRequest
-        from telethon.tl.types import (DocumentAttributeCustomEmoji, InputPeerSelf, StarGiftAttributeModel,
-                                       StarGiftAttributeRarity, StarGiftUnique)
+        from telethon.tl.types import (DocumentAttributeCustomEmoji, DocumentAttributeSticker, InputPeerSelf, PeerUser,
+                                       StarGift, StarGiftAttributeModel, StarGiftAttributeRarity, StarGiftUnique)
         items: list[dict[str, Any]] = []
         offset = ""
-        now = time.time()
         while True:
-            res = await self.client(GetSavedStarGiftsRequest(peer=InputPeerSelf(), offset=offset, limit=100,
-                                                             exclude_unlimited=True))
+            res = await self.client(GetSavedStarGiftsRequest(peer=InputPeerSelf(), offset=offset, limit=100))
             for saved in res.gifts:
                 gift = saved.gift
-                if not isinstance(gift, StarGiftUnique) or not saved.msg_id:
+                if not saved.msg_id:
                     continue
-                if saved.can_transfer_at and saved.can_transfer_at.timestamp() > now:
-                    continue   # передача этого подарка пока заблокирована Telegram
-                model = next((a for a in gift.attributes if isinstance(a, StarGiftAttributeModel)), None)
-                if model is None:
-                    continue
-                rarity = model.rarity.permille / 10 if isinstance(model.rarity, StarGiftAttributeRarity) else None
-                emoji = next((a.alt for a in getattr(model.document, "attributes", []) or []
-                              if isinstance(a, DocumentAttributeCustomEmoji)), None)
-                items.append({
-                    "ref": saved.msg_id, "collection_id": str(gift.gift_id), "collection_name": gift.title,
-                    "number": gift.num, "model": model.name, "rarity": rarity, "emoji": emoji,
+                base = {
+                    "ref": saved.msg_id,
+                    "from_user": saved.from_id.user_id if isinstance(saved.from_id, PeerUser) else None,
+                    "date": saved.date.timestamp() if saved.date else 0.0,
+                    "transfer_at": saved.can_transfer_at.timestamp() if saved.can_transfer_at else 0.0,
                     "transfer_stars": saved.transfer_stars or 0,
-                })
+                }
+                if isinstance(gift, StarGiftUnique):
+                    model = next((a for a in gift.attributes if isinstance(a, StarGiftAttributeModel)), None)
+                    if model is None:
+                        continue
+                    rarity = model.rarity.permille / 10 if isinstance(model.rarity, StarGiftAttributeRarity) else None
+                    emoji = next((a.alt for a in getattr(model.document, "attributes", []) or []
+                                  if isinstance(a, DocumentAttributeCustomEmoji)), None)
+                    items.append({**base, "kind": "nft", "collection_id": str(gift.gift_id),
+                                  "collection_name": gift.title, "number": gift.num, "model": model.name,
+                                  "rarity": rarity, "emoji": emoji})
+                elif isinstance(gift, StarGift):
+                    emoji = next((a.alt for a in getattr(gift.sticker, "attributes", []) or []
+                                  if isinstance(a, DocumentAttributeSticker)), None)
+                    items.append({**base, "kind": "gift", "collection_id": str(gift.id),
+                                  "collection_name": gift.title or "Подарок", "number": None, "model": None,
+                                  "rarity": None, "emoji": emoji,
+                                  "convert_stars": saved.convert_stars or gift.convert_stars or 0})
             offset = res.next_offset
             if not offset:
                 return items
+
+    async def received(self) -> list[dict[str, Any]]:
+        """Все подарки релейера (для зачисления подарков, которые прислали игроки)."""
+        return await self._saved()
+
+    async def inventory(self) -> list[dict[str, Any]]:
+        """NFT-подарки на аккаунте релейера, которые можно передать прямо сейчас."""
+        now = time.time()
+        # передача подарка с can_transfer_at в будущем пока заблокирована Telegram
+        return [i for i in await self._saved() if i["kind"] == "nft" and i["transfer_at"] <= now]
 
     async def transfer(self, item: dict[str, Any], user_id: int, username: str | None) -> None:
         """Передаёт подарок игроку. RelayerError('NEED_CONTACT') — релейер не может найти игрока."""
@@ -241,16 +260,27 @@ class Relayer:
             await self.client(TransferStarGiftRequest(stargift=stargift, to_id=peer))
 
     def on_private_message(self, callback: Any) -> None:
-        """callback(user_id) — игрок написал релейеру (нужно, чтобы передать NFT игроку без @username)."""
+        """callback(user_id) — игрок написал релейеру или прислал ему подарок."""
         if not self.ready:
             return
         from telethon import events
+        from telethon.tl.types import (MessageActionStarGift, MessageActionStarGiftUnique, MessageService, PeerUser,
+                                       UpdateNewMessage)
 
         async def handler(event: Any) -> None:
             if event.is_private and event.sender_id:
                 await callback(event.sender_id)
 
+        async def gift_handler(update: Any) -> None:
+            # подарок приходит служебным сообщением, которое NewMessage не ловит
+            msg = getattr(update, "message", None)
+            if (isinstance(update, UpdateNewMessage) and isinstance(msg, MessageService) and not msg.out
+                    and isinstance(msg.action, (MessageActionStarGift, MessageActionStarGiftUnique))
+                    and isinstance(msg.peer_id, PeerUser)):
+                await callback(msg.peer_id.user_id)
+
         self.client.add_event_handler(handler, events.NewMessage(incoming=True))
+        self.client.add_event_handler(gift_handler, events.Raw(UpdateNewMessage))
 
     async def username(self) -> str | None:
         if not self.ready:

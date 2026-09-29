@@ -346,7 +346,9 @@ function walletTab(tab) {
   $$("#wallet-tabs button").forEach((b) => b.classList.toggle("sel", b.dataset.tab === tab));
   $("#tab-dep").classList.toggle("hidden", tab !== "dep");
   $("#tab-out").classList.toggle("hidden", tab !== "out");
+  $("#tab-nft").classList.toggle("hidden", tab !== "nft");
   if (tab === "out") loadWithdraw();
+  if (tab === "nft") loadMyGifts();
 }
 
 function walletEnter() {
@@ -435,6 +437,160 @@ async function withdraw(gift) {
     toast("Заявка отправлена, ждите подарок");
     haptic("win");
     loadWithdraw();
+  });
+}
+
+// ---------- мои подарки (прислали релейеру) ----------
+
+const myGifts = { relayer: null, list: [], timer: 0 };
+const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится" };
+
+function giftCard(gift, opts) {
+  const el = document.createElement(opts && opts.button ? "button" : "div");
+  el.className = "mg";
+  const em = document.createElement("span");
+  em.className = "em";
+  em.textContent = gift.emoji || "🎁";
+  const info = document.createElement("div");
+  const t = document.createElement("div");
+  t.className = "t";
+  t.textContent = gift.title;
+  const sub = document.createElement("div");
+  sub.className = "s";
+  const parts = [];
+  if (gift.model) parts.push(`модель «${gift.model}»` + (gift.rarity ? ` · ${gift.rarity}%` : ""));
+  if (GIFT_STATUS[gift.status]) parts.push(GIFT_STATUS[gift.status]);
+  else if (!gift.priced) parts.push("цена проверяется");
+  sub.textContent = parts.join(" · ");
+  info.append(t, sub);
+  const v = document.createElement("span");
+  v.className = "v";
+  v.textContent = gift.value ? stars(gift.value) : "—";
+  el.append(em, info, v);
+  return el;
+}
+
+async function loadMyGifts(quiet) {
+  const box = $("#mygifts");
+  if (!quiet) box.textContent = "Загружаем…";
+  try {
+    const data = await api("/api/gifts");
+    myGifts.relayer = data.relayer;
+    myGifts.list = data.gifts;
+    $("#nft-rate").textContent = Math.round(data.sell_rate * 100);
+    $("#nft-howto").textContent = data.relayer
+      ? `Отправьте NFT или подарок в Telegram аккаунту @${data.relayer} — он появится здесь через несколько секунд.`
+      : "Приём подарков временно недоступен.";
+    $("#nft-open").classList.toggle("hidden", !data.relayer);
+    box.innerHTML = "";
+    if (!data.gifts.length) box.textContent = "Пока пусто. Отправьте подарок — и он появится здесь.";
+    data.gifts.forEach((gift) => {
+      const card = giftCard(gift);
+      if (gift.status === "owned") {
+        const acts = document.createElement("div");
+        acts.className = "acts";
+        const sell = document.createElement("button");
+        sell.className = "btn";
+        sell.textContent = gift.sell ? `Продать за ${stars(gift.sell)}` : "Продать";
+        sell.disabled = !gift.sell;
+        sell.addEventListener("click", () => sellGift(gift));
+        const out = document.createElement("button");
+        out.className = "btn small";
+        out.textContent = "Вывести";
+        out.addEventListener("click", () => withdrawGift(gift));
+        acts.append(sell, out);
+        card.append(acts);
+      }
+      box.append(card);
+    });
+  } catch (e) {
+    if (!quiet) box.textContent = e.message;
+  }
+}
+
+function openRelayer() {
+  if (!myGifts.relayer) return;
+  const link = `https://t.me/${myGifts.relayer}`;
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(link);
+  else window.open(link, "_blank");
+  // ждём подарок: обновляем список, пока открыт раздел
+  clearInterval(myGifts.timer);
+  let n = 0;
+  myGifts.timer = setInterval(() => {
+    if (++n > 30 || $("#tab-nft").classList.contains("hidden") || state.screen !== "wallet") {
+      clearInterval(myGifts.timer);
+      return;
+    }
+    loadMyGifts(true);
+  }, 5000);
+}
+
+async function sellGift(gift) {
+  const ok = await confirmAsk(`Продать ${gift.title} казино за ${gift.sell} ★?`);
+  if (!ok) return;
+  await guard(async () => {
+    const r = await api("/api/gifts/sell", { id: gift.id });
+    toast(`+${stars(r.amount)}`);
+    fxBurstAt($("#balance-btn"), { count: 30 });
+    haptic("win");
+    loadMyGifts(true);
+  });
+}
+
+async function withdrawGift(gift) {
+  const ok = await confirmAsk(`Вывести ${gift.title} обратно в ваш Telegram?`);
+  if (!ok) return;
+  await guard(async () => {
+    await api("/api/gifts/withdraw", { id: gift.id });
+    toast("Подарок отправлен вам в Telegram");
+    haptic("win");
+    loadMyGifts(true);
+  });
+}
+
+// Выбор подарков для ставки в PvP
+async function pvpGiftSheet(game) {
+  await guard(async () => {
+    const data = await api("/api/gifts");
+    myGifts.relayer = data.relayer;
+    const usable = data.gifts.filter((g) => g.status === "owned");
+    const list = $("#sheet-list");
+    list.innerHTML = "";
+    const chosen = new Set();
+    const ok = $("#sheet-ok");
+    const update = () => {
+      const sum = usable.filter((g) => chosen.has(g.id)).reduce((a, g) => a + g.value, 0);
+      ok.textContent = chosen.size ? `Поставить на ${stars(sum)}` : "Выберите подарки";
+      ok.disabled = !chosen.size;
+    };
+    if (!usable.length) {
+      list.innerHTML = "";
+      const note = document.createElement("p");
+      note.className = "note";
+      note.textContent = data.relayer
+        ? `У вас нет подарков. Отправьте NFT аккаунту @${data.relayer} — и ставьте его здесь.`
+        : "Приём подарков временно недоступен.";
+      list.append(note);
+    }
+    usable.forEach((gift) => {
+      const card = giftCard(gift, { button: true });
+      if (!gift.priced) card.classList.add("off");
+      card.addEventListener("click", () => {
+        if (!gift.priced) { toast("Цена подарка ещё проверяется", true); return; }
+        if (chosen.has(gift.id)) chosen.delete(gift.id); else chosen.add(gift.id);
+        card.classList.toggle("sel", chosen.has(gift.id));
+        haptic();
+        update();
+      });
+      list.append(card);
+    });
+    update();
+    ok.onclick = async () => {
+      const ids = Array.from(chosen);
+      $("#sheet").classList.add("hidden");
+      await pvpBet(game, ids);
+    };
+    $("#sheet").classList.remove("hidden");
   });
 }
 
@@ -1202,6 +1358,13 @@ function pvpRenderPlayers(game, round) {
     const am = document.createElement("span");
     am.className = "am";
     am.textContent = stars(p.amount);
+    if (p.gifts && p.gifts.length) {
+      const gl = document.createElement("span");
+      gl.className = "gl";
+      gl.textContent = p.gifts.slice(0, 5).map((g) => g.emoji || "🎁").join("") + (p.gifts.length > 5 ? "…" : "");
+      gl.title = p.gifts.map((g) => g.title).join(", ");
+      nm.append(gl);
+    }
     const ch = document.createElement("span");
     ch.className = "ch";
     ch.textContent = p.chance + "%";
@@ -1293,15 +1456,15 @@ function pvpLeave() {
   pvp.game = null;
 }
 
-async function pvpBet(game) {
+async function pvpBet(game, gifts) {
   await guard(async () => {
-    const amount = getBet(game === "hockey" ? "hockey" : "pvp");
-    const s = await api("/api/pvp/bet", { amount, game });
+    const body = gifts && gifts.length ? { amount: 0, game, gifts } : { amount: getBet(game === "hockey" ? "hockey" : "pvp"), game };
+    const s = await api("/api/pvp/bet", body);
     pvp.holdUntil = 0;
     loadMe().catch(() => {});
     pvpRenderPlayers(game, s.round);
     if (game === "hockey") hockeyDrawIdle(s.round);
-    toast("Ставка принята");
+    toast(gifts && gifts.length ? "Подарки в банке!" : "Ставка принята");
     fxBurstAt(pvpEl(game, "btn"), { count: 16, speed: 4 });
     haptic();
   });
@@ -1500,6 +1663,11 @@ function bind() {
   $("#case-btn").addEventListener("click", openCase);
   $("#pvp-btn").addEventListener("click", () => pvpBet("roulette"));
   $("#hockey-btn").addEventListener("click", () => pvpBet("hockey"));
+  $("#pvp-gifts").addEventListener("click", () => pvpGiftSheet("roulette"));
+  $("#hockey-gifts").addEventListener("click", () => pvpGiftSheet("hockey"));
+  $("#nft-open").addEventListener("click", openRelayer);
+  $("#sheet-cancel").addEventListener("click", () => $("#sheet").classList.add("hidden"));
+  $("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") $("#sheet").classList.add("hidden"); });
   $("#bigwin-ok").addEventListener("click", () => $("#bigwin").classList.add("hidden"));
   if (tg && tg.BackButton) tg.BackButton.onClick(goBack);
 }
