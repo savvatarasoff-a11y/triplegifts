@@ -459,3 +459,14 @@ body.has-tabbar { padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
   font-weight: 800; font-size: 13px; animation: pop .3s; }
 .case-drops span.good { border-color: var(--accent); color: var(--accent-soft); }
 .mg .acts-note { grid-column: 1 / -1; color: var(--accent-soft); }
+
+/* ---------- валюты: звёзды и TON ---------- */
+body.cur-ton .only-stars { display: none !important; }
+body:not(.cur-ton) .only-ton { display: none !important; }
+.cur-switch { display: flex; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px; margin-right: 6px; }
+.cur-switch button { width: 34px; height: 30px; border-radius: 999px; font-size: 15px; color: var(--muted); font-weight: 900; }
+.cur-switch button.sel { background: var(--accent); color: #fff; }
+.kv { text-align: left; margin: 10px 0; }
+.kv small { display: block; color: var(--muted); font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+.kv .btn.small { margin-top: 6px; width: 100%; }
+#tab-out input#ton-address { width: 100%; margin: 6px 0; }

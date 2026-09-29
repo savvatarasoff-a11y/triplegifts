@@ -39,8 +39,11 @@
       <span class="wordmark"><b>SVAG</b><i>GIFTS</i></span>
     </button>
     <div class="screen-title hidden" id="title"></div>
+    <div class="cur-switch" id="cur-switch" role="tablist" aria-label="Валюта">
+      <button data-cur="stars" class="sel">★</button><button data-cur="ton">💎</button>
+    </div>
     <button class="balance" id="balance-btn">
-      <span class="star">★</span><span id="balance">—</span><span class="plus">+</span>
+      <span class="star" id="cur-icon">★</span><span id="balance">—</span><span class="plus">+</span>
     </button>
   </header>
 
@@ -211,7 +214,19 @@
       <div class="seg three tabs" id="wallet-tabs">
         <button data-tab="dep" class="sel">Пополнить</button><button data-tab="nft">Подарки</button><button data-tab="out">Вывести</button>
       </div>
-      <div class="panel center" id="tab-dep">
+      <div class="panel center only-ton" id="dep-ton">
+        <div class="big-star">💎</div>
+        <div class="panel-title">Пополнить TON</div>
+        <div id="ton-dep-body">
+          <p class="note">Переведите любую сумму TON на кошелёк казино <b>с комментарием</b> — баланс пополнится сам через ~30 секунд.</p>
+          <div class="kv"><small>Кошелёк</small><div class="ref-link" id="ton-wallet">—</div><button class="btn small" data-copy="ton-wallet">Копировать</button></div>
+          <div class="kv"><small>Комментарий (обязательно!)</small><div class="ref-link" id="ton-comment">—</div><button class="btn small" data-copy="ton-comment">Копировать</button></div>
+          <button class="btn big" id="ton-open">Открыть кошелёк</button>
+          <p class="note">Без комментария перевод не найти — пишите его точно как указано.</p>
+        </div>
+        <p class="note hidden" id="ton-dep-off">Пополнение TON пока не подключено.</p>
+      </div>
+      <div class="panel center only-stars" id="tab-dep">
         <div class="big-star">★</div>
         <div class="panel-title">Пополнить через Telegram Stars</div>
         <div class="presets" id="presets"></div>
@@ -235,13 +250,25 @@
         </div>
       </div>
       <div class="hidden" id="tab-out">
-        <div class="panel">
+        <div class="panel only-ton">
+          <div class="panel-title">Вывод TON на кошелёк</div>
+          <div class="wager hidden" id="ton-wager"></div>
+          <input id="ton-address" placeholder="Адрес TON-кошелька (UQ… или EQ…)" autocomplete="off">
+          <div class="row">
+            <input id="ton-amount" type="number" inputmode="decimal" step="0.01" placeholder="Сумма, TON">
+            <button class="btn" id="ton-max">MAX</button>
+          </div>
+          <button class="btn big" id="ton-withdraw">Вывести TON</button>
+          <p class="note">Заявку проверяет администратор и переводит TON на ваш кошелёк. Минимум <span id="ton-min">0.1</span> TON.</p>
+          <div class="history" id="ton-history"></div>
+        </div>
+        <div class="panel only-stars">
           <div class="panel-title">Вывод подарком Telegram</div>
           <p class="note left">Выберите подарок — его стоимость спишется с баланса. После проверки подарок придёт вам в Telegram: его можно оставить или обменять на звёзды в профиле (Telegram начисляет за обмен чуть меньше стоимости).</p>
           <div class="wager hidden" id="wager"></div>
           <div class="gifts" id="gifts"></div>
         </div>
-        <div class="panel">
+        <div class="panel only-stars">
           <div class="panel-title">Мои выводы</div>
           <div class="history" id="wd-history"></div>
         </div>
@@ -347,7 +374,7 @@
     <!-- PvP-рулетка -->
     <section class="screen" id="pvp">
       <div class="pvp-top">
-        <div class="pot"><small>Банк</small><b><span id="pvp-pot">0</span> ★</b></div>
+        <div class="pot"><small>Банк</small><b><span id="pvp-pot">0</span> <span class="pot-cur">★</span></b></div>
         <div class="timer" id="pvp-timer">Ждём игроков…</div>
       </div>
       <div class="pvp-bar" id="pvp-bar"></div>
@@ -367,7 +394,7 @@
     <!-- PvP-хоккей -->
     <section class="screen" id="hockey">
       <div class="pvp-top">
-        <div class="pot"><small>Банк</small><b><span id="hockey-pot">0</span> ★</b></div>
+        <div class="pot"><small>Банк</small><b><span id="hockey-pot">0</span> <span class="pot-cur">★</span></b></div>
         <div class="timer" id="hockey-timer">Ждём игроков…</div>
       </div>
       <div class="rink"><canvas id="hockey-canvas"></canvas></div>

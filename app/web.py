@@ -15,6 +15,7 @@ from aiogram.utils.web_app import safe_parse_webapp_init_data
 from aiohttp import web
 
 from .casino import GIFT_SELL_RATE, Casino, GameError, display_name
+from . import money, ton
 from .config import Config
 from .db import REFERRAL_RATE
 from .games import logic as g
@@ -22,7 +23,7 @@ from .cases import CaseCatalog
 from .gifts import withdraw as withdraw_gift
 from .nft import deliver as deliver_nft
 from .relayer import Relayer
-from .withdraw import GiftCatalog, notify_admins
+from .withdraw import GiftCatalog, notify_admins, notify_admins_ton
 
 log = logging.getLogger(__name__)
 
@@ -183,10 +184,14 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         return web.json_response({
             "user": {"id": uid, "name": display_name(user)},
             "balance": user["balance"],
+            "ton": user["ton"],
             "history": await casino.db.recent_bets(uid, 15),
             "config": {
                 "min_bet": cfg.min_bet,
                 "max_bet": cfg.max_bet,
+                "ton": {"min_bet": money.TON_MIN_BET, "max_bet": money.TON_MAX_BET, "nano": money.NANO,
+                        "rate": await casino.rate(), "min_withdraw": money.TON_MIN_WITHDRAW,
+                        "deposits": bool(await ton.wallet(casino.db))},
                 "deposit_presets": DEPOSIT_PRESETS,
                 "slots": {"symbols": g.SLOT_SYMBOLS, "777": g.SLOT_777, "triple": g.SLOT_TRIPLE,
                           "two_sevens": g.SLOT_TWO_SEVENS, "pair": g.SLOT_PAIR, "jackpot_nft": True},
@@ -256,7 +261,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.post("/api/slots")
     async def slots(request: web.Request) -> web.Response:
         data = await body(request)
-        result = await casino.slots(request[USER_ID], data.get("bet"))
+        result = await casino.slots(request[USER_ID], data.get("bet"), cur=data.get("cur"))
         if result.get("nft"):
             asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
         return web.json_response(result)
@@ -264,7 +269,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.post("/api/dice")
     async def dice(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.dice(request[USER_ID], data.get("bet"), data.get("chance"), data.get("over", False)))
+        return web.json_response(await casino.dice(request[USER_ID], data.get("bet"), data.get("chance"),
+                                                   data.get("over", False), data.get("cur")))
 
     @routes.post("/api/case")
     async def open_case(request: web.Request) -> web.Response:
@@ -273,7 +279,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         case = await cases.get(case_id) if isinstance(case_id, str) else None
         if not case:
             raise GameError("Кейс сейчас недоступен")
-        result = await casino.open_case(request[USER_ID], case, data.get("count", 1))
+        result = await casino.open_case(request[USER_ID], case, data.get("count", 1), data.get("cur"))
         for item in result["items"]:
             if item["kind"] == "nft":
                 asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, item["nft"]["win_id"]))
@@ -286,7 +292,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.post("/api/mines/start")
     async def mines_start(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.mines_start(request[USER_ID], data.get("bet"), data.get("mines")))
+        return web.json_response(await casino.mines_start(request[USER_ID], data.get("bet"), data.get("mines"),
+                                                          data.get("cur")))
 
     @routes.post("/api/mines/open")
     async def mines_open(request: web.Request) -> web.Response:
@@ -304,7 +311,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.post("/api/crash/bet")
     async def crash_bet(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.crash_bet(request[USER_ID], data.get("bet"), data.get("auto")))
+        return web.json_response(await casino.crash_bet(request[USER_ID], data.get("bet"), data.get("auto"),
+                                                        data.get("cur")))
 
     @routes.post("/api/crash/cashout")
     async def crash_cashout(request: web.Request) -> web.Response:
@@ -313,13 +321,33 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.get("/api/pvp")
     async def pvp_state(request: web.Request) -> web.Response:
         game = request.query.get("game", "roulette")
-        return web.json_response(await casino.pvp_state(request[USER_ID], game))
+        return web.json_response(await casino.pvp_state(request[USER_ID], game, request.query.get("cur", "stars")))
 
     @routes.post("/api/pvp/bet")
     async def pvp_bet(request: web.Request) -> web.Response:
         data = await body(request)
         return web.json_response(await casino.pvp_bet(request[USER_ID], data.get("amount"), data.get("game", "roulette"),
-                                                      data.get("gifts")))
+                                                      data.get("gifts"), data.get("cur")))
+
+    @routes.get("/api/ton")
+    async def ton_info(request: web.Request) -> web.Response:
+        uid = request[USER_ID]
+        address = await ton.wallet(casino.db)
+        comment = ton.deposit_comment(uid)
+        return web.json_response({
+            "wallet": address, "comment": comment,
+            "link": ton.transfer_link(address, comment) if address else None,
+            "min_withdraw": money.TON_MIN_WITHDRAW, "wager": await casino.wager_status(uid, money.TON),
+            "history": [{"id": w["id"], "amount": w["amount"], "address": w["address"], "status": w["status"],
+                         "created_at": w["created_at"]} for w in await casino.ton_withdrawals(user_id=uid, limit=10)],
+        })
+
+    @routes.post("/api/ton/withdraw")
+    async def ton_withdraw(request: web.Request) -> web.Response:
+        data = await body(request)
+        wd = await casino.ton_withdraw_request(request[USER_ID], data.get("amount"), data.get("address"))
+        await notify_admins_ton(bot, cfg, casino, wd)
+        return web.json_response(wd)
 
     @routes.get("/api/profile")
     async def profile(request: web.Request) -> web.Response:

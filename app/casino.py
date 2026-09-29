@@ -5,10 +5,11 @@ import json
 import re
 import secrets
 import time
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import aiosqlite
 
+from . import money
 from .config import Config
 from .db import REFERRAL_RATE, Database, InsufficientFunds
 from .games import logic as g
@@ -20,6 +21,8 @@ PVP_ROUND_SECONDS = 30
 PVP_GAMES = ("roulette", "hockey")      # сколько длится раунд после второго игрока
 PVP_IDLE_REFUND = 600       # одиночную ставку возвращаем через 10 минут
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
+# адрес TON: «дружелюбный» (48 символов base64url) или сырой 0:hex
+TON_ADDRESS_RE = re.compile(r"^(?:[A-Za-z0-9_-]{48}|-?[0-9]:[0-9a-fA-F]{64})$")
 GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
 MAX_GIFTS_PER_BET = 20
 TEST_PRICE_UNTIL = 4_102_444_800   # 2100 год: цены тестовых NFT всегда «свежие»
@@ -41,34 +44,59 @@ class Casino:
     def __init__(self, db: Database, cfg: Config):
         self.db = db
         self.cfg = cfg
+        # курс «звёзд за 1 TON» — для кейсов и NFT-джекпота в TON; подключается в main (MRKT)
+        self.ton_rate: Callable[[], Awaitable[float | None]] | None = None
 
     # ---------- общее ----------
 
-    def _check_bet(self, bet: Any) -> int:
+    @staticmethod
+    def _cur(cur: Any) -> str:
+        try:
+            return money.check(cur)
+        except money.CurrencyError as e:
+            raise GameError(str(e)) from None
+
+    async def rate(self) -> float | None:
+        if self.ton_rate is None:
+            return None
+        try:
+            return await self.ton_rate()
+        except Exception:
+            return None
+
+    def _check_bet(self, bet: Any, cur: str = money.STARS) -> int:
         if not isinstance(bet, int) or isinstance(bet, bool):
             raise GameError("Ставка должна быть целым числом")
-        if bet < self.cfg.min_bet:
-            raise GameError(f"Минимальная ставка — {self.cfg.min_bet} ⭐")
-        if bet > self.cfg.max_bet:
-            raise GameError(f"Максимальная ставка — {self.cfg.max_bet} ⭐")
+        lo, hi = (self.cfg.min_bet, self.cfg.max_bet) if cur == money.STARS else (money.TON_MIN_BET, money.TON_MAX_BET)
+        if bet < lo:
+            raise GameError(f"Минимальная ставка — {money.fmt(lo, cur)}")
+        if bet > hi:
+            raise GameError(f"Максимальная ставка — {money.fmt(hi, cur)}")
         return bet
 
-    async def _take(self, c: aiosqlite.Connection, user_id: int, bet: int, game: str) -> int:
+    async def _take(self, c: aiosqlite.Connection, user_id: int, bet: int, game: str,
+                    cur: str = money.STARS) -> int:
         try:
-            return await self.db.change_balance(c, user_id, -bet, "bet", game)
+            return await self.db.change_balance(c, user_id, -bet, "bet", game, cur)
         except InsufficientFunds:
-            raise GameError("Недостаточно звёзд на балансе") from None
+            raise GameError("Недостаточно звёзд на балансе" if cur == money.STARS
+                            else "Недостаточно TON на балансе") from None
+
+    @staticmethod
+    async def _balance(c: aiosqlite.Connection, user_id: int, cur: str = money.STARS) -> int:
+        async with c.execute(f"SELECT {money.column(cur)} b FROM users WHERE id=?", (user_id,)) as q:
+            return (await q.fetchone())["b"]
 
     async def _settle(
-        self, c: aiosqlite.Connection, user_id: int, game: str, bet: int, win: int, detail: dict
+        self, c: aiosqlite.Connection, user_id: int, game: str, bet: int, win: int, detail: dict,
+        cur: str = money.STARS,
     ) -> int:
         balance = None
         if win > 0:
-            balance = await self.db.change_balance(c, user_id, win, "win", game)
-        await self.db.log_bet(c, user_id, game, bet, win, json.dumps(detail, ensure_ascii=False))
+            balance = await self.db.change_balance(c, user_id, win, "win", game, cur)
+        await self.db.log_bet(c, user_id, game, bet, win, json.dumps(detail, ensure_ascii=False), cur)
         if balance is None:
-            async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
-                balance = (await q.fetchone())["balance"]
+            balance = await self._balance(c, user_id, cur)
         return balance
 
     async def register(self, user_id: int, username: str | None, first_name: str | None) -> dict:
@@ -89,17 +117,24 @@ class Casino:
         fav = await self.db.one(
             "SELECT game, COUNT(*) n FROM bets WHERE user_id=? GROUP BY game ORDER BY n DESC LIMIT 1", user_id)
         best = await self.db.one(
-            "SELECT game, bet, win FROM bets WHERE user_id=? AND win > 0 ORDER BY win DESC, id LIMIT 1", user_id)
+            "SELECT game, bet, win, cur FROM bets WHERE user_id=? AND win > 0 AND cur='stars' "
+            "ORDER BY win DESC, id LIMIT 1", user_id)
         withdrawn = await self.db.one(
             "SELECT COALESCE(SUM(amount),0) s FROM withdrawals WHERE user_id=? AND status='sent'", user_id)
+        ton_out = await self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM ton_withdrawals WHERE user_id=? AND status='sent'", user_id)
         return {
             "id": user_id, "name": display_name(user or None), "username": user.get("username"),
             "joined": user.get("created_at"), "balance": user.get("balance", 0),
             "deposited": user.get("deposited", 0), "wagered": user.get("wagered", 0), "won": user.get("won", 0),
             "withdrawn": withdrawn["s"], "games": bets["n"], "wins": bets["wins"],
             "favorite": fav["game"] if fav else None,
-            "best": {"game": best["game"], "bet": best["bet"], "win": best["win"]} if best else None,
+            "best": {"game": best["game"], "bet": best["bet"], "win": best["win"], "cur": best["cur"]}
+            if best else None,
             "wager": await self.wager_status(user_id),
+            "ton": {"balance": user.get("ton", 0), "deposited": user.get("ton_deposited", 0),
+                    "wagered": user.get("ton_wagered", 0), "won": user.get("ton_won", 0),
+                    "withdrawn": ton_out["s"], "wager": await self.wager_status(user_id, money.TON)},
         }
 
     async def referrals(self, user_id: int) -> dict:
@@ -107,28 +142,32 @@ class Casino:
         rows = await self.db.all(
             "SELECT u.id, u.username, u.first_name, u.created_at, "
             "(SELECT COALESCE(SUM(delta),0) FROM ledger l WHERE l.user_id=? AND l.kind='ref_bonus' "
-            " AND l.ref=CAST(u.id AS TEXT)) earned "
-            "FROM users u WHERE u.referrer_id=? ORDER BY earned DESC, u.created_at DESC LIMIT 50",
-            user_id, user_id)
+            " AND l.cur='stars' AND l.ref=CAST(u.id AS TEXT)) earned, "
+            "(SELECT COALESCE(SUM(delta),0) FROM ledger l WHERE l.user_id=? AND l.kind='ref_bonus' "
+            " AND l.cur='ton' AND l.ref=CAST(u.id AS TEXT)) earned_ton "
+            "FROM users u WHERE u.referrer_id=? ORDER BY earned DESC, earned_ton DESC, u.created_at DESC LIMIT 50",
+            user_id, user_id, user_id)
         total = await self.db.one(
-            "SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE user_id=? AND kind='ref_bonus'", user_id)
+            "SELECT COALESCE(SUM(CASE WHEN cur='stars' THEN delta END),0) s, "
+            "COALESCE(SUM(CASE WHEN cur='ton' THEN delta END),0) t FROM ledger WHERE user_id=? AND kind='ref_bonus'",
+            user_id)
         count = await self.db.one("SELECT COUNT(*) n FROM users WHERE referrer_id=?", user_id)
         return {
-            "count": count["n"], "earned": total["s"], "rate": REFERRAL_RATE,
-            "list": [{"id": r["id"], "name": display_name(r), "earned": r["earned"], "joined": r["created_at"]}
-                     for r in rows],
+            "count": count["n"], "earned": total["s"], "earned_ton": total["t"], "rate": REFERRAL_RATE,
+            "list": [{"id": r["id"], "name": display_name(r), "earned": r["earned"], "earned_ton": r["earned_ton"],
+                      "joined": r["created_at"]} for r in rows],
         }
 
     async def big_wins(self, limit: int = 20) -> list[dict]:
         """Лента крупных выигрышей всех игроков (от ×5)."""
         rows = await self.db.all(
-            "SELECT b.game, b.bet, b.win, b.ts, u.id, u.first_name, u.username FROM bets b "
+            "SELECT b.game, b.bet, b.win, b.ts, b.cur, u.id, u.first_name, u.username FROM bets b "
             "LEFT JOIN users u ON u.id = b.user_id WHERE b.win >= b.bet * 5 AND b.win > 0 "
             "ORDER BY b.id DESC LIMIT ?",
             limit,
         )
         return [
-            {"game": r["game"], "bet": r["bet"], "win": r["win"], "x": round(r["win"] / r["bet"], 2),
+            {"game": r["game"], "bet": r["bet"], "win": r["win"], "x": round(r["win"] / r["bet"], 2), "cur": r["cur"],
              "name": display_name({"id": r["id"], "first_name": r["first_name"], "username": r["username"]})}
             for r in rows
         ]
@@ -179,14 +218,15 @@ class Casino:
 
     # ---------- вывод подарками ----------
 
-    async def wager_status(self, user_id: int) -> dict:
-        """Звёзды из чеков и бонусов нужно отыграть: сумма ставок ≥ полученного бесплатно."""
+    async def wager_status(self, user_id: int, cur: str = money.STARS) -> dict:
+        """Звёзды из чеков и бонусов (и TON реф-бонусов) нужно отыграть: сумма ставок ≥ полученного бесплатно."""
         free = await self.db.one(
-            "SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE user_id=? AND kind IN ('check','bonus','ref_bonus')",
-            user_id
+            "SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE user_id=? AND cur=? "
+            "AND kind IN ('check','bonus','ref_bonus')",
+            user_id, cur
         )
         user = await self.db.get_user(user_id)
-        wagered = user["wagered"] if user else 0
+        wagered = (user["wagered"] if cur == money.STARS else user["ton_wagered"]) if user else 0
         return {"required": free["s"], "done": wagered, "left": max(0, free["s"] - wagered)}
 
     async def withdraw_request(self, user_id: int, gift_id: str, price: int, emoji: str | None) -> dict:
@@ -259,14 +299,80 @@ class Casino:
         args.append(limit)
         return await self.db.all(sql, *args)
 
+    # ---------- вывод TON ----------
+
+    async def ton_withdraw_request(self, user_id: int, amount: Any, address: Any) -> dict:
+        """Заявка на вывод TON: сумма списывается сразу, админ переводит вручную со своего кошелька."""
+        if not isinstance(amount, int) or isinstance(amount, bool):
+            raise GameError("Некорректная сумма")
+        if not money.TON_MIN_WITHDRAW <= amount <= money.TON_MAX_WITHDRAW:
+            raise GameError(f"Вывод — от {money.fmt(money.TON_MIN_WITHDRAW, money.TON)} "
+                            f"до {money.fmt(money.TON_MAX_WITHDRAW, money.TON)}")
+        if not isinstance(address, str) or not TON_ADDRESS_RE.match(address.strip()):
+            raise GameError("Некорректный адрес TON-кошелька")
+        address = address.strip()
+        wager = await self.wager_status(user_id, money.TON)
+        if wager["left"] > 0:
+            raise GameError(f"Сначала отыграйте бонусные TON: осталось поставить {money.fmt(wager['left'], money.TON)}")
+        async with self.db.tx() as c:
+            async with c.execute("SELECT 1 FROM ton_withdrawals WHERE user_id=? AND status='pending'", (user_id,)) as q:
+                if await q.fetchone():
+                    raise GameError("У вас уже есть заявка на вывод TON — дождитесь её обработки")
+            res = await c.execute(
+                "INSERT INTO ton_withdrawals(user_id, amount, address, created_at) VALUES (?,?,?,?)",
+                (user_id, amount, address, time.time()),
+            )
+            wd_id = res.lastrowid
+            try:
+                balance = await self.db.change_balance(c, user_id, -amount, "withdraw", f"ton:{wd_id}", money.TON)
+            except InsufficientFunds:
+                raise GameError("Недостаточно TON на балансе") from None
+        return {"id": wd_id, "user_id": user_id, "amount": amount, "address": address, "status": "pending",
+                "balance": balance, "cur": money.TON}
+
+    async def ton_withdraw_done(self, wd_id: int, admin_id: int) -> dict | None:
+        async with self.db.tx() as c:
+            res = await c.execute(
+                "UPDATE ton_withdrawals SET status='sent', admin_id=?, processed_at=? WHERE id=? AND status='pending'",
+                (admin_id, time.time(), wd_id),
+            )
+        return await self.db.one("SELECT * FROM ton_withdrawals WHERE id=?", wd_id) if res.rowcount == 1 else None
+
+    async def ton_withdraw_reject(self, wd_id: int, admin_id: int) -> dict | None:
+        async with self.db.tx() as c:
+            res = await c.execute(
+                "UPDATE ton_withdrawals SET status='rejected', admin_id=?, processed_at=? WHERE id=? AND status='pending'",
+                (admin_id, time.time(), wd_id),
+            )
+            if res.rowcount != 1:
+                return None
+            async with c.execute("SELECT * FROM ton_withdrawals WHERE id=?", (wd_id,)) as q:
+                wd = dict(await q.fetchone())
+            wd["balance"] = await self.db.change_balance(c, wd["user_id"], wd["amount"], "withdraw_refund",
+                                                         f"ton:{wd_id}", money.TON)
+        return wd
+
+    async def ton_withdrawals(self, user_id: int | None = None, status: str | None = None,
+                              limit: int = 20) -> list[dict]:
+        sql, args = "SELECT * FROM ton_withdrawals WHERE 1=1", []
+        if user_id is not None:
+            sql += " AND user_id=?"
+            args.append(user_id)
+        if status is not None:
+            sql += " AND status=?"
+            args.append(status)
+        return await self.db.all(sql + " ORDER BY id DESC LIMIT ?", *args, limit)
+
     # ---------- слоты ----------
 
-    async def slots(self, user_id: int, bet: Any, value: int | None = None) -> dict:
+    async def slots(self, user_id: int, bet: Any, value: int | None = None, cur: Any = money.STARS) -> dict:
         """value — исход 1–64 (например, от 🎰 Telegram в чате); без него выпадает случайно на сервере.
 
-        7️⃣7️⃣7️⃣ — NFT у релейера с рыночной ценой ≈ ×40 от ставки; если такого нет — ×40 звёздами.
+        7️⃣7️⃣7️⃣ — NFT у релейера с рыночной ценой ≈ ×40 от ставки; если такого нет — ×40 в валюте ставки.
         """
-        bet = self._check_bet(bet)
+        cur = self._cur(cur)
+        bet = self._check_bet(bet, cur)
+        rate = await self.rate() if cur == money.TON else None
         if value is None:
             value, reels, mult = g.slots_spin()
         else:
@@ -274,20 +380,20 @@ class Casino:
             mult = g.slots_multiplier(reels)
         detail: dict[str, Any] = {"value": value, "reels": reels}
         nft = None
+        target = money.to_stars(bet * g.SLOT_777, cur, rate)          # цена NFT-джекпота в звёздах
         async with self.db.tx() as c:
-            await self._take(c, user_id, bet, "slots")
-            if value == 64:
-                nft = await self._reserve_nft_near(c, user_id, bet * g.SLOT_777)
+            await self._take(c, user_id, bet, "slots", cur)
+            if value == 64 and target:
+                nft = await self._reserve_nft_near(c, user_id, target)
             if nft:
                 detail["nft_win"] = nft["win_id"]
-                await self.db.log_bet(c, user_id, "slots", bet, nft["price"], json.dumps(detail, ensure_ascii=False))
-                async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
-                    balance = (await q.fetchone())["balance"]
-                win = nft["price"]
+                win = money.stars_to(nft["price"], cur, rate) or 0
+                await self.db.log_bet(c, user_id, "slots", bet, win, json.dumps(detail, ensure_ascii=False), cur)
+                balance = await self._balance(c, user_id, cur)
             else:
                 win = g.payout(bet, mult)
-                balance = await self._settle(c, user_id, "slots", bet, win, detail)
-        result = {"value": value, "reels": reels, "multiplier": mult, "win": win, "balance": balance}
+                balance = await self._settle(c, user_id, "slots", bet, win, detail, cur)
+        result = {"value": value, "reels": reels, "multiplier": mult, "win": win, "balance": balance, "cur": cur}
         if nft:
             result["nft"] = nft
         return result
@@ -313,8 +419,9 @@ class Casino:
 
     # ---------- кости ----------
 
-    async def dice(self, user_id: int, bet: Any, chance: Any, over: Any = False) -> dict:
-        bet = self._check_bet(bet)
+    async def dice(self, user_id: int, bet: Any, chance: Any, over: Any = False, cur: Any = money.STARS) -> dict:
+        cur = self._cur(cur)
+        bet = self._check_bet(bet, cur)
         if not isinstance(chance, (int, float)) or isinstance(chance, bool) or not g.dice_valid_chance(float(chance)):
             raise GameError(f"Шанс — от {g.DICE_MIN_CHANCE} до {g.DICE_MAX_CHANCE:g}%, не больше двух знаков после точки")
         chance = float(chance)
@@ -322,37 +429,43 @@ class Casino:
         roll, won, mult = g.dice_roll(chance, over)
         win = g.payout(bet, mult)
         async with self.db.tx() as c:
-            await self._take(c, user_id, bet, "dice")
+            await self._take(c, user_id, bet, "dice", cur)
             balance = await self._settle(
-                c, user_id, "dice", bet, win, {"roll": roll, "chance": chance, "over": over}
+                c, user_id, "dice", bet, win, {"roll": roll, "chance": chance, "over": over}, cur
             )
         return {"roll": roll, "chance": chance, "over": over, "won": won,
-                "multiplier": g.dice_multiplier(chance), "win": win, "balance": balance}
+                "multiplier": g.dice_multiplier(chance), "win": win, "balance": balance, "cur": cur}
 
     # ---------- кейсы ----------
 
-    async def open_case(self, user_id: int, case: dict, count: Any = 1) -> dict:
+    async def open_case(self, user_id: int, case: dict, count: Any = 1, cur: Any = money.STARS) -> dict:
         """Открывает кейс count раз (1–CASE_MAX_COUNT) одной транзакцией.
 
         case — готовый кейс из CaseCatalog (с живыми ценами). NFT не зачисляется звёздами, а передаётся игроку.
         """
         if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= CASE_MAX_COUNT:
             raise GameError(f"Открыть можно от 1 до {CASE_MAX_COUNT} кейсов")
+        cur = self._cur(cur)
+        rate = await self.rate() if cur == money.TON else None
+        price = money.stars_to(case["price"], cur, rate, up=True)      # цены кейсов — в звёздах, в TON по курсу
+        if not price:
+            raise GameError("Курс TON сейчас недоступен — откройте кейс за звёзды")
         weights = [p["weight"] for p in case["prizes"]]
         prizes = [g.pick_weighted(case["prizes"], weights) for _ in range(count)]
         items = []
         async with self.db.tx() as c:
-            await self._take(c, user_id, case["price"] * count, "case")
+            await self._take(c, user_id, price * count, "case", cur)
             for prize in prizes:
-                detail = {"case": case["id"], "prize": prize["amount"], "gift": prize["emoji"], "kind": prize["kind"]}
-                item = {"kind": prize["kind"], "prize": prize["amount"], "gift": prize["emoji"]}
+                amount = money.stars_to(prize["amount"], cur, rate) or 0
+                detail = {"case": case["id"], "prize": amount, "gift": prize["emoji"], "kind": prize["kind"]}
+                item = {"kind": prize["kind"], "prize": amount, "gift": prize["emoji"]}
                 if prize["kind"] == "nft":
                     # Резервируем подарок этой модели у релейера; конкретный NFT выберется при передаче
-                    cur = await c.execute(
+                    res = await c.execute(
                         "UPDATE nft_models SET reserved=reserved+1 WHERE id=? AND enabled=1 AND stock > reserved",
                         (prize["model_id"],),
                     )
-                    if cur.rowcount != 1:
+                    if res.rowcount != 1:
                         raise GameError("Подарки этой модели только что закончились — откройте кейс ещё раз")
                     win = await c.execute(
                         "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
@@ -361,16 +474,14 @@ class Casino:
                     detail["nft_win"] = win.lastrowid
                     detail["model"] = prize["model"]
                     item["nft"] = {"win_id": win.lastrowid, "title": prize["title"], "model": prize["model"]}
-                elif prize["amount"] > 0:
-                    await self.db.change_balance(c, user_id, prize["amount"], "win", "case")
-                await self.db.log_bet(c, user_id, "case", case["price"], prize["amount"],
-                                      json.dumps(detail, ensure_ascii=False))
+                elif amount > 0:
+                    await self.db.change_balance(c, user_id, amount, "win", "case", cur)
+                await self.db.log_bet(c, user_id, "case", price, amount, json.dumps(detail, ensure_ascii=False), cur)
                 items.append(item)
-            async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
-                balance = (await q.fetchone())["balance"]
+            balance = await self._balance(c, user_id, cur)
         # поля первого приза оставлены на верхнем уровне для совместимости со старым клиентом
-        return {"case": case["id"], **items[0], "items": items, "count": count, "cost": case["price"] * count,
-                "total": sum(i["prize"] for i in items), "balance": balance}
+        return {"case": case["id"], **items[0], "items": items, "count": count, "cost": price * count, "price": price,
+                "total": sum(i["prize"] for i in items), "balance": balance, "cur": cur}
 
     # ---------- мины ----------
 
@@ -379,6 +490,7 @@ class Casino:
         opened = json.loads(game["opened"])
         view = {
             "active": not reveal,
+            "cur": game.get("cur") or money.STARS,
             "bet": game["bet"],
             "mines": game["mines"],
             "opened": opened,
@@ -395,8 +507,9 @@ class Casino:
         game = await self.db.one("SELECT * FROM mines_games WHERE user_id=?", user_id)
         return self._mines_view(game) if game else None
 
-    async def mines_start(self, user_id: int, bet: Any, mines: Any) -> dict:
-        bet = self._check_bet(bet)
+    async def mines_start(self, user_id: int, bet: Any, mines: Any, cur: Any = money.STARS) -> dict:
+        cur = self._cur(cur)
+        bet = self._check_bet(bet, cur)
         if not isinstance(mines, int) or isinstance(mines, bool) or not g.MINES_MIN <= mines <= 24:
             raise GameError(f"Мин — от {g.MINES_MIN} до 24")
         layout = g.mines_place(mines)
@@ -404,10 +517,10 @@ class Casino:
             async with c.execute("SELECT 1 FROM mines_games WHERE user_id=?", (user_id,)) as q:
                 if await q.fetchone():
                     raise GameError("Сначала закончите текущую игру")
-            balance = await self._take(c, user_id, bet, "mines")
+            balance = await self._take(c, user_id, bet, "mines", cur)
             await c.execute(
-                "INSERT INTO mines_games(user_id, bet, mines, layout, created_at) VALUES (?,?,?,?,?)",
-                (user_id, bet, mines, json.dumps(layout), time.time()),
+                "INSERT INTO mines_games(user_id, bet, mines, layout, created_at, cur) VALUES (?,?,?,?,?,?)",
+                (user_id, bet, mines, json.dumps(layout), time.time(), cur),
             )
             async with c.execute("SELECT * FROM mines_games WHERE user_id=?", (user_id,)) as q:
                 game = dict(await q.fetchone())
@@ -430,7 +543,8 @@ class Casino:
                 await c.execute("DELETE FROM mines_games WHERE user_id=?", (user_id,))
                 game["opened"] = json.dumps(opened)
                 balance = await self._settle(
-                    c, user_id, "mines", game["bet"], 0, {"mines": game["mines"], "opened": len(opened), "boom": cell}
+                    c, user_id, "mines", game["bet"], 0, {"mines": game["mines"], "opened": len(opened), "boom": cell},
+                    game["cur"],
                 )
                 return {**self._mines_view(game, reveal=True), "boom": cell, "win": 0, "balance": balance}
             opened.append(cell)
@@ -457,7 +571,7 @@ class Casino:
         await c.execute("DELETE FROM mines_games WHERE user_id=?", (game["user_id"],))
         balance = await self._settle(
             c, game["user_id"], "mines", game["bet"], win,
-            {"mines": game["mines"], "opened": len(view["opened"]), "multiplier": view["multiplier"]},
+            {"mines": game["mines"], "opened": len(view["opened"]), "multiplier": view["multiplier"]}, game["cur"],
         )
         return {**view, "win": win, "balance": balance}
 
@@ -511,7 +625,7 @@ class Casino:
                     )
                     await self.db.log_bet(
                         c, bet["user_id"], "crash", bet["bet"], 0,
-                        json.dumps({"round": rnd["id"], "point": point, "cashout": None}),
+                        json.dumps({"round": rnd["id"], "point": point, "cashout": None}), bet["cur"],
                     )
 
     async def _crash_pay(self, c: aiosqlite.Connection, rnd: dict, bet: dict, multiplier: float) -> int:
@@ -522,12 +636,13 @@ class Casino:
         )
         balance = await self._settle(
             c, bet["user_id"], "crash", bet["bet"], win,
-            {"round": rnd["id"], "point": rnd["point"], "cashout": multiplier},
+            {"round": rnd["id"], "point": rnd["point"], "cashout": multiplier}, bet["cur"],
         )
         return balance
 
-    async def crash_bet(self, user_id: int, bet: Any, auto: Any = None) -> dict:
-        bet = self._check_bet(bet)
+    async def crash_bet(self, user_id: int, bet: Any, auto: Any = None, cur: Any = money.STARS) -> dict:
+        cur = self._cur(cur)
+        bet = self._check_bet(bet, cur)
         if auto is not None:
             if not isinstance(auto, (int, float)) or isinstance(auto, bool) or not 1.01 <= auto <= g.CRASH_MAX:
                 raise GameError("Автовывод — от 1.01×")
@@ -542,12 +657,12 @@ class Casino:
             ) as q:
                 if await q.fetchone():
                     raise GameError("Вы уже сделали ставку в этом раунде")
-            balance = await self._take(c, user_id, bet, "crash")
+            balance = await self._take(c, user_id, bet, "crash", cur)
             await c.execute(
-                "INSERT INTO crash_bets(round_id, user_id, bet, auto, placed_at) VALUES (?,?,?,?,?)",
-                (rnd["id"], user_id, bet, auto, now),
+                "INSERT INTO crash_bets(round_id, user_id, bet, auto, placed_at, cur) VALUES (?,?,?,?,?,?)",
+                (rnd["id"], user_id, bet, auto, now, cur),
             )
-        return {"round": rnd["id"], "bet": bet, "auto": auto, "balance": balance}
+        return {"round": rnd["id"], "bet": bet, "auto": auto, "balance": balance, "cur": cur}
 
     async def crash_cashout(self, user_id: int) -> dict:
         now = time.time()
@@ -565,7 +680,8 @@ class Casino:
             if current >= rnd["point"]:
                 raise GameError("Не успели — ракета уже взорвалась")
             balance = await self._crash_pay(c, rnd, dict(row), current)
-        return {"cashout": current, "win": g.payout(row["bet"], current), "bet": row["bet"], "balance": balance}
+        return {"cashout": current, "win": g.payout(row["bet"], current), "bet": row["bet"], "balance": balance,
+                "cur": row["cur"]}
 
     async def crash_state(self, user_id: int | None = None) -> dict:
         now = time.time()
@@ -575,13 +691,13 @@ class Casino:
         if not rnd:
             return {"round": None, "history": history, "growth": g.CRASH_GROWTH}
         rows = await self.db.all(
-            "SELECT b.user_id, b.bet, b.auto, b.cashout, b.win, u.first_name, u.username FROM crash_bets b "
+            "SELECT b.user_id, b.bet, b.auto, b.cashout, b.win, b.cur, u.first_name, u.username FROM crash_bets b "
             "LEFT JOIN users u ON u.id=b.user_id WHERE b.round_id=? ORDER BY b.bet DESC",
             rnd["id"],
         )
         players = [
             {"id": r["user_id"], "name": display_name({"id": r["user_id"], **r}), "bet": r["bet"],
-             "cashout": r["cashout"], "win": r["win"]}
+             "cashout": r["cashout"], "win": r["win"], "cur": r["cur"]}
             for r in rows
         ]
         mine = next((dict(r) for r in rows if r["user_id"] == user_id), None)
@@ -597,7 +713,8 @@ class Casino:
         return {
             "round": view,
             "players": players,
-            "my": {"bet": mine["bet"], "auto": mine["auto"], "cashout": mine["cashout"], "win": mine["win"]}
+            "my": {"bet": mine["bet"], "auto": mine["auto"], "cashout": mine["cashout"], "win": mine["win"],
+                   "cur": mine["cur"]}
             if mine else None,
             "history": history,
             "growth": g.CRASH_GROWTH,
@@ -818,28 +935,33 @@ class Casino:
             raise GameError("Неизвестная игра")
         return game
 
-    async def _open_round(self, c: aiosqlite.Connection, game: str) -> dict:
+    async def _open_round(self, c: aiosqlite.Connection, game: str, cur: str = money.STARS) -> dict:
+        """Открытый раунд игры: у звёзд и TON раунды раздельные — банк всегда в одной валюте."""
         async with c.execute(
-            "SELECT * FROM pvp_rounds WHERE status='open' AND game=? ORDER BY id DESC LIMIT 1", (game,)
+            "SELECT * FROM pvp_rounds WHERE status='open' AND game=? AND cur=? ORDER BY id DESC LIMIT 1", (game, cur)
         ) as q:
             row = await q.fetchone()
         if row:
             return dict(row)
-        cur = await c.execute("INSERT INTO pvp_rounds(game, created_at) VALUES (?, ?)", (game, time.time()))
-        async with c.execute("SELECT * FROM pvp_rounds WHERE id=?", (cur.lastrowid,)) as q:
+        res = await c.execute("INSERT INTO pvp_rounds(game, created_at, cur) VALUES (?, ?, ?)", (game, time.time(), cur))
+        async with c.execute("SELECT * FROM pvp_rounds WHERE id=?", (res.lastrowid,)) as q:
             return dict(await q.fetchone())
 
-    async def pvp_bet(self, user_id: int, amount: Any, game: Any = "roulette", gifts: Any = None) -> dict:
-        """Ставка звёздами и/или NFT-подарками (подарок идёт в банк по цене пола маркета)."""
+    async def pvp_bet(self, user_id: int, amount: Any, game: Any = "roulette", gifts: Any = None,
+                      cur: Any = money.STARS) -> dict:
+        """Ставка звёздами/TON и (в звёздном раунде) NFT-подарками — подарок идёт в банк по флору."""
         game = self._pvp_game(game)
+        cur = self._cur(cur)
         gift_ids = self._gift_ids(gifts)
+        if gift_ids and cur != money.STARS:
+            raise GameError("NFT ставятся в раунды на звёзды")
         if gift_ids and amount in (None, 0):
             amount = 0
         else:
-            amount = self._check_bet(amount)
+            amount = self._check_bet(amount, cur)
         now = time.time()
         async with self.db.tx() as c:
-            rnd = await self._open_round(c, game)
+            rnd = await self._open_round(c, game, cur)
             if rnd["ends_at"] and now >= rnd["ends_at"] - 1:
                 raise GameError("Раунд уже крутится, подождите следующий")
             stake = amount
@@ -849,7 +971,7 @@ class Casino:
                     stake += gift["value"]
                     staked.append({"emoji": gift["emoji"], "title": gift["title"], "value": gift["value"]})
             if amount:
-                await self._take(c, user_id, amount, game)
+                await self._take(c, user_id, amount, game, cur)
             async with c.execute("SELECT gifts FROM pvp_bets WHERE round_id=? AND user_id=?",
                                  (rnd["id"], user_id)) as q:
                 prev = await q.fetchone()
@@ -864,7 +986,7 @@ class Casino:
                 players = (await q.fetchone())["n"]
             if players >= 2 and not rnd["ends_at"]:
                 await c.execute("UPDATE pvp_rounds SET ends_at=? WHERE id=?", (now + PVP_ROUND_SECONDS, rnd["id"]))
-        return await self.pvp_state(user_id, game)
+        return await self.pvp_state(user_id, game, cur)
 
     async def pvp_tick(self) -> list[dict]:
         """Завершает раунды, у которых вышло время. Возвращает итоги для уведомлений."""
@@ -895,19 +1017,20 @@ class Casino:
                         winner_idx = next(i for i, b in enumerate(bets) if b["user_id"] == winner)
                         detail = {"zones": [list(z) for z in zones], **g.hockey_shot(zones[winner_idx])}
                     if stars_prize:
-                        await self.db.change_balance(c, winner, stars_prize, "pvp_win", str(rnd["id"]))
+                        await self.db.change_balance(c, winner, stars_prize, "pvp_win", str(rnd["id"]), rnd["cur"])
                     prize = stars_prize + gifts_value
                     for b in bets:
                         win = prize if b["user_id"] == winner else 0
                         game_name = "hockey" if rnd["game"] == "hockey" else "pvp"
-                        await self.db.log_bet(c, b["user_id"], game_name, b["amount"], win, json.dumps({"round": rnd["id"]}))
+                        await self.db.log_bet(c, b["user_id"], game_name, b["amount"], win,
+                                              json.dumps({"round": rnd["id"]}), rnd["cur"])
                     await c.execute(
                         "UPDATE pvp_rounds SET status='done', winner_id=?, pot=?, payout=?, ticket=?, finished_at=?, "
                         "detail=? WHERE id=?",
                         (winner, pot, prize, ticket, now, json.dumps(detail) if detail else None, rnd["id"]),
                     )
                     results.append({"round": rnd["id"], "game": rnd["game"], "winner": winner, "pot": pot,
-                                    "payout": prize, "stars": stars_prize, "gifts_value": gifts_value,
+                                    "payout": prize, "stars": stars_prize, "gifts_value": gifts_value, "cur": rnd["cur"],
                                     "players": [b["user_id"] for b in bets]})
                 elif len(bets) == 1 and not rnd["ends_at"] and now - bets[0]["joined"] > PVP_IDLE_REFUND:
                     async with c.execute("SELECT COALESCE(SUM(value),0) v FROM user_gifts WHERE round_id=? "
@@ -917,7 +1040,7 @@ class Casino:
                                     "WHERE round_id=? AND status='staked'", (rnd["id"],))
                     if bets[0]["amount"] > gifts_value:
                         await self.db.change_balance(c, bets[0]["user_id"], bets[0]["amount"] - gifts_value,
-                                                     "pvp_refund", str(rnd["id"]))
+                                                     "pvp_refund", str(rnd["id"]), rnd["cur"])
                     await c.execute(
                         "UPDATE pvp_rounds SET status='refunded', finished_at=? WHERE id=?", (now, rnd["id"])
                     )
@@ -936,11 +1059,12 @@ class Casino:
             for r in rows
         ]
 
-    async def pvp_state(self, user_id: int | None = None, game: Any = "roulette") -> dict:
+    async def pvp_state(self, user_id: int | None = None, game: Any = "roulette", cur: Any = money.STARS) -> dict:
         game = self._pvp_game(game)
+        cur = self._cur(cur)
         now = time.time()
         rnd = await self.db.one(
-            "SELECT * FROM pvp_rounds WHERE status='open' AND game=? ORDER BY id DESC LIMIT 1", game
+            "SELECT * FROM pvp_rounds WHERE status='open' AND game=? AND cur=? ORDER BY id DESC LIMIT 1", game, cur
         )
         current = None
         if rnd:
@@ -953,7 +1077,7 @@ class Casino:
                 "my_bet": next((p["amount"] for p in players if p["id"] == user_id), 0),
             }
         last = await self.db.one(
-            "SELECT * FROM pvp_rounds WHERE status='done' AND game=? ORDER BY id DESC LIMIT 1", game
+            "SELECT * FROM pvp_rounds WHERE status='done' AND game=? AND cur=? ORDER BY id DESC LIMIT 1", game, cur
         )
         last_view = None
         if last:
@@ -964,5 +1088,5 @@ class Casino:
                 "winner": winner, "players": players, "finished_ago": now - (last["finished_at"] or now),
                 "detail": json.loads(last["detail"]) if last["detail"] else None,
             }
-        return {"game": game, "round": current, "last": last_view, "commission": g.PVP_COMMISSION,
+        return {"game": game, "cur": cur, "round": current, "last": last_view, "commission": g.PVP_COMMISSION,
                 "round_seconds": PVP_ROUND_SECONDS}

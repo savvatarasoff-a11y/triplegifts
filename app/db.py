@@ -9,6 +9,8 @@ from typing import Any, AsyncIterator
 
 import aiosqlite
 
+from . import money
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id         INTEGER PRIMARY KEY,
@@ -190,6 +192,19 @@ CREATE TABLE IF NOT EXISTS pvp_bets (
 """
 
 
+TON_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ton_withdrawals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL,
+    amount       INTEGER NOT NULL,             -- nanoTON
+    address      TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',   -- pending | sent | rejected
+    admin_id     INTEGER,
+    created_at   REAL NOT NULL,
+    processed_at REAL
+);
+"""
+
 REFERRAL_RATE = 0.10   # пригласивший получает 10% от каждой покупки звёзд рефералом
 REFERRAL_WINDOW = 24 * 3600   # привязать можно только новичка: не позже суток после первого входа
 
@@ -234,6 +249,21 @@ class Database:
         async with self.conn.execute("PRAGMA table_info(pvp_bets)") as cur:
             if "gifts" not in {r["name"] for r in await cur.fetchall()}:
                 await self.conn.execute("ALTER TABLE pvp_bets ADD COLUMN gifts TEXT")
+        # TON — вторая валюта: баланс в nanoTON и валюта у всех денежных записей
+        await self._add_columns("users", {"ton": "INTEGER NOT NULL DEFAULT 0",
+                                          "ton_deposited": "INTEGER NOT NULL DEFAULT 0",
+                                          "ton_wagered": "INTEGER NOT NULL DEFAULT 0",
+                                          "ton_won": "INTEGER NOT NULL DEFAULT 0"})
+        for table in ("ledger", "bets", "payments", "mines_games", "crash_bets", "pvp_rounds"):
+            await self._add_columns(table, {"cur": "TEXT NOT NULL DEFAULT 'stars'"})
+        await self.conn.executescript(TON_SCHEMA)
+
+    async def _add_columns(self, table: str, columns: dict[str, str]) -> None:
+        async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
+            have = {r["name"] for r in await cur.fetchall()}
+        for name, ddl in columns.items():
+            if name not in have:
+                await self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
     async def close(self) -> None:
         if self._conn:
@@ -315,30 +345,33 @@ class Database:
 
     @staticmethod
     async def change_balance(
-        c: aiosqlite.Connection, user_id: int, delta: int, kind: str, ref: str | None = None
+        c: aiosqlite.Connection, user_id: int, delta: int, kind: str, ref: str | None = None, cur: str = money.STARS
     ) -> int:
-        cur = await c.execute(
-            "UPDATE users SET balance = balance + ? WHERE id=? AND balance + ? >= 0",
+        col = money.column(cur)
+        res = await c.execute(
+            f"UPDATE users SET {col} = {col} + ? WHERE id=? AND {col} + ? >= 0",
             (delta, user_id, delta),
         )
-        if cur.rowcount != 1:
+        if res.rowcount != 1:
             raise InsufficientFunds()
-        async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
-            balance = (await q.fetchone())["balance"]
+        async with c.execute(f"SELECT {col} b FROM users WHERE id=?", (user_id,)) as q:
+            balance = (await q.fetchone())["b"]
         await c.execute(
-            "INSERT INTO ledger(user_id, delta, kind, ref, balance_after, ts) VALUES (?,?,?,?,?,?)",
-            (user_id, delta, kind, ref, balance, time.time()),
+            "INSERT INTO ledger(user_id, delta, kind, ref, balance_after, ts, cur) VALUES (?,?,?,?,?,?,?)",
+            (user_id, delta, kind, ref, balance, time.time(), cur),
         )
         return balance
 
     @staticmethod
-    async def log_bet(c: aiosqlite.Connection, user_id: int, game: str, bet: int, win: int, detail: str = "") -> None:
+    async def log_bet(c: aiosqlite.Connection, user_id: int, game: str, bet: int, win: int, detail: str = "",
+                      cur: str = money.STARS) -> None:
         await c.execute(
-            "INSERT INTO bets(user_id, game, bet, win, detail, ts) VALUES (?,?,?,?,?,?)",
-            (user_id, game, bet, win, detail, time.time()),
+            "INSERT INTO bets(user_id, game, bet, win, detail, ts, cur) VALUES (?,?,?,?,?,?,?)",
+            (user_id, game, bet, win, detail, time.time(), cur),
         )
+        wagered, won = ("wagered", "won") if cur == money.STARS else ("ton_wagered", "ton_won")
         await c.execute(
-            "UPDATE users SET wagered = wagered + ?, won = won + ? WHERE id=?", (bet, win, user_id)
+            f"UPDATE users SET {wagered} = {wagered} + ?, {won} = {won} + ? WHERE id=?", (bet, win, user_id)
         )
 
     # ---------- платежи ----------
@@ -379,15 +412,41 @@ class Database:
 
     # ---------- история ----------
 
+    async def credit_ton(self, tx_hash: str, user_id: int, amount: int) -> bool:
+        """Зачисляет перевод TON (nanoTON). Повторная обработка той же транзакции ничего не делает."""
+        async with self.tx() as c:
+            res = await c.execute(
+                "INSERT OR IGNORE INTO payments(charge_id, user_id, amount, ts, cur) VALUES (?,?,?,?,?)",
+                (f"ton:{tx_hash}", user_id, amount, time.time(), money.TON),
+            )
+            if res.rowcount != 1:
+                return False
+            await c.execute("INSERT OR IGNORE INTO users(id, created_at, last_seen) VALUES (?,?,?)",
+                            (user_id, time.time(), time.time()))
+            await self.change_balance(c, user_id, amount, "deposit", tx_hash, money.TON)
+            await c.execute("UPDATE users SET ton_deposited = ton_deposited + ? WHERE id=?", (amount, user_id))
+            async with c.execute("SELECT referrer_id FROM users WHERE id=?", (user_id,)) as q:
+                referrer = (await q.fetchone())["referrer_id"]
+            bonus = int(amount * REFERRAL_RATE)
+            if referrer and bonus > 0:
+                await self.change_balance(c, referrer, bonus, "ref_bonus", str(user_id), money.TON)
+        return True
+
     async def recent_bets(self, user_id: int, limit: int = 20) -> list[dict]:
         return await self.all(
-            "SELECT game, bet, win, ts FROM bets WHERE user_id=? ORDER BY id DESC LIMIT ?", user_id, limit
+            "SELECT game, bet, win, ts, cur FROM bets WHERE user_id=? ORDER BY id DESC LIMIT ?", user_id, limit
         )
 
     async def stats(self) -> dict[str, Any]:
-        users = await self.one("SELECT COUNT(*) n, COALESCE(SUM(balance),0) bal FROM users")
-        pay = await self.one("SELECT COUNT(*) n, COALESCE(SUM(amount),0) s FROM payments")
-        bets = await self.one("SELECT COUNT(*) n, COALESCE(SUM(bet),0) b, COALESCE(SUM(win),0) w FROM bets")
+        users = await self.one("SELECT COUNT(*) n, COALESCE(SUM(balance),0) bal, COALESCE(SUM(ton),0) ton FROM users")
+        pay = await self.one("SELECT COUNT(*) n, COALESCE(SUM(amount),0) s FROM payments WHERE cur='stars'")
+        bets = await self.one("SELECT COUNT(*) n, COALESCE(SUM(bet),0) b, COALESCE(SUM(win),0) w FROM bets "
+                              "WHERE cur='stars'")
+        ton_pay = await self.one("SELECT COUNT(*) n, COALESCE(SUM(amount),0) s FROM payments WHERE cur='ton'")
+        ton_bets = await self.one("SELECT COALESCE(SUM(bet),0) b, COALESCE(SUM(win),0) w FROM bets WHERE cur='ton'")
+        ton_wd = await self.one(
+            "SELECT COALESCE(SUM(CASE WHEN status='sent' THEN amount END),0) sent, "
+            "COALESCE(SUM(CASE WHEN status='pending' THEN amount END),0) pending FROM ton_withdrawals")
         checks = await self.one(
             "SELECT COALESCE(SUM(amount*left),0) liab, COUNT(*) n FROM checks WHERE active=1 AND left>0"
         )
@@ -409,4 +468,11 @@ class Database:
             "checks_redeemed": issued["s"],
             "withdrawn": wd["sent"],
             "withdraw_pending": wd["pending"],
+            "ton_balances": users["ton"],
+            "ton_payments": ton_pay["n"],
+            "ton_deposited": ton_pay["s"],
+            "ton_wagered": ton_bets["b"],
+            "ton_won": ton_bets["w"],
+            "ton_withdrawn": ton_wd["sent"],
+            "ton_withdraw_pending": ton_wd["pending"],
         }

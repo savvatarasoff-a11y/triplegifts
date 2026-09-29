@@ -6,7 +6,8 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const STAR = "★";
-const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null };
+const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null,
+  cur: "stars", bal: { stars: 0, ton: 0 } };
 const GAME_NAMES = { slots: "Слоты", dice: "Кости", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
 const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
@@ -54,6 +55,34 @@ const fmt = (n) => Number(n).toLocaleString("ru-RU");
 const stars = (n) => `${fmt(n)} ${STAR}`;
 const fmtX = (x) => "×" + (x >= 100 ? Math.round(x) : Number(x).toFixed(2));
 
+// ---------- валюты: звёзды и TON (TON приходит с сервера в nanoTON) ----------
+
+const NANO = 1e9;
+const tonNum = (nano) => {
+  const v = nano / NANO;
+  const digits = Math.abs(v) >= 100 ? 1 : Math.abs(v) >= 1 ? 2 : 4;
+  return Number(v.toFixed(digits)).toLocaleString("ru-RU", { maximumFractionDigits: digits });
+};
+function money(n, cur) {
+  return (cur || state.cur) === "ton" ? `${tonNum(n)} TON` : stars(n);
+}
+const moneyNum = (n, cur) => ((cur || state.cur) === "ton" ? tonNum(n) : fmt(n));
+const tonRate = () => (state.config && state.config.ton && state.config.ton.rate) || null;
+// цена в звёздах → текущая валюта (кейсы и NFT считаются в звёздах)
+function fromStars(n, cur, up) {
+  if ((cur || state.cur) !== "ton") return n;
+  const r = tonRate();
+  if (!r) return null;
+  const v = n / r * NANO;
+  return up ? Math.ceil(v) : Math.floor(v);
+}
+// цена NFT: звёзды и TON рядом
+function nftPrice(starsAmount) {
+  const r = tonRate();
+  return r ? `${stars(starsAmount)} · ${tonNum(starsAmount / r * NANO)} TON` : stars(starsAmount);
+}
+const curBalance = () => state.bal[state.cur] || 0;
+
 // deferBalance: баланс из ответа покажем сами — после анимации
 async function api(path, body, opts) {
   const req = { method: body === undefined ? "GET" : "POST",
@@ -70,14 +99,22 @@ async function api(path, body, opts) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Ошибка " + res.status);
-  if (typeof data.balance === "number" && !(opts && opts.deferBalance)) setBalance(data.balance);
+  if (typeof data.balance === "number" && !(opts && opts.deferBalance)) setBalance(data.balance, data.cur);
   return data;
 }
 
-function setBalance(value) {
-  if (state.me) state.me.balance = value;
+function renderBalance() {
+  $("#balance").textContent = moneyNum(curBalance());
+  $("#cur-icon").textContent = state.cur === "ton" ? "💎" : "★";
+}
+
+function setBalance(value, cur) {
+  cur = cur || "stars";
+  state.bal[cur] = value;
+  if (state.me) state.me.balance = state.bal.stars;
+  if (cur !== state.cur) return;
+  renderBalance();
   const el = $("#balance");
-  el.textContent = fmt(value);
   el.parentElement.classList.remove("bump");
   void el.offsetWidth;
   el.parentElement.classList.add("bump");
@@ -85,7 +122,22 @@ function setBalance(value) {
 
 // Ставка списывается на экране сразу, выигрыш добавляется после анимации
 function showBetTaken(bet) {
-  if (state.me) $("#balance").textContent = fmt(Math.max(0, state.me.balance - bet));
+  $("#balance").textContent = moneyNum(Math.max(0, curBalance() - bet));
+}
+
+// Переключение валюты: ★ ↔ TON
+function setCurrency(cur) {
+  state.cur = cur === "ton" ? "ton" : "stars";
+  store("cur", state.cur);
+  document.body.classList.toggle("cur-ton", state.cur === "ton");
+  renderBalance();
+  refreshBetBoxes();
+  renderPresets();
+  const enter = { pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), cases: renderCases,
+    case: () => currentCase && caseSetCount(caseCount), mines: () => minesRender(minesGame),
+    wallet: () => walletTab($("#wallet-tabs button.sel") ? $("#wallet-tabs button.sel").dataset.tab : "dep"),
+    profile: profileEnter, home: () => renderHistory(state.me && state.me.history), ref: refEnter };
+  if (enter[state.screen]) enter[state.screen]();
 }
 
 async function guard(fn) {
@@ -181,7 +233,7 @@ function fxLoop() {
 function bigWin(x, win) {
   $("#bigwin-label").textContent = x >= 100 ? "MEGA WIN" : x >= 50 ? "SUPER WIN" : "BIG WIN";
   $("#bigwin-x").textContent = fmtX(x);
-  $("#bigwin-sum").textContent = "+" + stars(win);
+  $("#bigwin-sum").textContent = "+" + money(win);
   const conf = $("#confetti");
   conf.innerHTML = "";
   for (let i = 0; i < 70; i++) {
@@ -243,7 +295,7 @@ async function refEnter() {
     $$(".ref-rate").forEach((el) => { el.textContent = rate; });
     $("#ref-link").textContent = r.link || "Ссылка появится, когда бот будет на связи";
     $("#ref-count").textContent = fmt(r.count);
-    $("#ref-earned").textContent = stars(r.earned);
+    $("#ref-earned").textContent = stars(r.earned) + (r.earned_ton ? ` + ${money(r.earned_ton, "ton")}` : "");
     const box = $("#ref-list");
     box.innerHTML = "";
     if (!r.list.length) box.innerHTML = '<div class="note">Пока никого — отправьте ссылку другу!</div>';
@@ -255,7 +307,7 @@ async function refEnter() {
       nm.textContent = p.name;
       const am = document.createElement("span");
       am.className = "am";
-      am.textContent = "+" + stars(p.earned);
+      am.textContent = "+" + stars(p.earned) + (p.earned_ton ? ` + ${money(p.earned_ton, "ton")}` : "");
       row.append(avatarEl(p, "av", PVP_COLORS[p.id % PVP_COLORS.length]), nm, am);
       box.append(row);
     });
@@ -293,13 +345,14 @@ async function profileEnter() {
     const since = p.joined ? new Date(p.joined * 1000).toLocaleDateString("ru-RU") : "";
     $("#prof-sub").textContent = [p.username ? "@" + p.username : null, `ID ${p.id}`, since ? `с ${since}` : null]
       .filter(Boolean).join(" · ");
-    $("#prof-balance").textContent = stars(p.balance);
+    const t = state.cur === "ton" ? p.ton : p;
+    $("#prof-balance").textContent = money(t.balance);
     $("#prof-games").textContent = fmt(p.games);
     $("#prof-wins").textContent = fmt(p.wins);
-    $("#prof-wagered").textContent = stars(p.wagered);
-    $("#prof-won").textContent = stars(p.won);
-    $("#prof-deposited").textContent = stars(p.deposited);
-    $("#prof-withdrawn").textContent = stars(p.withdrawn);
+    $("#prof-wagered").textContent = money(t.wagered);
+    $("#prof-won").textContent = money(t.won);
+    $("#prof-deposited").textContent = money(t.deposited);
+    $("#prof-withdrawn").textContent = money(t.withdrawn);
     const best = $("#prof-best");
     best.classList.toggle("hidden", !p.best);
     if (p.best) {
@@ -314,42 +367,67 @@ async function profileEnter() {
       best.append(l, b);
     }
     const w = $("#prof-wager");
-    w.classList.toggle("hidden", !p.wager.left);
-    w.textContent = p.wager.left ? `Бонусы и чеки нужно отыграть: осталось поставить ${stars(p.wager.left)}.` : "";
+    w.classList.toggle("hidden", !t.wager.left);
+    w.textContent = t.wager.left ? `Бонусы и чеки нужно отыграть: осталось поставить ${money(t.wager.left)}.` : "";
   } catch (e) { toast(e.message, true); }
 }
 
 // ---------- ставка ----------
 
+// Лимиты ставки в единицах, которые видит игрок: звёзды или TON
+function betLimits() {
+  const c = state.config || { min_bet: 1, max_bet: 10000 };
+  if (state.cur === "ton") {
+    const t = c.ton || { min_bet: 1e7, max_bet: 1e11 };
+    return { min: t.min_bet / NANO, max: t.max_bet / NANO, step: 0.01, def: "0.1" };
+  }
+  return { min: c.min_bet, max: c.max_bet, step: 1, def: "10" };
+}
+
+const betKey = (box) => `bet:${box.dataset.bet}${state.cur === "ton" ? ":ton" : ""}`;
+
+function refreshBetBoxes() {
+  $$(".betbox").forEach((box) => {
+    const input = box.querySelector("input");
+    if (!input) return;
+    const lim = betLimits();
+    input.step = lim.step;
+    input.inputMode = state.cur === "ton" ? "decimal" : "numeric";
+    input.value = store(betKey(box)) || lim.def;
+  });
+  $$(".cur-label").forEach((el) => { el.textContent = state.cur === "ton" ? "TON" : "★"; });
+}
+
 function betBoxes() {
   $$(".betbox").forEach((box) => {
-    const key = "bet:" + box.dataset.bet;
     const input = document.createElement("input");
     input.type = "number";
-    input.inputMode = "numeric";
-    input.value = store(key) || "10";
-    input.addEventListener("change", () => store(key, input.value));
-    const cfg = () => state.config || { min_bet: 1, max_bet: 10000 };
-    const clamp = (v) => Math.max(cfg().min_bet, Math.min(cfg().max_bet, v));
+    input.addEventListener("change", () => store(betKey(box), input.value));
+    const round = (v) => (state.cur === "ton" ? Math.round(v * 100) / 100 : Math.floor(v));
+    const clamp = (v) => { const l = betLimits(); return round(Math.max(l.min, Math.min(l.max, v))); };
     const mk = (label, fn) => {
       const b = document.createElement("button");
       b.textContent = label;
       b.addEventListener("click", () => {
-        input.value = fn(parseInt(input.value, 10) || 0);
-        store(key, input.value);
+        input.value = fn(parseFloat(input.value) || 0);
+        store(betKey(box), input.value);
         haptic();
       });
       return b;
     };
-    box.append(mk("½", (v) => clamp(Math.floor(v / 2))), input, mk("×2", (v) => clamp(v * 2)),
-      mk("MAX", () => clamp(state.me ? state.me.balance : cfg().max_bet)));
+    const balUnits = () => (state.cur === "ton" ? Math.floor(curBalance() / NANO * 100) / 100 : curBalance());
+    box.append(mk("½", (v) => clamp(v / 2)), input, mk("×2", (v) => clamp(v * 2)), mk("MAX", () => clamp(balUnits())));
   });
+  refreshBetBoxes();
 }
 
+// Ставка в единицах сервера: звёзды или nanoTON
 function getBet(game) {
-  const v = parseInt($(`.betbox[data-bet="${game}"] input`).value, 10);
-  if (!Number.isInteger(v) || v <= 0) throw new Error("Введите ставку");
-  if (state.me && v > state.me.balance) throw new Error("Недостаточно звёзд на балансе");
+  const raw = parseFloat($(`.betbox[data-bet="${game}"] input`).value);
+  if (!(raw > 0)) throw new Error("Введите ставку");
+  const v = state.cur === "ton" ? Math.round(raw * NANO) : Math.floor(raw);
+  if (v <= 0) throw new Error("Введите ставку");
+  if (state.me && v > curBalance()) throw new Error(state.cur === "ton" ? "Недостаточно TON на балансе" : "Недостаточно звёзд на балансе");
   return v;
 }
 
@@ -359,7 +437,8 @@ async function loadMe() {
   const me = await api("/api/me");
   state.me = me;
   state.config = me.config;
-  setBalance(me.balance);
+  state.bal = { stars: me.balance, ton: me.ton || 0 };
+  renderBalance();
   $("#hello").textContent = me.user.name;
   renderHistory(me.history);
   return me;
@@ -391,8 +470,8 @@ function renderHistory(items) {
   }
   items.forEach((h) => {
     const diff = h.win - h.bet;
-    box.append(historyRow(`${GAME_NAMES[h.game] || h.game} · ${stars(h.bet)}`,
-      (diff >= 0 ? "+" : "") + stars(diff), diff >= 0));
+    box.append(historyRow(`${GAME_NAMES[h.game] || h.game} · ${money(h.bet, h.cur)}`,
+      (diff >= 0 ? "+" : "") + money(diff, h.cur), diff >= 0));
   });
 }
 
@@ -412,7 +491,7 @@ async function loadTicker() {
       x.className = "xx";
       x.textContent = fmtX(w.x);
       const sum = document.createElement("b");
-      sum.textContent = "+" + stars(w.win);
+      sum.textContent = "+" + money(w.win, w.cur);
       el.append(nm, x, sum);
       track.append(el);
     });
@@ -443,7 +522,9 @@ function walletTab(tab) {
   $("#tab-dep").classList.toggle("hidden", tab !== "dep");
   $("#tab-out").classList.toggle("hidden", tab !== "out");
   $("#tab-nft").classList.toggle("hidden", tab !== "nft");
-  if (tab === "out") loadWithdraw();
+  if (tab === "dep" && state.cur === "ton") loadTonDeposit();
+  if (tab === "out" && state.cur === "ton") loadTonWithdraw();
+  if (tab === "out" && state.cur !== "ton") loadWithdraw();
   if (tab === "nft") loadMyGifts();
 }
 
@@ -484,6 +565,85 @@ async function deposit(amount) {
         toast("Оплата не прошла", true);
       }
     });
+  });
+}
+
+// ---------- TON: пополнение переводом с комментарием и вывод на кошелёк ----------
+
+const tonState = { info: null };
+
+async function loadTonInfo() {
+  tonState.info = await api("/api/ton");
+  return tonState.info;
+}
+
+async function loadTonDeposit() {
+  try {
+    const t = await loadTonInfo();
+    $("#ton-dep-body").classList.toggle("hidden", !t.wallet);
+    $("#ton-dep-off").classList.toggle("hidden", !!t.wallet);
+    $("#ton-wallet").textContent = t.wallet || "—";
+    $("#ton-comment").textContent = t.comment;
+  } catch (e) { toast(e.message, true); }
+}
+
+function tonOpenWallet() {
+  const t = tonState.info;
+  if (!t || !t.wallet) return;
+  const link = `https://app.tonkeeper.com/transfer/${t.wallet}?text=${encodeURIComponent(t.comment)}`;
+  if (tg && tg.openLink) tg.openLink(link); else window.open(link, "_blank");
+  // ждём зачисления: обновляем баланс, пока открыт кошелёк
+  let n = 0;
+  const before = state.bal.ton;
+  const timer = setInterval(async () => {
+    if (++n > 40 || state.screen !== "wallet") { clearInterval(timer); return; }
+    await loadMe().catch(() => {});
+    if (state.bal.ton > before) {
+      clearInterval(timer);
+      toast(`Зачислено +${money(state.bal.ton - before, "ton")}`);
+      fxBurstAt($("#balance-btn"), { count: 50 });
+      haptic("win");
+    }
+  }, 6000);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Скопировано");
+    haptic();
+  } catch (e) { toast("Не удалось скопировать — зажмите текст", true); }
+}
+
+const TON_WD_STATUS = { pending: "на проверке", sent: "отправлено", rejected: "отклонено" };
+
+async function loadTonWithdraw() {
+  try {
+    const t = await loadTonInfo();
+    $("#ton-min").textContent = tonNum(t.min_withdraw);
+    const w = $("#ton-wager");
+    w.classList.toggle("hidden", !t.wager.left);
+    w.textContent = t.wager.left ? `Бонусные TON нужно отыграть: осталось поставить ${money(t.wager.left, "ton")}.` : "";
+    const hist = $("#ton-history");
+    hist.innerHTML = "";
+    t.history.forEach((x) => hist.append(historyRow(`№${x.id} · ${money(x.amount, "ton")}`,
+      TON_WD_STATUS[x.status] || x.status, x.status === "sent")));
+  } catch (e) { toast(e.message, true); }
+}
+
+async function tonWithdraw() {
+  const address = $("#ton-address").value.trim();
+  const amount = Math.round(parseFloat($("#ton-amount").value.replace(",", ".")) * NANO);
+  if (!address) return toast("Укажите адрес кошелька", true);
+  if (!(amount > 0)) return toast("Укажите сумму", true);
+  const ok = await confirmAsk(`Вывести ${money(amount, "ton")} на ${address.slice(0, 6)}…${address.slice(-6)}?`);
+  if (!ok) return;
+  await guard(async () => {
+    await api("/api/ton/withdraw", { amount, address });
+    $("#ton-amount").value = "";
+    toast("Заявка отправлена — TON придут после проверки");
+    haptic("win");
+    loadTonWithdraw();
   });
 }
 
@@ -561,7 +721,7 @@ function giftCard(gift, opts) {
   info.append(t, sub);
   const v = document.createElement("span");
   v.className = "v";
-  v.textContent = gift.value ? stars(gift.value) : "—";
+  v.textContent = gift.value ? nftPrice(gift.value) : "—";
   el.append(em, info, v);
   return el;
 }
@@ -718,9 +878,9 @@ function upgUpdate() {
   $("#upg-chance").textContent = (chance * 100).toFixed(chance < 0.1 ? 2 : 1) + "%";
   const picked = upg.gifts.filter((g) => upg.chosen.has(g.id));
   $("#upg-from-em").textContent = picked.length ? picked.slice(0, 3).map((g) => g.emoji).join("") : "🎁";
-  $("#upg-stake").textContent = stake ? stars(stake) : "выберите NFT";
+  $("#upg-stake").textContent = stake ? nftPrice(stake) : "выберите NFT";
   $("#upg-to-em").textContent = upg.target ? upg.target.emoji : "💎";
-  $("#upg-target").textContent = upg.target ? stars(upg.target.price) : "выберите цель";
+  $("#upg-target").textContent = upg.target ? nftPrice(upg.target.price) : "выберите цель";
   const btn = $("#upg-btn");
   let hint = "";
   if (!stake) hint = "Выберите свои NFT";
@@ -780,7 +940,7 @@ function upgRender() {
     md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
     const pr = document.createElement("span");
     pr.className = "pr";
-    pr.textContent = stars(t.price);
+    pr.textContent = nftPrice(t.price);
     b.append(em, ttl, md, pr);
     b.addEventListener("click", () => {
       if (upg.spinning) return;
@@ -911,7 +1071,7 @@ async function slotsSpin() {
     $("#slots-result").className = "result";
     $("#slots-result").textContent = "Крутим…";
     try {
-      const r = await api("/api/slots", { bet }, { deferBalance: true });
+      const r = await api("/api/slots", { bet, cur: state.cur }, { deferBalance: true });
       showBetTaken(bet);
       haptic();
       const reels = $$("#slots .reel");
@@ -930,7 +1090,7 @@ async function slotsSpin() {
         setTimeout(() => strip.classList.remove("spin"), ms * 0.75);
         setTimeout(() => { reel.classList.add("stop"); haptic(); resolve(); }, ms);
       })));
-      setBalance(r.balance);
+      setBalance(r.balance, r.cur);
       const res = $("#slots-result");
       if (r.nft) {
         machine.classList.add("won");
@@ -940,14 +1100,14 @@ async function slotsSpin() {
         fxBurstAt(machine, { count: 80, speed: 9 });
         bigWin(r.nft.price / bet, r.nft.price);
         $("#bigwin-label").textContent = "NFT JACKPOT";
-        $("#bigwin-sum").textContent = `${r.nft.emoji} ${r.nft.title} ≈ ${stars(r.nft.price)}`;
+        $("#bigwin-sum").textContent = `${r.nft.emoji} ${r.nft.title} ≈ ${nftPrice(r.nft.price)}`;
       } else if (r.win === bet) {
         res.className = "result";
         res.textContent = "Две семёрки — ставка возвращена";
       } else if (r.win > 0) {
         machine.classList.add("won");
         res.className = "result win reveal";
-        res.textContent = `${r.value === 64 ? "777! " : ""}${fmtX(r.multiplier)} · +${stars(r.win)}`;
+        res.textContent = `${r.value === 64 ? "777! " : ""}${fmtX(r.multiplier)} · +${money(r.win, r.cur)}`;
         haptic("win");
         celebrate(bet, r.win, machine);
       } else {
@@ -1051,7 +1211,7 @@ async function diceRoll() {
     const chance = diceChance();
     $("#dice-btn").disabled = true;
     try {
-      const r = await api("/api/dice", { bet, chance, over: diceOver }, { deferBalance: true });
+      const r = await api("/api/dice", { bet, chance, over: diceOver, cur: state.cur }, { deferBalance: true });
       showBetTaken(bet);
       haptic();
       const el = $("#dice-roll");
@@ -1068,10 +1228,10 @@ async function diceRoll() {
         };
         requestAnimationFrame(tick);
       });
-      setBalance(r.balance);
+      setBalance(r.balance, r.cur);
       el.className = "dice-roll pop " + (r.won ? "win" : "lose");
       if (r.won) {
-        toast(`${fmtX(r.multiplier)} · +${stars(r.win)}`);
+        toast(`${fmtX(r.multiplier)} · +${money(r.win, r.cur)}`);
         haptic("win");
         celebrate(bet, r.win, marker);
       } else {
@@ -1113,7 +1273,7 @@ function minesRender(game, reveal) {
     $("#mines-mult").textContent = fmtX(game.multiplier);
     $("#mines-next").textContent = game.next_multiplier ? fmtX(game.next_multiplier) : "—";
     $("#mines-win").textContent = fmt(game.opened.length ? game.cashout : 0);
-    btn.textContent = game.opened.length ? "Забрать " + stars(game.cashout) : "Откройте клетку";
+    btn.textContent = game.opened.length ? "Забрать " + money(game.cashout, game.cur) : "Откройте клетку";
     btn.classList.toggle("cash", game.opened.length > 0);
   } else {
     btn.textContent = "Играть";
@@ -1148,13 +1308,13 @@ async function minesAction() {
       minesGame = null;
       minesRender(r, r);
       info.className = "result win reveal";
-      info.textContent = `${fmtX(r.multiplier)} · +${stars(r.win)}`;
+      info.textContent = `${fmtX(r.multiplier)} · +${money(r.win, r.cur)}`;
       haptic("win");
       celebrate(r.bet, r.win, $("#mines-grid"));
       return;
     }
     const bet = getBet("mines");
-    minesGame = await api("/api/mines/start", { bet, mines: minesCount });
+    minesGame = await api("/api/mines/start", { bet, mines: minesCount, cur: state.cur });
     info.className = "result";
     info.textContent = "";
     minesRender(minesGame);
@@ -1179,7 +1339,7 @@ async function minesOpen(cell) {
       minesGame = null;
       minesRender(r, r);
       info.className = "result win reveal";
-      info.textContent = `Все клетки! ${fmtX(r.multiplier)} · +${stars(r.win)}`;
+      info.textContent = `Все клетки! ${fmtX(r.multiplier)} · +${money(r.win, r.cur)}`;
       celebrate(r.bet, r.win, $("#mines-grid"));
     } else {
       minesGame = r;
@@ -1316,7 +1476,7 @@ function crashFrame() {
     bar.style.width = "0";
     const my = s.my;
     crashDraw(m, my && my.cashout ? "cashed" : "running");
-    if (my && !my.cashout) $("#crash-btn").textContent = "Забрать " + stars(Math.floor(my.bet * m));
+    if (my && !my.cashout) $("#crash-btn").textContent = "Забрать " + money(Math.floor(my.bet * m), my.cur);
   } else {
     multEl.textContent = s.round.point.toFixed(2) + "×";
     multEl.className = "crash-mult lose";
@@ -1351,7 +1511,7 @@ function crashRenderPlayers(s) {
     nm.textContent = p.name;
     const am = document.createElement("span");
     am.className = "am";
-    am.textContent = stars(p.bet);
+    am.textContent = money(p.bet, p.cur);
     const st = document.createElement("span");
     st.className = "st";
     if (p.cashout) { st.classList.add("win"); st.textContent = `${fmtX(p.cashout)} · +${fmt(p.win)}`; }
@@ -1380,7 +1540,7 @@ function crashButton(s) {
   btn.classList.remove("cash");
   btn.disabled = false;
   if (phase === "betting") {
-    btn.textContent = my ? `Ставка ${stars(my.bet)} принята` : "Поставить";
+    btn.textContent = my ? `Ставка ${money(my.bet, my.cur)} принята` : "Поставить";
     btn.disabled = !!my;
   } else if (phase === "running") {
     if (my && !my.cashout) btn.classList.add("cash");
@@ -1413,7 +1573,7 @@ async function crashPoll() {
     if (phase === "betting" && prev && prev.round && prev.round.id !== s.round.id) $("#crash-sub").textContent = "Приём ставок";
     if (phase === "running") {
       const my = s.my;
-      $("#crash-sub").textContent = my && my.cashout ? `Вы забрали +${stars(my.win)}` : my ? `В полёте: ${stars(my.bet)}` : "Ракета летит";
+      $("#crash-sub").textContent = my && my.cashout ? `Вы забрали +${money(my.win, my.cur)}` : my ? `В полёте: ${money(my.bet, my.cur)}` : "Ракета летит";
     }
     crashRenderPlayers(s);
     crashHistory(s.history);
@@ -1442,10 +1602,10 @@ async function crashAction() {
   if (phase === "running" && s.my && !s.my.cashout) {
     try {
       const r = await api("/api/crash/cashout", {}, { deferBalance: true });
-      setBalance(r.balance);
+      setBalance(r.balance, r.cur);
       s.my.cashout = r.cashout;
       s.my.win = r.win;
-      $("#crash-sub").textContent = `Вы забрали +${stars(r.win)}`;
+      $("#crash-sub").textContent = `Вы забрали +${money(r.win, r.cur)}`;
       crashButton(s);
       haptic("win");
       celebrate(r.bet, r.win, $(".crash-box"));
@@ -1455,7 +1615,7 @@ async function crashAction() {
   await guard(async () => {
     const bet = getBet("crash");
     const autoRaw = $("#crash-auto").value.trim().replace(",", ".");
-    const body = { bet };
+    const body = { bet, cur: state.cur };
     if (autoRaw) body.auto = parseFloat(autoRaw);
     await api("/api/crash/bet", body);
     haptic();
@@ -1481,11 +1641,18 @@ function renderCases() {
     b.innerHTML = '<div class="e"></div><div class="n"></div><div class="j"></div><div class="p"></div>';
     b.querySelector(".e").textContent = c.emoji;
     b.querySelector(".n").textContent = c.name;
-    b.querySelector(".j").textContent = top.kind === "nft" ? `NFT до ${stars(top.amount)}` : `до ${top.emoji} ${stars(top.amount)}`;
-    b.querySelector(".p").textContent = stars(c.price);
+    b.querySelector(".j").textContent = top.kind === "nft" ? `NFT до ${nftPrice(top.amount)}`
+      : `до ${top.emoji} ${casePriceText(top.amount)}`;
+    b.querySelector(".p").textContent = casePriceText(c.price, true);
     b.addEventListener("click", () => openCaseScreen(c));
     box.append(b);
   });
+}
+
+// Цены кейсов — в звёздах; в режиме TON показываем по курсу
+function casePriceText(starsAmount, up) {
+  const v = fromStars(starsAmount, null, up);
+  return v === null ? "курс TON недоступен" : money(v);
 }
 
 // Редкость — оттенками фирменного цвета: от тёмного к белому
@@ -1496,7 +1663,7 @@ function prizeItem(p, price) {
     : ratio >= 1.5 ? ["#8B5CF6", "#FFFFFF"]
     : ratio >= 1 ? ["#6D28D9", "#FFFFFF"]
     : ["#242033", "#FFFFFF"];
-  return { em: p.emoji, sub: p.kind === "nft" ? "NFT" : stars(p.amount), bg, fg };
+  return { em: p.emoji, sub: p.label || (p.kind === "nft" ? "NFT" : casePriceText(p.amount)), bg, fg };
 }
 
 function pickPrize(c) {
@@ -1510,7 +1677,7 @@ function openCaseScreen(c) {
   go("case");
   $("#title").textContent = c.name;
   $("#case-emoji").textContent = c.emoji;
-  $("#case-btn").textContent = "Открыть за " + stars(c.price);
+  $("#case-btn").textContent = "Открыть за " + casePriceText(c.price, true);
   $("#case-result").textContent = "";
   const box = $("#case-prizes");
   box.innerHTML = "";
@@ -1528,9 +1695,9 @@ function openCaseScreen(c) {
       ttl.textContent = p.title;
       const model = document.createElement("small");
       model.textContent = `модель «${p.model || "—"}»` + (p.rarity != null ? ` · ${p.rarity}%` : "");
-      d.append(e, ttl, model, document.createTextNode("маркет от " + stars(p.amount)), sm);
+      d.append(e, ttl, model, document.createTextNode("флор " + nftPrice(p.amount)), sm);
     } else {
-      d.append(e, document.createTextNode(stars(p.amount)), sm);
+      d.append(e, document.createTextNode(casePriceText(p.amount)), sm);
     }
     box.append(d);
   });
@@ -1558,7 +1725,7 @@ function caseSetCount(n) {
   store("case:count", String(n));
   $$("#case-count button").forEach((b) => b.classList.toggle("sel", parseInt(b.dataset.n, 10) === n));
   if (!currentCase) return;
-  $("#case-btn").textContent = `Открыть ${n > 1 ? n + " шт. " : ""}за ${stars(currentCase.price * n)}`;
+  $("#case-btn").textContent = `Открыть ${n > 1 ? n + " шт. " : ""}за ${casePriceText(currentCase.price * n, true)}`;
   $("#case-drops").classList.add("hidden");
   caseRollers(n).forEach((r) => {
     const items = [];
@@ -1571,12 +1738,13 @@ async function openCase() {
   if (!currentCase) return;
   await guard(async () => {
     const n = caseCount;
-    const cost = currentCase.price * n;
-    if (state.me && state.me.balance < cost) throw new Error("Недостаточно звёзд на балансе");
+    const cost = fromStars(currentCase.price, null, true) * n;
+    if (!(cost > 0)) throw new Error("Курс TON недоступен — откройте кейс за звёзды");
+    if (state.me && curBalance() < cost) throw new Error(state.cur === "ton" ? "Недостаточно TON на балансе" : "Недостаточно звёзд на балансе");
     $("#case-btn").disabled = true;
     $$("#case-count button").forEach((b) => { b.disabled = true; });
     try {
-      const r = await api("/api/case", { case: currentCase.id, count: n }, { deferBalance: true });
+      const r = await api("/api/case", { case: currentCase.id, count: n, cur: state.cur }, { deferBalance: true });
       showBetTaken(cost);
       haptic();
       $("#case-drops").classList.add("hidden");
@@ -1585,10 +1753,11 @@ async function openCase() {
       const rollers = caseRollers(r.items.length);
       await Promise.all(r.items.map((it, k) => {
         const items = [];
-        for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? { kind: it.kind, emoji: it.gift, amount: it.prize } : pickPrize(currentCase), currentCase.price));
+        for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? { kind: it.kind, emoji: it.gift, label: it.kind === "nft" ? "NFT" : money(it.prize, r.cur),
+          amount: r.cur === "ton" ? Math.round(it.prize / NANO * (tonRate() || 0)) : it.prize } : pickPrize(currentCase), currentCase.price));
         return roll(rollers[k], items, 50, 4600 + k * 350);   // рулетки останавливаются по очереди
       }));
-      setBalance(r.balance);
+      setBalance(r.balance, r.cur);
       const res = $("#case-result");
       const good = r.total >= r.cost;
       const nfts = r.items.filter((it) => it.kind === "nft");
@@ -1596,15 +1765,15 @@ async function openCase() {
       if (n === 1) {
         res.textContent = nfts.length
           ? `NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}»! Передаём вам в Telegram`
-          : `${r.gift} ${stars(r.prize)}`;
+          : `${r.gift} ${money(r.prize, r.cur)}`;
       } else {
-        res.textContent = `Выпало на ${stars(r.total)} из ${stars(r.cost)}` + (nfts.length ? " · NFT передаём в Telegram!" : "");
+        res.textContent = `Выпало на ${money(r.total, r.cur)} из ${money(r.cost, r.cur)}` + (nfts.length ? " · NFT передаём в Telegram!" : "");
         const drops = $("#case-drops");
         drops.innerHTML = "";
         r.items.forEach((it) => {
           const s = document.createElement("span");
-          s.textContent = it.kind === "nft" ? `${it.gift} NFT «${it.nft.model}»` : `${it.gift} ${stars(it.prize)}`;
-          if (it.kind === "nft" || it.prize >= currentCase.price) s.className = "good";
+          s.textContent = it.kind === "nft" ? `${it.gift} NFT «${it.nft.model}»` : `${it.gift} ${money(it.prize, r.cur)}`;
+          if (it.kind === "nft" || it.prize >= r.price) s.className = "good";
           drops.append(s);
         });
         drops.classList.remove("hidden");
@@ -1624,7 +1793,7 @@ async function openCase() {
 
 // ---------- PvP: рулетка и хоккей ----------
 
-const pvp = { game: null, timer: 0, lastSeen: {}, animating: false, colors: {}, round: null, holdUntil: 0 };
+const pvp = { game: null, cur: "stars", timer: 0, lastSeen: {}, animating: false, colors: {}, round: null, holdUntil: 0 };
 const PVP_RESULT_HOLD = 7000;  // сколько показывать итог раунда, пока новый раунд пустой
 
 function pvpColorFor(id) {
@@ -1661,7 +1830,7 @@ function pvpRenderPlayers(game, round) {
     nm.textContent = p.name;
     const am = document.createElement("span");
     am.className = "am";
-    am.textContent = stars(p.amount);
+    am.textContent = money(p.amount, pvp.cur);
     if (p.gifts && p.gifts.length) {
       const gl = document.createElement("span");
       gl.className = "gl";
@@ -1696,7 +1865,7 @@ function pvpShowResult(game, last) {
   const mine = state.me && last.winner.id === state.me.user.id;
   const res = pvpEl(game, "result");
   res.className = "result reveal " + (mine ? "win" : "");
-  res.textContent = mine ? `Вы забрали ${stars(last.payout)}!` : `${last.winner.name} забирает ${stars(last.payout)}`;
+  res.textContent = mine ? `Вы забрали ${money(last.payout, pvp.cur)}!` : `${last.winner.name} забирает ${money(last.payout, pvp.cur)}`;
   if (mine) {
     const myBet = (last.players.find((p) => p.id === last.winner.id) || {}).amount || last.payout;
     celebrate(myBet, last.payout, res);
@@ -1709,14 +1878,14 @@ async function pvpRefresh() {
   const game = pvp.game;
   if (!game) return;
   try {
-    const s = await api(`/api/pvp?game=${game}`);
+    const s = await api(`/api/pvp?game=${game}&cur=${pvp.cur}`);
     if (pvp.game !== game) return;
     document.querySelectorAll(".pvp-fee").forEach((el) => { el.textContent = Math.round(s.commission * 100); });
     const round = s.round;
     pvp.round = round;
-    const seen = pvp.lastSeen[game];
+    const seen = pvp.lastSeen[game + pvp.cur];
     if (s.last && seen !== undefined && s.last.id !== seen && s.last.finished_ago < 15 && !pvp.animating) {
-      pvp.lastSeen[game] = s.last.id;
+      pvp.lastSeen[game + pvp.cur] = s.last.id;
       pvp.animating = true;
       pvpEl(game, "result").className = "result";
       pvpEl(game, "result").textContent = game === "hockey" ? "Удар!" : "Крутим…";
@@ -1729,9 +1898,9 @@ async function pvpRefresh() {
         pvp.animating = false;
       }
     } else if (seen === undefined) {
-      pvp.lastSeen[game] = s.last ? s.last.id : 0;
+      pvp.lastSeen[game + pvp.cur] = s.last ? s.last.id : 0;
     }
-    pvpEl(game, "pot").textContent = fmt(round ? round.pot : 0);
+    pvpEl(game, "pot").textContent = moneyNum(round ? round.pot : 0, pvp.cur);
     const timer = pvpEl(game, "timer");
     if (!round || !round.players.length) timer.textContent = "Ждём игроков…";
     else if (round.ends_in === null) timer.textContent = "Ждём второго…";
@@ -1747,7 +1916,10 @@ async function pvpRefresh() {
 function pvpEnter(game) {
   pvpLeave();
   pvp.game = game;
+  pvp.cur = state.cur;        // у звёзд и TON раунды раздельные
   pvp.holdUntil = 0;
+  $$(".gift-btn").forEach((b) => b.classList.toggle("hidden", pvp.cur !== "stars"));
+  $$(".pot-cur").forEach((el) => { el.textContent = pvp.cur === "ton" ? "TON" : "★"; });
   pvpEl(game, "result").textContent = "";
   if (game === "hockey") hockeyDrawIdle(null);
   pvpRefresh();
@@ -1762,7 +1934,8 @@ function pvpLeave() {
 
 async function pvpBet(game, gifts) {
   await guard(async () => {
-    const body = gifts && gifts.length ? { amount: 0, game, gifts } : { amount: getBet(game === "hockey" ? "hockey" : "pvp"), game };
+    const body = gifts && gifts.length ? { amount: 0, game, gifts, cur: "stars" }
+      : { amount: getBet(game === "hockey" ? "hockey" : "pvp"), game, cur: state.cur };
     const s = await api("/api/pvp/bet", body);
     pvp.holdUntil = 0;
     loadMe().catch(() => {});
@@ -1984,6 +2157,16 @@ function bind() {
     walletTab(b.dataset.wallet);
   }));
   $("#upg-btn").addEventListener("click", upgradeGo);
+  $$("#cur-switch button").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.cur === state.cur || state.busy) return;
+    haptic();
+    $$("#cur-switch button").forEach((x) => x.classList.toggle("sel", x === b));
+    setCurrency(b.dataset.cur);
+  }));
+  $$("[data-copy]").forEach((b) => b.addEventListener("click", () => copyText($("#" + b.dataset.copy).textContent)));
+  $("#ton-open").addEventListener("click", tonOpenWallet);
+  $("#ton-withdraw").addEventListener("click", tonWithdraw);
+  $("#ton-max").addEventListener("click", () => { $("#ton-amount").value = Math.floor(state.bal.ton / NANO * 100) / 100; });
   $("#ref-copy").addEventListener("click", refCopy);
   $("#ref-share").addEventListener("click", refShare);
   $("#sheet-cancel").addEventListener("click", () => $("#sheet").classList.add("hidden"));
@@ -2009,6 +2192,10 @@ async function init() {
   }
   document.body.classList.add("has-tabbar");
   await homeEnter();
+  if (store("cur") === "ton") {
+    $$("#cur-switch button").forEach((x) => x.classList.toggle("sel", x.dataset.cur === "ton"));
+    setCurrency("ton");
+  }
   diceUpdate(false);
   minesPreview();
   renderPaytable();

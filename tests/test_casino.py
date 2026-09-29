@@ -304,7 +304,7 @@ async def test_big_wins_feed(casino, monkeypatch):
     await casino.slots(1, 2, value=64)          # 777 -> ×40
     await casino.slots(1, 2, value=48)          # две семёрки, ×1 — в ленту не попадает
     feed = await casino.big_wins()
-    assert feed == [{"game": "slots", "bet": 2, "win": 80, "x": 40.0, "name": "User1"}]
+    assert feed == [{"game": "slots", "bet": 2, "win": 80, "x": 40.0, "cur": "stars", "name": "User1"}]
 
 
 async def test_stats(casino):

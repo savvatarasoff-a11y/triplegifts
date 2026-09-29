@@ -5,10 +5,12 @@ import html
 import logging
 import time
 from typing import Any
+from urllib.parse import quote
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from . import money
 from .casino import Casino, display_name
 from .config import Config
 from .relayer import Relayer, RelayerError
@@ -147,3 +149,51 @@ async def reject(bot: Bot, casino: Casino, wd_id: int, admin_id: int) -> tuple[b
     except Exception:
         pass
     return True, f"❌ Заявка №{wd_id} отклонена, звёзды возвращены игроку"
+
+
+# ---------- вывод TON: админ переводит сам со своего кошелька ----------
+
+def ton_admin_keyboard(wd_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Отправил", callback_data=f"tw:ok:{wd_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"tw:no:{wd_id}"),
+    ]])
+
+
+async def notify_admins_ton(bot: Bot, cfg: Config, casino: Casino, wd: dict) -> None:
+    user = await casino.db.get_user(wd["user_id"])
+    username = f" @{html.escape(user['username'])}" if user and user.get("username") else ""
+    stats = (f"пополнил {money.fmt(user['ton_deposited'], money.TON)}, поставил "
+             f"{money.fmt(user['ton_wagered'], money.TON)}, выиграл {money.fmt(user['ton_won'], money.TON)}"
+             if user else "нет данных")
+    comment = quote(f"Svag Gifts вывод {wd['id']}")
+    link = f"ton://transfer/{wd['address']}?amount={wd['amount']}&text={comment}"
+    text = (
+        f"💎 <b>Вывод TON №{wd['id']}</b>\n"
+        f"Игрок: {html.escape(display_name(user))}{username} (<code>{wd['user_id']}</code>)\n"
+        f"Сумма: <b>{money.fmt(wd['amount'], money.TON)}</b>\n"
+        f"Адрес: <code>{html.escape(wd['address'])}</code>\n"
+        f"Статистика TON: {stats}\n\n"
+        f"Переведите со своего кошелька (<a href=\"{html.escape(link)}\">открыть перевод</a>) и нажмите «Отправил». "
+        "«Отклонить» вернёт TON игроку."
+    )
+    for admin_id in cfg.admin_ids:
+        try:
+            await bot.send_message(admin_id, text, reply_markup=ton_admin_keyboard(wd["id"]),
+                                   disable_web_page_preview=True)
+        except Exception:
+            log.warning("Не удалось уведомить админа %s о выводе TON", admin_id)
+
+
+async def ton_decide(bot: Bot, casino: Casino, wd_id: int, admin_id: int, ok: bool) -> tuple[bool, str]:
+    wd = await (casino.ton_withdraw_done if ok else casino.ton_withdraw_reject)(wd_id, admin_id)
+    if wd is None:
+        return False, "Заявка уже обработана"
+    amount = money.fmt(wd["amount"], money.TON)
+    try:
+        await bot.send_message(wd["user_id"], f"✅ Вывод TON №{wd_id} выполнен: {amount} отправлены на ваш кошелёк."
+                               if ok else f"❌ Заявка на вывод TON №{wd_id} отклонена, {amount} вернулись на баланс.")
+    except Exception:
+        pass
+    return True, (f"✅ Вывод TON №{wd_id} отмечен отправленным" if ok
+                  else f"❌ Заявка TON №{wd_id} отклонена, TON возвращены игроку")

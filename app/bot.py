@@ -26,14 +26,16 @@ from .web import (DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, notify_refer
 from .db import REFERRAL_RATE
 from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
 from .relayer import Relayer
-from .withdraw import admin_keyboard, approve, reject
+from . import money, ton
+from .withdraw import admin_keyboard, approve, reject, ton_admin_keyboard, ton_decide
 
 log = logging.getLogger(__name__)
 
 SLOT_TEXT = {"bar": "BAR", "grape": "🍇", "lemon": "🍋", "seven": "7️⃣"}
 
 RULES = (
-    "Пополнить баланс Svag Gifts можно через Telegram Stars, чеком или подарком: отправьте его аккаунту казино "
+    "Играть можно на звёзды или на TON (переключатель ★/💎 в мини-приложении). "
+    "Пополнить баланс Svag Gifts можно через Telegram Stars, TON-переводом, чеком или подарком: отправьте его аккаунту казино "
     "(мини-приложение → Кошелёк → Подарки), NFT можно ставить в PvP. "
     "<b>Вывод — подарками Telegram</b>: выберите подарок в мини-приложении (раздел «Вывод»), "
     "после проверки администратором он придёт вам в Telegram, его можно оставить или обменять на звёзды. "
@@ -107,7 +109,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     @router.message(Command("balance"))
     async def balance(message: Message) -> None:
         user = await register(message)
-        await message.answer(f"Баланс: <b>{user['balance']} ⭐</b>", reply_markup=play_keyboard(cfg))
+        await message.answer(f"Баланс: <b>{user['balance']} ⭐</b> · <b>{money.fmt(user.get('ton') or 0, money.TON)}</b>",
+                             reply_markup=play_keyboard(cfg))
 
     @router.message(Command("deposit"))
     async def deposit(message: Message, command: CommandObject) -> None:
@@ -218,6 +221,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/nftsend <code>номер выигрыша</code> — повторить передачу NFT\n"
             "/testnft — выдать себе тестовые NFT (настоящие модели с MRKT, для апгрейда), /testnft_clear — удалить\n"
             "/tonrate — курс TON → звёзды для цен MRKT\n"
+            "/tonwallet <code>адрес</code> — кошелёк казино для пополнений TON\n"
             "/stars — звёзды релейера (из них отправляются подарки при выводе)\n"
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
@@ -283,15 +287,31 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             f"Выдано по чекам: {s['checks_redeemed']} ⭐, ещё можно активировать на {s['checks_liability']} ⭐ "
             f"({s['active_checks']} чеков)\n"
             f"Звёзд на балансах игроков: {s['balances']} ⭐\n"
-            f"Выведено подарками: {s['withdrawn']} ⭐, ждут решения: {s['withdraw_pending']} ⭐"
+            f"Выведено подарками: {s['withdrawn']} ⭐, ждут решения: {s['withdraw_pending']} ⭐\n\n"
+            "💎 <b>TON</b>\n"
+            f"Пополнений: {s['ton_payments']} на {money.fmt(s['ton_deposited'], money.TON)}\n"
+            f"Ставки: {money.fmt(s['ton_wagered'], money.TON)}, выплачено {money.fmt(s['ton_won'], money.TON)}, "
+            f"доход {money.fmt(s['ton_wagered'] - s['ton_won'], money.TON)}\n"
+            f"TON на балансах игроков: {money.fmt(s['ton_balances'], money.TON)}\n"
+            f"Выведено: {money.fmt(s['ton_withdrawn'], money.TON)}, ждут: "
+            f"{money.fmt(s['ton_withdraw_pending'], money.TON)}"
         )
 
     @admin.message(Command("withdrawals"))
     async def list_withdrawals(message: Message) -> None:
         pending = await casino.withdrawals(status="pending", limit=20)
-        if not pending:
+        ton_pending = await casino.ton_withdrawals(status="pending", limit=20)
+        if not pending and not ton_pending:
             await message.answer("Заявок на вывод нет.")
             return
+        for wd in ton_pending:
+            user = await casino.db.get_user(wd["user_id"])
+            name = html.escape((user or {}).get("first_name") or str(wd["user_id"]))
+            await message.answer(
+                f"💎 TON №{wd['id']}: {name} (<code>{wd['user_id']}</code>) — "
+                f"<b>{money.fmt(wd['amount'], money.TON)}</b> на <code>{html.escape(wd['address'])}</code>",
+                reply_markup=ton_admin_keyboard(wd["id"]),
+            )
         for wd in pending:
             user = await casino.db.get_user(wd["user_id"])
             name = html.escape((user or {}).get("first_name") or str(wd["user_id"]))
@@ -535,6 +555,41 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             return
         ok, text = await deliver_nft(bot, casino.db, cfg, relayer, int(arg))
         await message.answer(("✅ " if ok else "⚠️ ") + html.escape(text))
+
+    @admin.message(Command("tonwallet"))
+    async def ton_wallet(message: Message, command: CommandObject) -> None:
+        arg = (command.args or "").strip()
+        if arg in ("off", "выкл"):
+            await ton.set_wallet(casino.db, None)
+            await message.answer("Пополнения TON выключены.")
+            return
+        if arg:
+            from .casino import TON_ADDRESS_RE
+            if not TON_ADDRESS_RE.match(arg):
+                await message.answer("Это не похоже на адрес TON-кошелька.")
+                return
+            await ton.set_wallet(casino.db, arg)
+        address = await ton.wallet(casino.db)
+        await message.answer(
+            f"💎 Кошелёк для пополнений TON: <code>{html.escape(address)}</code>\n"
+            "Игроки переводят на него TON с комментарием-кодом (SG + их ID) — бот сам находит перевод "
+            "и зачисляет его. Переводы, пришедшие до подключения кошелька, не зачисляются.\n"
+            "Сменить: <code>/tonwallet адрес</code>, выключить: <code>/tonwallet off</code>"
+            if address else
+            "Кошелёк не задан — пополнения TON выключены.\nЗадайте: <code>/tonwallet адрес</code> "
+            "(адрес вашего TON-кошелька, например из Tonkeeper)")
+
+    @admin.callback_query(F.data.startswith("tw:"))
+    async def ton_withdraw_decision(query: CallbackQuery, bot: Bot) -> None:
+        _, action, raw_id = query.data.split(":", 2)
+        ok, text = await ton_decide(bot, casino, int(raw_id), query.from_user.id, action == "ok")
+        await query.answer(text[:190], show_alert=not ok)
+        if ok and isinstance(query.message, Message):
+            try:
+                await query.message.edit_text(f"{query.message.html_text}\n\n<b>{html.escape(text)}</b>",
+                                              disable_web_page_preview=True)
+            except Exception:
+                pass
 
     @admin.callback_query(F.data.startswith("w:"))
     async def withdraw_decision(query: CallbackQuery, bot: Bot) -> None:

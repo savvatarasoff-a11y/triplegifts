@@ -20,6 +20,7 @@ from .logging_setup import setup_logging
 from .gifts import notify_deposits, scan as gifts_scan
 from .nft import deliver_waiting, sync as sync_nfts
 from .relayer import Relayer
+from . import ton as ton_mod
 from .web import build_app
 from .withdraw import approve_waiting
 
@@ -47,6 +48,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("relayer", "Релейер NFT"),
     ("testnft", "Тестовые NFT (модели с MRKT)"),
     ("tonrate", "Курс TON → звёзды"),
+    ("tonwallet", "Кошелёк для пополнений TON"),
 ]
 
 
@@ -104,6 +106,16 @@ async def scan_gifts(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) ->
         log.warning("Не удалось проверить подарки игроков", exc_info=True)
 
 
+async def ton_loop(bot: Bot, casino: Casino) -> None:
+    """Каждые 20 секунд ищет новые переводы TON на кошелёк казино."""
+    while True:
+        try:
+            await ton_mod.notify(bot, casino.db, await ton_mod.scan(casino.db))
+        except Exception as e:
+            log.warning("Не удалось проверить переводы TON: %s", e)
+        await asyncio.sleep(20)
+
+
 async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
     try:
         await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in PLAYER_COMMANDS])
@@ -141,6 +153,7 @@ async def run() -> None:
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
     relayer = Relayer(db, cfg.bot_token)
+    casino.ton_rate = relayer.market.ton_rate          # курс TON → звёзды (ручной /tonrate или авто)
 
     async def on_relayer_message(user_id: int) -> None:
         # игрок написал релейеру или прислал подарок: отдаём ждущие NFT и зачисляем подарки
@@ -167,6 +180,7 @@ async def run() -> None:
     crash_task = asyncio.create_task(crash_loop(casino))
     nft_task = asyncio.create_task(nft_loop(bot, cfg, casino, relayer))
     gifts_task = asyncio.create_task(gifts_loop(bot, cfg, casino, relayer))
+    ton_task = asyncio.create_task(ton_loop(bot, casino))
 
     try:
         me = await bot.get_me()
@@ -186,6 +200,7 @@ async def run() -> None:
         crash_task.cancel()
         nft_task.cancel()
         gifts_task.cancel()
+        ton_task.cancel()
         await relayer.stop()
         await runner.cleanup()
         await db.close()
