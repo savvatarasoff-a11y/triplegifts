@@ -20,6 +20,7 @@ from .config import Config
 from .db import REFERRAL_RATE
 from .games import logic as g
 from .cases import CaseCatalog
+from .channel import CHANNEL
 from .gifts import withdraw as withdraw_gift
 from .nft import deliver as deliver_nft
 from .nftimg import NftImages, render_tgs
@@ -266,6 +267,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                     for c in await cases.list()
                 ],
                 "mines_min": g.MINES_MIN,
+                "channel": CHANNEL.lstrip("@"),
                 "mines_edge": g.MINES_EDGE,
                 "crash_growth": g.CRASH_GROWTH,
                 "pvp_commission": g.PVP_COMMISSION,

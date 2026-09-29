@@ -2788,6 +2788,11 @@ function bind() {
   $("#dep-btn").addEventListener("click", () => deposit(parseInt($("#dep-amount").value, 10)));
   $("#check-btn").addEventListener("click", activateCheck);
   $("#chk-create").addEventListener("click", createCheck);
+  $("#channel-btn").addEventListener("click", () => {
+    const url = `https://t.me/${(state.config && state.config.channel) || "A_giftss"}`;
+    if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+    else window.open(url, "_blank");
+  });
   $("#chk-activate").addEventListener("click", () => activateCheck("#chk-code"));
   $("#slots-spin").addEventListener("click", slotsSpin);
   $("#plinko-btn").addEventListener("click", plinkoDrop);

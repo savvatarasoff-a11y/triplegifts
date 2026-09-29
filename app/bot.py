@@ -25,6 +25,7 @@ from .web import (DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, notify_refer
                   parse_referral, referral_link)
 from .db import REFERRAL_RATE
 from .mrkt import STAR_USD
+from .channel import CHANNEL
 from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
 from .relayer import Relayer
 from . import money, ton
@@ -77,11 +78,12 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             user = await casino.db.get_user(user["id"])
         await message.answer(
             f"🎁 <b>Добро пожаловать в Svag Gifts!</b>\n\n"
-            f"Слоты, краш, мины, кости, кейсы, PvP-рулетка и PvP-хоккей — в мини-приложении.\n"
+            f"Слоты, краш, мины, Plinko, кейсы с NFT, апгрейд NFT, PvP-рулетка и PvP-хоккей — в мини-приложении.\n"
             f"Вывод — подарками Telegram.\n"
             f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
             f"/slot 10 — слоты прямо в чате (настоящий 🎰)\n"
-            f"/deposit — пополнить звёздами\n/balance — баланс\n/ref — пригласить друзей (+10%)\n/help — правила",
+            f"/deposit — пополнить звёздами\n/balance — баланс\n/ref — пригласить друзей (+10%)\n/help — правила\n\n"
+            f"📢 Новости, чеки и выигрыши: {CHANNEL}",
             reply_markup=play_keyboard(cfg),
         )
 
@@ -289,6 +291,9 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
             "/stats — статистика казино\n"
+            "/channel_setup — оформить канал и опубликовать приветственный пост\n"
+            "/channel_post — ещё раз опубликовать приветственный пост\n"
+            "/channel_wins <code>on|off</code> — выигрыши в канал\n"
             "/user <code>@username или ID</code> — баланс игрока"
         )
 
@@ -552,6 +557,37 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     async def dupe_clear(message: Message) -> None:
         count = await casino.demo_clear()
         await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
+
+    @admin.message(Command("channel_setup"))
+    async def channel_setup(message: Message, bot: Bot) -> None:
+        from . import channel
+        await message.answer(f"Оформляю канал {channel.CHANNEL}…")
+        report = await channel.setup(bot)
+        tip = ("\n\nЕсли что-то не вышло — добавьте бота админом канала с правами: публикация сообщений, "
+               "изменение профиля канала, закрепление." if any(r.startswith("⚠️") for r in report) else "")
+        await message.answer("📢 <b>Канал</b>\n" + "\n".join(report) + tip)
+
+    @admin.message(Command("channel_post"))
+    async def channel_post(message: Message, bot: Bot) -> None:
+        from aiogram.types import BufferedInputFile
+        from . import channel
+        me = await bot.get_me()
+        try:
+            await bot.send_photo(channel.CHANNEL, BufferedInputFile(channel.banner(), "svag_gifts.png"),
+                                 caption=channel.welcome_text(), reply_markup=channel.play_keyboard(me.username))
+            await message.answer("✅ Приветственный пост опубликован")
+        except Exception as e:
+            await message.answer(f"⚠️ {html.escape(str(getattr(e, 'message', e)))}")
+
+    @admin.message(Command("channel_wins"))
+    async def channel_wins(message: Message, command: CommandObject) -> None:
+        from . import channel
+        arg = (command.args or "").strip().lower()
+        if arg in ("on", "off"):
+            await casino.db.kv_set(channel.WINS_ON_KEY, arg)
+        state = await casino.db.kv_get(channel.WINS_ON_KEY) or "on"
+        await message.answer(f"Крупные выигрыши и NFT в канал: <b>{'включено' if state != 'off' else 'выключено'}</b>\n"
+                             "<code>/channel_wins on</code> · <code>/channel_wins off</code>")
 
     @admin.message(Command("nftimg"))
     async def nft_images_check(message: Message) -> None:

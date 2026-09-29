@@ -51,6 +51,8 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("relayer", "Релейер NFT"),
     ("tonrate", "Курс TON → звёзды"),
     ("nftimg", "Проверка картинок NFT"),
+    ("channel_setup", "Оформить канал"),
+    ("channel_wins", "Выигрыши в канал"),
     ("dupe", "Демо-NFT (модели с MRKT)"),
     ("tonwallet", "Кошелёк для пополнений TON"),
 ]
@@ -143,6 +145,17 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, imag
         await asyncio.sleep(600)
 
 
+async def channel_loop(bot: Bot, casino: Casino) -> None:
+    """Раз в минуту постит в канал крупные выигрыши и NFT."""
+    from .channel import post_wins
+    while True:
+        try:
+            await post_wins(bot, casino.db)
+        except Exception as e:
+            log.warning("Канал: не удалось опубликовать выигрыши: %s", type(e).__name__)
+        await asyncio.sleep(60)
+
+
 async def gifts_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> None:
     """Каждые 20 секунд зачисляет подарки, которые игроки прислали релейеру."""
     while True:
@@ -178,6 +191,16 @@ async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
                 )
             except Exception:
                 log.warning("Меню админа %s не установлено: он ещё не нажал /start", admin_id)
+        try:
+            await bot.set_my_short_description("🎁 Казино на подарках Telegram: слоты, краш, кейсы с NFT, "
+                                               "апгрейд и PvP. Новости — @A_giftss")
+            await bot.set_my_description(
+                "🎁 Svag Gifts — казино на подарках Telegram.\n\n"
+                "🎰 Слоты · 🚀 Краш · 💣 Мины · 🟣 Plinko · 📦 Кейсы с NFT · ⬆️ Апгрейд · ⚔️ PvP\n"
+                "💸 Пополнение — Stars и TON, вывод — подарками и NFT.\n\n"
+                "Нажмите «Старт» и откройте мини-приложение. Канал: @A_giftss. 18+")
+        except Exception:
+            log.warning("Описание бота не обновлено")
         if cfg.webapp_url:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(text="Svag Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
@@ -233,6 +256,7 @@ async def run() -> None:
     nft_task = asyncio.create_task(nft_loop(bot, cfg, casino, relayer, images))
     gifts_task = asyncio.create_task(gifts_loop(bot, cfg, casino, relayer))
     ton_task = asyncio.create_task(ton_loop(bot, casino))
+    channel_task = asyncio.create_task(channel_loop(bot, casino))
 
     try:
         me = await bot.get_me()
@@ -253,6 +277,7 @@ async def run() -> None:
         nft_task.cancel()
         gifts_task.cancel()
         ton_task.cancel()
+        channel_task.cancel()
         await relayer.stop()
         await runner.cleanup()
         await db.close()
