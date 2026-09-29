@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 
 API = "https://toncenter.com/api/v2/getTransactions"
 WALLET_KEY = "ton:wallet"
+# кошелёк казино для пополнений, пока админ не задал другой (/tonwallet); адрес публичный
+DEFAULT_WALLET = os.environ.get("TON_WALLET", "UQC5wHZ0nk0liC5PSb2H1qq1c33vQPSjsDMSnDzVm5XIwahb")
 SINCE_KEY = "ton:since"          # переводы до подключения кошелька не зачисляются
 COMMENT_RE = re.compile(r"^\s*SG\s*(\d{1,15})\s*$", re.IGNORECASE)
 
@@ -38,11 +40,14 @@ def transfer_link(wallet: str, comment: str, amount: int | None = None) -> str:
 
 
 async def wallet(db: Database) -> str | None:
-    return await db.kv_get(WALLET_KEY)
+    value = await db.kv_get(WALLET_KEY)
+    if value == "off":
+        return None
+    return value or DEFAULT_WALLET or None
 
 
 async def set_wallet(db: Database, address: str | None) -> None:
-    await db.kv_set(WALLET_KEY, address)
+    await db.kv_set(WALLET_KEY, address or "off")
     await db.kv_set(SINCE_KEY, str(time.time()) if address else None)
 
 
@@ -80,7 +85,12 @@ async def scan(db: Database, fetcher: Any = fetch) -> list[dict[str, Any]]:
     address = await wallet(db)
     if not address:
         return []
-    since = float(await db.kv_get(SINCE_KEY) or 0)
+    since_raw = await db.kv_get(SINCE_KEY)
+    if since_raw is None:
+        # первый запуск с кошельком по умолчанию: старые переводы не зачисляем
+        await db.kv_set(SINCE_KEY, str(time.time()))
+        return []
+    since = float(since_raw)
     credited = []
     for tx in await fetcher(address):
         parsed = parse(tx)

@@ -146,3 +146,20 @@ def test_money_format():
     assert money.fmt(125_000_000, "ton") == "0.125 TON"
     assert money.fmt(42, "stars") == "42 ⭐"
     assert money.stars_to(25, "ton", 200, up=True) == 125_000_000 and money.to_stars(NANO, "ton", 200) == 200
+
+
+async def test_default_wallet_and_off(casino):
+    db = casino.db
+    from app.casino import TON_ADDRESS_RE
+    assert TON_ADDRESS_RE.match(ton.DEFAULT_WALLET)
+    assert await ton.wallet(db) == ton.DEFAULT_WALLET                            # кошелёк казино по умолчанию
+    fetched = []
+
+    async def fetcher(address):
+        fetched.append(address)
+        return [tx("old", "SG2", NANO, utime=1)]
+
+    assert await ton.scan(db, fetcher) == [] and fetched == []                  # первый запуск: только отметка времени
+    assert await ton.scan(db, fetcher) == [] and fetched == [ton.DEFAULT_WALLET]  # старый перевод не зачислен
+    await ton.set_wallet(db, None)
+    assert await ton.wallet(db) is None                                          # /tonwallet off
