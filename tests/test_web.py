@@ -15,6 +15,7 @@ from aiohttp import web
 from app.web import build_app, parse_deposit_payload
 
 CASINO = web.AppKey("casino", object)
+RELAYER = web.AppKey("relayer", object)
 BOT = web.AppKey("bot", object)
 
 TOKEN = "123456:TEST-token"
@@ -102,9 +103,12 @@ async def client(tmp_path):
     await db.connect()
     casino = Casino(db, cfg)
     bot = FakeBot()
-    app = build_app(cfg, casino, bot)
+    from tests.test_nft import FakeRelayer
+    relayer = FakeRelayer([])
+    app = build_app(cfg, casino, bot, relayer)
     app[CASINO] = casino
     app[BOT] = bot
+    app[RELAYER] = relayer
     async with TestClient(TestServer(app)) as c:
         yield c
     await db.close()
@@ -223,16 +227,16 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
     assert data["kind"] == "gift" and data["prize"] in (15, 25, 50, 100)
     assert (await client.post("/api/case", headers=auth(8), json={"case": "nft"})).status == 400
 
-    # Модель у релейера с ценой с маркета -> NFT-кейс; выигравшему уходит случайный подарок этой модели
+    # Модель у релейера с ценой с маркета -> NFT-кейс; выигравшему релейер передаёт случайный подарок модели
     import time as _t
-    await casino.db.conn.execute(
-        "INSERT INTO business_connections(id, user_id, can_gifts, is_enabled, updated_at) VALUES ('bc1', 777, 1, 1, 0)")
+    from tests.test_nft import FakeRelayer, item
+    relayer = FakeRelayer([item(1, "555", "Plush Pepe", 11, "Frog Prince"), item(2, "555", "Plush Pepe", 12, "Frog Prince"),
+                           item(3, "555", "Plush Pepe", 13, "Other")], known_users=[8])
+    client.app[RELAYER].items = relayer.items
+    client.app[RELAYER].known = relayer.known
     await casino.db.conn.execute(
         "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at) "
         "VALUES ('555','Plush Pepe','Frog Prince',1.5,'🐸',2,5000,?)", (_t.time(),))
-    client.app[BOT].inventory = [unique_gift("og1", "555", "Plush Pepe", 11, "Frog Prince"),
-                                 unique_gift("og2", "555", "Plush Pepe", 12, "Frog Prince"),
-                                 unique_gift("og3", "555", "Plush Pepe", 13, "Other")]
     cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(8))).json())["config"]["cases"]}
     nft_prize = next(p for p in cases["nft"]["prizes"] if p["kind"] == "nft")
     assert nft_prize["title"] == "Plush Pepe" and nft_prize["amount"] == 5000 and nft_prize["model"] == "Frog Prince"
@@ -242,8 +246,8 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
     assert data["kind"] == "nft" and data["nft"]["model"] == "Frog Prince"
     import asyncio
     await asyncio.sleep(0.05)
-    t = client.app[BOT].transfers[-1]
-    assert t["owned_gift_id"] in ("og1", "og2") and t["new_owner_chat_id"] == 8 and t["business_connection_id"] == "bc1"
+    ref, user = client.app[RELAYER].transfers[-1]
+    assert ref in (1, 2) and user == 8
     assert (await casino.db.one("SELECT status FROM nft_wins"))["status"] == "sent"
     assert (await casino.db.one("SELECT stock, reserved FROM nft_models")) == {"stock": 1, "reserved": 0}
 

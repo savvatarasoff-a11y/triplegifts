@@ -2,7 +2,8 @@
 
 На сервере хранятся только модели (коллекция + модель) с запасом у релейера и реальной ценой —
 полом маркета Telegram в звёздах. Выигравшему релейер передаёт случайный подарок этой модели.
-Инвентарь и передача — через бизнес-подключение релейера (Bot API), цены — через MTProto (relayer.py).
+Всё через MTProto-аккаунт релейера (relayer.py): Telegram временно запрещает бизнес-ботам,
+подключённым к аккаунту владельца, управлять подарками.
 """
 from __future__ import annotations
 
@@ -11,73 +12,39 @@ import logging
 import random
 import time
 from collections import defaultdict
+from typing import Any
 
 from aiogram import Bot
-from aiogram.types import OwnedGiftUnique
 
 from .config import Config
 from .db import Database
-from .relayer import Relayer
+from .relayer import Relayer, RelayerError
 
 log = logging.getLogger(__name__)
 
 PRICE_MAX_AGE = 3600   # модель без проверенной за час цены в кейс не попадает
 
 
-async def relayer_connection(db: Database, cfg: Config) -> dict | None:
-    """Бизнес-подключение аккаунта-релейера (аккаунт админа) с правом управлять подарками."""
-    rows = await db.all(
-        "SELECT * FROM business_connections WHERE is_enabled=1 AND can_gifts=1 ORDER BY updated_at DESC"
-    )
-    return next((r for r in rows if r["user_id"] in cfg.admin_ids), None)
-
-
-async def relayer_inventory(bot: Bot, conn: dict) -> list[OwnedGiftUnique]:
-    gifts: list[OwnedGiftUnique] = []
-    offset = None
-    while True:
-        page = await bot.get_business_account_gifts(
-            business_connection_id=conn["id"], exclude_unlimited=True, exclude_limited_upgradable=True,
-            exclude_limited_non_upgradable=True, offset=offset, limit=100,
-        )
-        gifts += [g for g in page.gifts if isinstance(g, OwnedGiftUnique) and g.can_be_transferred]
-        offset = page.next_offset
-        if not offset:
-            return gifts
-
-
-def model_key(owned: OwnedGiftUnique) -> tuple[str, str]:
-    gift = owned.gift
-    return gift.gift_id, gift.model.name if gift.model else "—"
-
-
-async def sync(bot: Bot, db: Database, cfg: Config, relayer: Relayer) -> tuple[int, str | None]:
+async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
     """Пересчитывает запас моделей у релейера и обновляет их рыночные цены. Возвращает (моделей, ошибка)."""
-    conn = await relayer_connection(db, cfg)
-    if not conn:
-        return 0, ("Релейер не подключён к боту. На аккаунте с NFT: Настройки → Telegram для бизнеса → "
-                   "Чат-боты → выберите бота и включите права на подарки и звёзды.")
-    inventory = await relayer_inventory(bot, conn)
-    groups: dict[tuple[str, str], list[OwnedGiftUnique]] = defaultdict(list)
-    for owned in inventory:
-        groups[model_key(owned)].append(owned)
+    if not relayer.ready:
+        return 0, "Релейер не подключён — выполните вход: /relayer"
+    inventory = await relayer.inventory()
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for item in inventory:
+        groups[(item["collection_id"], item["model"])].append(item)
     now = time.time()
     price_error = None
     rows = []
     for (collection_id, model), items in groups.items():
-        gift = items[0].gift
-        rarity = gift.model.rarity_per_mille / 10 if gift.model and gift.model.rarity_per_mille is not None else None
-        emoji = gift.model.sticker.emoji if gift.model and gift.model.sticker else None
-        price = None
-        if relayer.ready:
-            try:
-                price = await relayer.floor_price(int(collection_id), model)
-            except Exception as e:
-                price_error = f"не удалось получить цены с маркета: {type(e).__name__}"
-                log.warning("Цена модели %s/%s недоступна: %s", collection_id, model, e)
-        rows.append((collection_id, gift.base_name, model, rarity, emoji, len(items), price, now if price else None))
-    if not relayer.ready:
-        price_error = "MTProto-вход релейера не выполнен — цены с маркета недоступны (/relayer)"
+        first = items[0]
+        try:
+            price = await relayer.floor_price(int(collection_id), model)
+        except Exception as e:
+            price, price_error = None, f"не удалось получить цены с маркета: {type(e).__name__}"
+            log.warning("Цена модели %s/%s недоступна: %s", collection_id, model, e)
+        rows.append((collection_id, first["collection_name"], model, first["rarity"], first["emoji"], len(items),
+                     price, now if price else None))
     async with db.tx() as c:
         await c.execute("UPDATE nft_models SET stock=0")
         await c.executemany(
@@ -101,64 +68,86 @@ def describe(m: dict) -> str:
             f"«{html.escape(m['model'])}»{rarity} — {price}, у релейера {m['stock']} (свободно {free}){off}")
 
 
-async def deliver(bot: Bot, db: Database, cfg: Config, win_id: int) -> tuple[bool, str]:
+async def _notify_admins(bot: Bot, cfg: Config, text: str) -> None:
+    for admin_id in cfg.admin_ids:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:
+            pass
+
+
+async def deliver(bot: Bot, db: Database, cfg: Config, relayer: Relayer, win_id: int) -> tuple[bool, str]:
     """Передаёт победителю случайный подарок выигранной модели с аккаунта-релейера."""
     async with db.tx() as c:
         cur = await c.execute(
-            "UPDATE nft_wins SET status='sending' WHERE id=? AND status IN ('won','failed')", (win_id,)
+            "UPDATE nft_wins SET status='sending' WHERE id=? AND status IN ('won','failed','waiting')", (win_id,)
         )
     if cur.rowcount != 1:
         return False, "Выигрыш уже передан или не найден"
     win = await db.one("SELECT * FROM nft_wins WHERE id=?", win_id)
     model = await db.one("SELECT * FROM nft_models WHERE id=?", win["model_id"])
+    user = await db.get_user(win["user_id"])
+
+    async def set_status(status: str, error: str | None = None) -> None:
+        async with db.tx() as c:
+            await c.execute("UPDATE nft_wins SET status=?, error=? WHERE id=?", (status, error, win_id))
 
     async def fail(reason: str) -> tuple[bool, str]:
-        async with db.tx() as c:
-            await c.execute("UPDATE nft_wins SET status='failed', error=? WHERE id=?", (reason[:200], win_id))
-        for admin_id in cfg.admin_ids:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    f"⚠️ Не удалось передать NFT игроку <code>{win['user_id']}</code>: {describe(model)}\n"
-                    f"Причина: {html.escape(reason)}\nПовторить: /nftsend {win_id}",
-                )
-            except Exception:
-                pass
+        await set_status("failed", reason[:200])
+        await _notify_admins(bot, cfg,
+                             f"⚠️ Не удалось передать NFT игроку <code>{win['user_id']}</code>: {describe(model)}\n"
+                             f"Причина: {html.escape(reason)}\nПовторить: /nftsend {win_id}")
         return False, reason
 
-    conn = await relayer_connection(db, cfg)
-    if not conn:
-        return await fail("релейер не подключён к боту")
     try:
-        inventory = await relayer_inventory(bot, conn)
+        inventory = await relayer.inventory()
     except Exception as e:
         return await fail(f"не удалось получить подарки релейера: {type(e).__name__}")
     busy = {r["owned_gift_id"] for r in await db.all(
-        "SELECT owned_gift_id FROM nft_wins WHERE status IN ('sending','sent') AND owned_gift_id IS NOT NULL")}
-    candidates = [g for g in inventory
-                  if model_key(g) == (model["collection_id"], model["model"]) and g.owned_gift_id not in busy]
+        "SELECT owned_gift_id FROM nft_wins WHERE status='sent' AND owned_gift_id IS NOT NULL")}
+    candidates = [i for i in inventory if (i["collection_id"], i["model"]) == (model["collection_id"], model["model"])
+                  and str(i["ref"]) not in busy]
     if not candidates:
         return await fail("у релейера не осталось подарков этой модели")
-    owned = random.SystemRandom().choice(candidates)
+    item = random.SystemRandom().choice(candidates)
     try:
-        await bot.transfer_gift(
-            business_connection_id=conn["id"], owned_gift_id=owned.owned_gift_id,
-            new_owner_chat_id=win["user_id"], star_count=owned.transfer_star_count or None,
-        )
+        await relayer.transfer(item, win["user_id"], (user or {}).get("username"))
+    except RelayerError as e:
+        if str(e) == "NEED_CONTACT":
+            # Релейер не может найти игрока без @username — просим игрока написать релейеру
+            await set_status("waiting", "игрок должен написать релейеру")
+            relayer_name = await relayer.username()
+            contact = f"@{relayer_name}" if relayer_name else "аккаунту-релейеру"
+            try:
+                await bot.send_message(
+                    win["user_id"],
+                    f"🎁 Вы выиграли NFT {model.get('emoji') or '💎'} <b>{html.escape(model['collection_name'])}</b> "
+                    f"(модель «{html.escape(model['model'])}»)!\nЧтобы получить его, напишите любое сообщение "
+                    f"{contact} — подарок придёт сразу.",
+                )
+            except Exception:
+                pass
+            return False, "ждём, пока игрок напишет релейеру"
+        return await fail(str(e))
     except Exception as e:
         return await fail(str(getattr(e, "message", None) or type(e).__name__))
     async with db.tx() as c:
         await c.execute("UPDATE nft_wins SET status='sent', owned_gift_id=?, error=NULL, sent_at=? WHERE id=?",
-                        (owned.owned_gift_id, time.time(), win_id))
+                        (str(item["ref"]), time.time(), win_id))
         await c.execute("UPDATE nft_models SET stock=MAX(stock-1,0), reserved=MAX(reserved-1,0) WHERE id=?",
                         (model["id"],))
-    gift = owned.gift
     try:
         await bot.send_message(
             win["user_id"],
-            f"🎉 Вам передан NFT из кейса: {model.get('emoji') or '💎'} <b>{html.escape(gift.base_name)} "
-            f"#{gift.number}</b>, модель «{html.escape(model['model'])}». Он уже в вашем профиле.",
+            f"🎉 Вам передан NFT из кейса: {model.get('emoji') or '💎'} <b>{html.escape(item['collection_name'])} "
+            f"#{item['number']}</b>, модель «{html.escape(model['model'])}». Он уже в вашем профиле.",
         )
     except Exception:
         pass
-    return True, f"Передан {gift.base_name} #{gift.number}"
+    return True, f"Передан {item['collection_name']} #{item['number']}"
+
+
+async def deliver_waiting(bot: Bot, db: Database, cfg: Config, relayer: Relayer, user_id: int) -> None:
+    """Игрок написал релейеру — отдаём ему всё, что ждало контакта."""
+    for win in await db.all("SELECT id FROM nft_wins WHERE user_id=? AND status='waiting'", user_id):
+        await deliver(bot, db, cfg, relayer, win["id"])

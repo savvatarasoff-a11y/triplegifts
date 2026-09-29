@@ -18,6 +18,7 @@ from .config import Config
 from .games import logic as g
 from .cases import CaseCatalog
 from .nft import deliver as deliver_nft
+from .relayer import Relayer
 from .withdraw import GiftCatalog, notify_admins
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def parse_deposit_payload(payload: str) -> tuple[int, int] | None:
     return int(parts[1]), int(parts[2])
 
 
-def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
+def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = None) -> web.Application:
     @web.middleware
     async def errors(request: web.Request, handler: Handler) -> web.StreamResponse:
         try:
@@ -229,7 +230,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot) -> web.Application:
             raise GameError("Кейс сейчас недоступен")
         result = await casino.open_case(request[USER_ID], case)
         if result["kind"] == "nft":
-            asyncio.create_task(deliver_nft(bot, casino.db, cfg, result["nft"]["win_id"]))
+            asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
         return web.json_response(result)
 
     @routes.get("/api/mines")

@@ -17,7 +17,7 @@ from .casino import Casino
 from .config import Config, ConfigError
 from .db import Database
 from .logging_setup import setup_logging
-from .nft import sync as sync_nfts
+from .nft import deliver_waiting, sync as sync_nfts
 from .relayer import Relayer
 from .web import build_app
 
@@ -76,7 +76,7 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> N
     """Каждые 10 минут обновляет запас моделей у релейера и цены с маркета."""
     while True:
         try:
-            await sync_nfts(bot, casino.db, cfg, relayer)
+            await sync_nfts(casino.db, relayer)
         except Exception:
             log.warning("Не удалось обновить NFT-модели")
         await asyncio.sleep(600)
@@ -118,14 +118,18 @@ async def run() -> None:
     casino = Casino(db, cfg)
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
-    runner = web.AppRunner(build_app(cfg, casino, bot), access_log=None)
+    relayer = Relayer(db, cfg.bot_token)
+    if await relayer.start():
+        relayer.on_private_message(lambda user_id: deliver_waiting(bot, db, cfg, relayer, user_id))
+
+    runner = web.AppRunner(build_app(cfg, casino, bot, relayer), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", cfg.port).start()
-
-    relayer = Relayer(db, cfg.bot_token)
-    await relayer.start()
     dp = Dispatcher()
-    dp.include_router(build_router(cfg, casino, relayer))
+    dp.include_router(build_router(
+        cfg, casino, relayer,
+        on_relayer_ready=lambda: relayer.on_private_message(lambda uid: deliver_waiting(bot, db, cfg, relayer, uid)),
+    ))
     await setup_bot_ui(bot, cfg)
     bg = asyncio.create_task(background(casino, bot))
     crash_task = asyncio.create_task(crash_loop(casino))

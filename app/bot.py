@@ -43,7 +43,7 @@ def play_keyboard(cfg: Config) -> InlineKeyboardMarkup | None:
     ]])
 
 
-def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None) -> Router:
+def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on_relayer_ready=None) -> Router:
     router = Router(name="casino")
 
     async def register(message: Message) -> dict:
@@ -278,23 +278,21 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None) ->
 
     @admin.message(Command("relayer"))
     async def relayer_status(message: Message) -> None:
-        conn = await casino.db.one(
-            "SELECT * FROM business_connections WHERE is_enabled=1 ORDER BY updated_at DESC LIMIT 1")
         who = await relayer.me() if relayer and relayer.ready else None
         lines = [
-            "🤖 <b>Релейер NFT</b> — аккаунт, на котором лежат NFT-подарки казино.",
+            "🤖 <b>Релейер NFT</b> — аккаунт казино, на котором лежат NFT-подарки. Через него бот узнаёт цены "
+            "моделей на маркете Telegram и передаёт выигранные NFT игрокам.",
             "",
-            f"1. Бизнес-подключение (выдача подарков): {'✅' if conn and conn['can_gifts'] else '❌'}",
-            "   Telegram → Настройки → Telegram для бизнеса → Чат-боты → этот бот, права на подарки и звёзды.",
-            f"2. Вход через MTProto (цены с маркета): {'✅ ' + html.escape(who) if who else '❌'}",
-            "   • получите api_id и api_hash на my.telegram.org → API development tools;",
-            "   • <code>/relayer_api api_id api_hash</code>",
-            "   • <code>/relayer_phone +79990000000</code> — номер аккаунта-релейера;",
-            "   • код из Telegram отправьте <b>с пробелами</b>: <code>/relayer_code 1 2 3 4 5</code>",
-            "     (слитный код Telegram блокирует);",
-            "   • если есть облачный пароль: <code>/relayer_password пароль</code>.",
-            "   Сообщения с ключами, кодом и паролем бот сразу удаляет. Сессия хранится зашифрованной.",
-            "3. <code>/nfts</code> — модели у релейера и их пол на маркете.",
+            f"Вход: {'✅ ' + html.escape(who) if who else '❌ не выполнен'}",
+            "1. Получите api_id и api_hash на my.telegram.org → API development tools.",
+            "2. <code>/relayer_api api_id api_hash</code>",
+            "3. <code>/relayer_phone +79990000000</code> — номер аккаунта-релейера.",
+            "4. Код из Telegram — <b>с пробелами</b>: <code>/relayer_code 1 2 3 4 5</code> (слитный Telegram блокирует).",
+            "5. Если есть облачный пароль: <code>/relayer_password пароль</code>.",
+            "6. <code>/nfts</code> — модели у релейера и их пол на маркете.",
+            "",
+            "Сообщения с ключами, кодом и паролем бот сразу удаляет, сессия хранится зашифрованной.",
+            "Платную передачу NFT релейер оплачивает звёздами со своего баланса — держите на нём немного звёзд.",
         ]
         await message.answer("\n".join(lines))
 
@@ -337,6 +335,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None) ->
         if not done:
             await message.answer("🔐 Включён облачный пароль: <code>/relayer_password пароль</code>")
             return
+        if on_relayer_ready:
+            on_relayer_ready()
         await message.answer(f"✅ Релейер подключён: {html.escape(await relayer.me() or '')}. Теперь /nfts")
 
     @admin.message(Command("relayer_password"))
@@ -347,6 +347,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None) ->
         except Exception as e:
             await message.answer(f"⚠️ {html.escape(str(e))}")
             return
+        if on_relayer_ready:
+            on_relayer_ready()
         await message.answer(f"✅ Релейер подключён: {html.escape(await relayer.me() or '')}. Теперь /nfts")
 
     @admin.message(Command("relayer_logout"))
@@ -358,7 +360,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None) ->
     async def nfts(message: Message, bot: Bot) -> None:
         status = await message.answer("🔄 Обновляю подарки релейера и цены с маркета…")
         try:
-            count, error = await sync_nfts(bot, casino.db, cfg, relayer)
+            count, error = await sync_nfts(casino.db, relayer)
         except Exception as e:
             await status.edit_text(f"⚠️ Не удалось обновить: {html.escape(type(e).__name__)}")
             return
@@ -399,7 +401,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None) ->
         if not arg.isdigit():
             await message.answer("Формат: <code>/nftsend номер_выигрыша</code>")
             return
-        ok, text = await deliver_nft(bot, casino.db, cfg, int(arg))
+        ok, text = await deliver_nft(bot, casino.db, cfg, relayer, int(arg))
         await message.answer(("✅ " if ok else "⚠️ ") + html.escape(text))
 
     @admin.callback_query(F.data.startswith("w:"))

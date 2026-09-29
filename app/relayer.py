@@ -176,3 +176,84 @@ class Relayer:
             price = min(amounts) if amounts else None
         self._prices[key] = (time.time(), price)
         return price
+
+    # ---------- инвентарь и передача (MTProto) ----------
+
+    async def inventory(self) -> list[dict[str, Any]]:
+        """NFT-подарки на аккаунте релейера, которые можно передать прямо сейчас."""
+        if not self.ready:
+            raise RelayerError("Релейер не подключён")
+        from telethon.tl.functions.payments import GetSavedStarGiftsRequest
+        from telethon.tl.types import (DocumentAttributeCustomEmoji, InputPeerSelf, StarGiftAttributeModel,
+                                       StarGiftAttributeRarity, StarGiftUnique)
+        items: list[dict[str, Any]] = []
+        offset = ""
+        now = time.time()
+        while True:
+            res = await self.client(GetSavedStarGiftsRequest(peer=InputPeerSelf(), offset=offset, limit=100,
+                                                             exclude_unlimited=True))
+            for saved in res.gifts:
+                gift = saved.gift
+                if not isinstance(gift, StarGiftUnique) or not saved.msg_id:
+                    continue
+                if saved.can_transfer_at and saved.can_transfer_at.timestamp() > now:
+                    continue   # передача этого подарка пока заблокирована Telegram
+                model = next((a for a in gift.attributes if isinstance(a, StarGiftAttributeModel)), None)
+                if model is None:
+                    continue
+                rarity = model.rarity.permille / 10 if isinstance(model.rarity, StarGiftAttributeRarity) else None
+                emoji = next((a.alt for a in getattr(model.document, "attributes", []) or []
+                              if isinstance(a, DocumentAttributeCustomEmoji)), None)
+                items.append({
+                    "ref": saved.msg_id, "collection_id": str(gift.gift_id), "collection_name": gift.title,
+                    "number": gift.num, "model": model.name, "rarity": rarity, "emoji": emoji,
+                    "transfer_stars": saved.transfer_stars or 0,
+                })
+            offset = res.next_offset
+            if not offset:
+                return items
+
+    async def transfer(self, item: dict[str, Any], user_id: int, username: str | None) -> None:
+        """Передаёт подарок игроку. RelayerError('NEED_CONTACT') — релейер не может найти игрока."""
+        if not self.ready:
+            raise RelayerError("Релейер не подключён")
+        from telethon.tl.functions.payments import (GetPaymentFormRequest, SendStarsFormRequest,
+                                                    TransferStarGiftRequest)
+        from telethon.tl.types import InputInvoiceStarGiftTransfer, InputSavedStarGiftUser
+        peer = None
+        for target in ([username] if username else []) + [user_id]:
+            try:
+                peer = await self.client.get_input_entity(target)
+                break
+            except (ValueError, TypeError):
+                continue
+            except Exception as e:
+                log.warning("Не удалось найти игрока %s: %s", user_id, type(e).__name__)
+        if peer is None:
+            raise RelayerError("NEED_CONTACT")
+        stargift = InputSavedStarGiftUser(msg_id=item["ref"])
+        if item.get("transfer_stars"):
+            # Платная передача: оплачиваем звёздами с баланса релейера
+            invoice = InputInvoiceStarGiftTransfer(stargift=stargift, to_id=peer)
+            form = await self.client(GetPaymentFormRequest(invoice=invoice))
+            await self.client(SendStarsFormRequest(form_id=form.form_id, invoice=invoice))
+        else:
+            await self.client(TransferStarGiftRequest(stargift=stargift, to_id=peer))
+
+    def on_private_message(self, callback: Any) -> None:
+        """callback(user_id) — игрок написал релейеру (нужно, чтобы передать NFT игроку без @username)."""
+        if not self.ready:
+            return
+        from telethon import events
+
+        async def handler(event: Any) -> None:
+            if event.is_private and event.sender_id:
+                await callback(event.sender_id)
+
+        self.client.add_event_handler(handler, events.NewMessage(incoming=True))
+
+    async def username(self) -> str | None:
+        if not self.ready:
+            return None
+        user = await self.client.get_me()
+        return user.username
