@@ -186,3 +186,21 @@ async def test_regular_gift_picture(tmp_path):
         assert r.status == 200 and r.content_type == "image/webp"
         assert (await c.get("/giftimg", params={"id": "nope"})).status == 404
     await db.close()
+
+
+async def test_images_survive_restart_via_db(tmp_path):
+    """Картинки хранятся в базе: после перезапуска (новый диск) их не качают заново."""
+    db = Database(str(tmp_path / "img.db"))
+    await db.connect()
+    calls = []
+
+    async def fetch(url):
+        calls.append(url)
+        return png()
+
+    first = NftImages(tmp_path / "run1", fetch, db=db)
+    assert await first.get("u1")
+    second = NftImages(tmp_path / "run2", fetch, db=db)             # новый запуск, пустой диск
+    assert await second.load_saved() == 1 and "u1" in second.mem
+    assert await second.get("u1") and calls == ["u1"]
+    await db.close()

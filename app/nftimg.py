@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 SIZE = 160                 # px — хватает для карточек на ретине
 QUALITY = 80
-MEM_MAX = 600              # превью в памяти
+MEM_MAX = 3000             # превью в памяти (~8 КБ каждое)
 FAIL_TTL = 600             # не долбим источники, если картинки нет
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=15)
 MAX_SOURCE = 5 * 1024 * 1024
@@ -125,7 +125,8 @@ def _guess_type(data: bytes) -> str:
 
 
 class NftImages:
-    def __init__(self, cache_dir: str | Path | None = None, fetch=None, relayer: Any = None):
+    def __init__(self, cache_dir: str | Path | None = None, fetch=None, relayer: Any = None, db: Any = None):
+        self.db = db                  # картинки хранятся и в базе: она переживает перезапуски хостинга
         self.dir = Path(cache_dir) if cache_dir else None
         if self.dir:
             self.dir.mkdir(parents=True, exist_ok=True)
@@ -136,6 +137,25 @@ class NftImages:
         self._fetch = fetch or self._http_fetch
         self._session: aiohttp.ClientSession | None = None
         self.stats = {"telegram": 0, "web": 0, "failed": 0}
+
+    async def load_saved(self) -> int:
+        """При запуске — все сохранённые в базе картинки сразу в память: отдаются мгновенно."""
+        if self.db is None:
+            return 0
+        rows = await self.db.all("SELECT key, data, ctype FROM nft_images ORDER BY ts DESC LIMIT ?", MEM_MAX)
+        for r in reversed(rows):
+            self.mem[r["key"]] = (bytes(r["data"]), r["ctype"])
+        return len(rows)
+
+    async def _save(self, key: str, value: tuple[bytes, str]) -> None:
+        if self.db is None:
+            return
+        try:
+            async with self.db.tx() as c:
+                await c.execute("INSERT OR REPLACE INTO nft_images(key, data, ctype, ts) VALUES (?,?,?,?)",
+                                (key, value[0], value[1], time.time()))
+        except Exception:
+            log.debug("Картинка %s не сохранена в базу", key, exc_info=True)
 
     async def close(self) -> None:
         if self._session:
@@ -186,6 +206,12 @@ class NftImages:
             value = (data, _guess_type(data))
             self._remember(key, value)
             return value
+        if self.db is not None:
+            row = await self.db.one("SELECT data, ctype FROM nft_images WHERE key=?", key)
+            if row:
+                value = (bytes(row["data"]), row["ctype"])
+                self._remember(key, value)
+                return value
         if time.time() - self.failed.get(key, 0) < FAIL_TTL:
             return None
         if key in self.pending:                       # то же уже качается — ждём его
@@ -210,6 +236,7 @@ class NftImages:
                 self._remember(key, value)
                 if path:
                     path.write_bytes(value[0])
+                await self._save(key, value)
             else:
                 self.stats["failed"] += 1
                 self.failed[key] = time.time()

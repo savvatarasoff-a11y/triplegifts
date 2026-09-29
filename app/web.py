@@ -214,7 +214,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             raise web.HTTPNotFound()
         return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 
-    images = images or NftImages(Path(cfg.db_path).parent / "nftimg", relayer=relayer)
+    images = images or NftImages(Path(cfg.db_path).parent / "nftimg", relayer=relayer, db=casino.db)
 
     @routes.get("/nftimg")
     async def nft_image(request: web.Request) -> web.Response:

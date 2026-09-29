@@ -226,7 +226,8 @@ async def run() -> None:
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
     relayer = Relayer(db, cfg.bot_token)
-    images = NftImages(Path(cfg.db_path).parent / "nftimg", relayer=relayer)
+    images = NftImages(Path(cfg.db_path).parent / "nftimg", relayer=relayer, db=db)
+    log.info("Картинки NFT из базы: %s", await images.load_saved())
     casino.ton_rate = relayer.market.ton_rate          # курс TON → звёзды (ручной /tonrate или авто)
 
     async def on_relayer_message(user_id: int) -> None:
