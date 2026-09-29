@@ -668,3 +668,12 @@ button { -webkit-user-select: none; user-select: none; }
 .gate .btn { width: 100%; }
 .gate .btn + .btn { margin-top: 8px; }
 .btn.ghost { background: var(--surface-3); color: var(--text); box-shadow: none; }
+
+/* рулетки: картинка + подпись всегда помещаются в карточку */
+.roller-track .it { justify-content: center; gap: 3px; padding: 4px 2px 6px; box-sizing: border-box; overflow: hidden; }
+.roller-track .it .em { flex: none; line-height: 1; }
+.roller-track .it .em.nft-ic { width: 46px; height: 46px; }
+.roller-track .it small { flex: none; line-height: 1.15; }
+.case-rollers.multi .roller { height: 84px; }
+.case-rollers.multi .roller-track .it { height: 72px; gap: 2px; padding: 3px 2px 5px; }
+.case-rollers.multi .roller-track .it .em.nft-ic { width: 34px; height: 34px; }
