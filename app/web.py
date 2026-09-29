@@ -14,7 +14,7 @@ from aiogram.types import LabeledPrice
 from aiogram.utils.web_app import safe_parse_webapp_init_data
 from aiohttp import web
 
-from .casino import GIFT_SELL_RATE, Casino, GameError, display_name
+from .casino import GIFT_SELL_RATE, USER_CHECK_MAX_ACTIVATIONS, Casino, GameError, display_name
 from . import money, ton
 from .config import Config
 from .db import REFERRAL_RATE
@@ -313,6 +313,34 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         code = code.strip().split("start=")[-1].removeprefix("c_")
         amount, balance = await casino.activate_check(request[USER_ID], code)
         return web.json_response({"amount": amount, "balance": balance})
+
+    async def check_view(c: dict) -> dict:
+        username = await bot_username(bot)
+        return {"code": c["code"], "amount": c["amount"], "left": c["left"], "total": c["total"],
+                "link": f"https://t.me/{username}?start=c_{c['code']}" if username else None}
+
+    @routes.get("/api/checks")
+    async def my_checks(request: web.Request) -> web.Response:
+        return web.json_response({"checks": [await check_view(c) for c in await casino.my_checks(request[USER_ID])],
+                                  "max_activations": USER_CHECK_MAX_ACTIVATIONS})
+
+    @routes.post("/api/checks/create")
+    async def create_check(request: web.Request) -> web.Response:
+        data = await body(request)
+        uid = request[USER_ID]
+        code = await casino.create_check(uid, data.get("amount"), data.get("activations", 1),
+                                         paid=uid not in cfg.admin_ids)
+        check = next(c for c in await casino.my_checks(uid) if c["code"] == code)
+        user = await casino.db.get_user(uid)
+        return web.json_response({"check": await check_view(check), "balance": user["balance"]})
+
+    @routes.post("/api/checks/revoke")
+    async def revoke_check(request: web.Request) -> web.Response:
+        code = (await body(request)).get("code")
+        refund = await casino.revoke_check(code, request[USER_ID]) if isinstance(code, str) else None
+        if refund is None:
+            raise GameError("Чек не найден или уже отозван")
+        return web.json_response({"refund": refund, "balance": (await casino.db.get_user(request[USER_ID]))["balance"]})
 
     @routes.post("/api/slots")
     async def slots(request: web.Request) -> web.Response:

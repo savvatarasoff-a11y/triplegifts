@@ -116,7 +116,7 @@ async def test_checks(casino):
     with pytest.raises(GameError, match="полностью"):
         await casino.activate_check(3, code)
     code2 = await casino.create_check(7, 5, 1)
-    assert await casino.revoke_check(code2)
+    assert await casino.revoke_check(code2) == 0          # чек админа: отозван, возвращать нечего
     with pytest.raises(GameError, match="отозван"):
         await casino.activate_check(3, code2)
     with pytest.raises(GameError):
@@ -479,3 +479,24 @@ async def test_leaders(casino):
     lb = await casino.leaders(1)
     assert [p["id"] for p in lb["top"]] == [3, 2, 1] and lb["top"][0]["points"] == 500
     assert lb["me"]["place"] == 3
+
+
+async def test_player_checks_paid_from_balance(casino):
+    db = casino.db
+    for uid in (1, 2, 3):
+        await db.touch_user(uid, f"u{uid}", f"U{uid}")
+    await db.conn.execute("UPDATE users SET balance=500 WHERE id=1")
+    with pytest.raises(GameError, match="Недостаточно"):
+        await casino.create_check(1, 300, 2, paid=True)
+    code = await casino.create_check(1, 100, 3, paid=True)
+    assert (await db.get_user(1))["balance"] == 200                  # 100 × 3 списано сразу
+    with pytest.raises(GameError, match="Свой чек"):
+        await casino.activate_check(1, code)
+    assert (await casino.activate_check(2, code))[0] == 100
+    assert (await casino.wager_status(2))["left"] == 100             # полученное по чеку нужно отыграть
+    assert await casino.revoke_check(code, by_user=2) is None        # чужой чек отозвать нельзя
+    assert await casino.revoke_check(code, by_user=1) == 200         # остаток 2 × 100 вернулся
+    assert (await db.get_user(1))["balance"] == 400
+    with pytest.raises(GameError):
+        await casino.activate_check(3, code)
+    assert (await db.stats())["checks_redeemed"] == 0                # чеки игроков — не расход казино

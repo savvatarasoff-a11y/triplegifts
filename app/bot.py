@@ -208,6 +208,64 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                 reply_markup=play_keyboard(cfg),
             )
 
+    # ---------- чеки (для всех: админ — бесплатно, игрок — из своего баланса) ----------
+
+    @router.message(Command("check"))
+    async def make_check(message: Message, command: CommandObject, bot: Bot) -> None:
+        await register(message)
+        is_admin = message.from_user.id in cfg.admin_ids
+        args = (command.args or "").split()
+        if not args or not all(a.isdigit() for a in args[:2]):
+            await message.answer(
+                "🎁 <b>Чеки</b>\nФормат: <code>/check сумма [активаций]</code>, например <code>/check 100 5</code> — "
+                "5 человек получат по 100 ⭐."
+                + ("" if is_admin else "\nСумма × активации сразу списывается с вашего баланса. "
+                   "Неактивированное можно вернуть: /mychecks, /revoke код."))
+            return
+        amount = int(args[0])
+        activations = int(args[1]) if len(args) > 1 else 1
+        try:
+            code = await casino.create_check(message.from_user.id, amount, activations, paid=not is_admin)
+        except GameError as e:
+            await message.answer(f"⚠️ {html.escape(str(e))}")
+            return
+        me = await bot.me()
+        link = f"https://t.me/{me.username}?start=c_{code}"
+        log.info("%s %s создал чек на %s ⭐ × %s", "Админ" if is_admin else "Игрок", message.from_user.id,
+                 amount, activations)
+        await message.answer(
+            f"🎁 <b>Чек на {amount} ⭐</b>\nАктиваций: {activations}\nКод: <code>{code}</code>\n\n{link}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"🎁 Получить {amount} ⭐", url=link)],
+                [InlineKeyboardButton(
+                    text="📤 Поделиться",
+                    url=f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(f'Чек на {amount} ⭐')}",
+                )],
+            ]),
+        )
+
+    @router.message(Command("mychecks"))
+    async def my_checks(message: Message) -> None:
+        checks = await casino.my_checks(message.from_user.id)
+        if not checks:
+            await message.answer("У вас нет активных чеков. Создать: <code>/check 100 5</code>")
+            return
+        lines = [f"<code>{c['code']}</code> — {c['amount']} ⭐, осталось {c['left']}/{c['total']}" for c in checks]
+        await message.answer("<b>Ваши чеки</b>\n" + "\n".join(lines) + "\n\nОтозвать и вернуть остаток: /revoke код")
+
+    @router.message(Command("revoke"))
+    async def revoke(message: Message, command: CommandObject) -> None:
+        code = (command.args or "").strip().removeprefix("c_")
+        if not code:
+            await message.answer("Формат: <code>/revoke код</code>")
+            return
+        is_admin = message.from_user.id in cfg.admin_ids
+        refund = await casino.revoke_check(code, None if is_admin else message.from_user.id)
+        if refund is None:
+            await message.answer("Чек не найден или уже отозван.")
+        else:
+            await message.answer("🗑 Чек отозван." + (f" Возвращено {refund} ⭐ создателю чека." if refund else ""))
+
     # ---------- администратор ----------
 
     admin = Router(name="admin")
@@ -234,33 +292,6 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/user <code>@username или ID</code> — баланс игрока"
         )
 
-    @admin.message(Command("check"))
-    async def make_check(message: Message, command: CommandObject, bot: Bot) -> None:
-        args = (command.args or "").split()
-        if not args or not all(a.isdigit() for a in args[:2]):
-            await message.answer("Формат: <code>/check сумма [активаций]</code>, например <code>/check 100 5</code>")
-            return
-        amount = int(args[0])
-        activations = int(args[1]) if len(args) > 1 else 1
-        try:
-            code = await casino.create_check(message.from_user.id, amount, activations)
-        except GameError as e:
-            await message.answer(f"⚠️ {html.escape(str(e))}")
-            return
-        me = await bot.me()
-        link = f"https://t.me/{me.username}?start=c_{code}"
-        log.info("Админ %s создал чек на %s ⭐ × %s", message.from_user.id, amount, activations)
-        await message.answer(
-            f"🎁 <b>Чек на {amount} ⭐</b>\nАктиваций: {activations}\nКод: <code>{code}</code>\n\n{link}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=f"🎁 Получить {amount} ⭐", url=link)],
-                [InlineKeyboardButton(
-                    text="📤 Поделиться",
-                    url=f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(f'Чек на {amount} ⭐')}",
-                )],
-            ]),
-        )
-
     @admin.message(Command("checks"))
     async def list_checks(message: Message) -> None:
         checks = await casino.list_checks()
@@ -269,15 +300,6 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             return
         lines = [f"<code>{c['code']}</code> — {c['amount']} ⭐, осталось {c['left']}/{c['total']}" for c in checks]
         await message.answer("<b>Активные чеки</b>\n" + "\n".join(lines))
-
-    @admin.message(Command("revoke"))
-    async def revoke(message: Message, command: CommandObject) -> None:
-        code = (command.args or "").strip().removeprefix("c_")
-        if not code:
-            await message.answer("Формат: <code>/revoke код</code>")
-            return
-        ok = await casino.revoke_check(code)
-        await message.answer("🗑 Чек отозван." if ok else "Чек не найден или уже отозван.")
 
     @admin.message(Command("stats"))
     async def stats(message: Message) -> None:

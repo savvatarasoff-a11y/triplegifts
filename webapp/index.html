@@ -248,6 +248,16 @@
         <span class="promo-t"><b>Мои подарки</b><small>NFT, которые можно ставить в PvP</small></span>
         <span class="promo-go">›</span>
       </button>
+      <div class="panel" id="checks-panel">
+        <div class="panel-title">🎁 Чеки</div>
+        <p class="note left">Раздайте звёзды друзьям: сумма × активации спишется с баланса, неактивированное можно вернуть.</p>
+        <div class="row">
+          <input id="chk-amount" type="number" inputmode="numeric" min="1" placeholder="Сумма ★">
+          <input id="chk-count" type="number" inputmode="numeric" min="1" value="1" placeholder="Активаций">
+        </div>
+        <button class="btn big" id="chk-create">Создать чек</button>
+        <div id="chk-list" class="chk-list"></div>
+      </div>
       <div class="panel">
         <div class="panel-title">Мои игры</div>
         <div id="history" class="history"></div>

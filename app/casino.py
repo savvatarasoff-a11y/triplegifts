@@ -23,6 +23,8 @@ PVP_IDLE_REFUND = 600       # одиночную ставку возвращае
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 # адрес TON: «дружелюбный» (48 символов base64url) или сырой 0:hex
 TON_ADDRESS_RE = re.compile(r"^(?:[A-Za-z0-9_-]{48}|-?[0-9]:[0-9a-fA-F]{64})$")
+USER_CHECK_MIN = 1
+USER_CHECK_MAX_ACTIVATIONS = 100
 GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
 DEMO_SELL_RATE = 1.0        # выигранный демо-NFT — по полному флору (как выплата, заложенная в RTP игр)
 MAX_GIFTS_PER_BET = 20
@@ -265,18 +267,36 @@ class Casino:
 
     # ---------- чеки ----------
 
-    async def create_check(self, admin_id: int, amount: int, activations: int) -> str:
-        if amount < 1 or amount > 1_000_000:
-            raise GameError("Сумма чека — от 1 до 1 000 000 ⭐")
-        if activations < 1 or activations > 10_000:
-            raise GameError("Активаций — от 1 до 10 000")
+    async def create_check(self, creator_id: int, amount: int, activations: int, paid: bool = False) -> str:
+        """Чек админа — бесплатный; чек игрока (paid) сразу списывает сумму × активации с его баланса."""
+        if not isinstance(amount, int) or not isinstance(activations, int):
+            raise GameError("Некорректный чек")
+        if paid:
+            if amount < USER_CHECK_MIN or amount > 100_000:
+                raise GameError(f"Сумма чека — от {USER_CHECK_MIN} до 100 000 ⭐")
+            if activations < 1 or activations > USER_CHECK_MAX_ACTIVATIONS:
+                raise GameError(f"Активаций — от 1 до {USER_CHECK_MAX_ACTIVATIONS}")
+        else:
+            if amount < 1 or amount > 1_000_000:
+                raise GameError("Сумма чека — от 1 до 1 000 000 ⭐")
+            if activations < 1 or activations > 10_000:
+                raise GameError("Активаций — от 1 до 10 000")
         code = secrets.token_hex(6)
         async with self.db.tx() as c:
+            if paid:
+                try:
+                    await self.db.change_balance(c, creator_id, -amount * activations, "check_out", code)
+                except InsufficientFunds:
+                    raise GameError(f"Недостаточно звёзд: чек стоит {amount * activations} ⭐") from None
             await c.execute(
-                "INSERT INTO checks(code, amount, total, left, created_by, created_at) VALUES (?,?,?,?,?,?)",
-                (code, amount, activations, activations, admin_id, time.time()),
+                "INSERT INTO checks(code, amount, total, left, created_by, created_at, paid) VALUES (?,?,?,?,?,?,?)",
+                (code, amount, activations, activations, creator_id, time.time(), int(paid)),
             )
         return code
+
+    async def my_checks(self, user_id: int) -> list[dict]:
+        return await self.db.all("SELECT code, amount, total, left, created_at FROM checks WHERE created_by=? "
+                                 "AND active=1 AND left>0 ORDER BY created_at DESC LIMIT 30", user_id)
 
     async def activate_check(self, user_id: int, code: str) -> tuple[int, int]:
         """Возвращает (сумма, новый баланс)."""
@@ -290,6 +310,8 @@ class Casino:
                 raise GameError("Чек не найден или отозван")
             if check["left"] <= 0:
                 raise GameError("Чек уже полностью активирован")
+            if check["paid"] and check["created_by"] == user_id:
+                raise GameError("Свой чек активировать нельзя — отправьте его другу")
             cur = await c.execute(
                 "INSERT OR IGNORE INTO check_uses(code, user_id, ts) VALUES (?,?,?)", (code, user_id, time.time())
             )
@@ -302,10 +324,22 @@ class Casino:
     async def list_checks(self) -> list[dict]:
         return await self.db.all("SELECT * FROM checks WHERE active=1 AND left>0 ORDER BY created_at DESC LIMIT 50")
 
-    async def revoke_check(self, code: str) -> bool:
+    async def revoke_check(self, code: str, by_user: int | None = None) -> int | None:
+        """Отзывает чек. Игрок — только свой. Неактивированный остаток чека игрока возвращается ему.
+
+        Возвращает возвращённую сумму (0 для чека админа) или None, если чек не найден.
+        """
+        code = code.strip()
         async with self.db.tx() as c:
-            cur = await c.execute("UPDATE checks SET active=0 WHERE code=? AND active=1", (code.strip(),))
-        return cur.rowcount == 1
+            async with c.execute("SELECT * FROM checks WHERE code=? AND active=1", (code,)) as q:
+                check = await q.fetchone()
+            if not check or (by_user is not None and check["created_by"] != by_user):
+                return None
+            await c.execute("UPDATE checks SET active=0 WHERE code=?", (code,))
+            refund = check["amount"] * check["left"] if check["paid"] else 0
+            if refund:
+                await self.db.change_balance(c, check["created_by"], refund, "check_refund", code)
+        return refund
 
     # ---------- вывод подарками ----------
 

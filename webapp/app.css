@@ -606,3 +606,15 @@ button { -webkit-user-select: none; user-select: none; }
 .prizes > div.t-unc { border-color: #6D28D9; }
 .roller-track .it.t-leg { box-shadow: inset 0 0 0 2px #fff, 0 0 18px -2px rgba(255, 255, 255, .6); }
 .roller-track .it .em.nft-ic { background: none; }
+
+/* ---------- чеки игрока ---------- */
+#checks-panel .row input { flex: 1; min-width: 0; }
+#chk-create { margin-top: 8px; }
+.chk-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.chk { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); }
+.chk-t { flex: 1; min-width: 0; }
+.chk-t b { display: block; font-size: 14px; }
+.chk-t small { color: var(--muted); font-size: 11px; }
+.chk-a { display: flex; gap: 4px; flex: none; }
+.chk-a .btn.small { padding: 7px 10px; font-size: 13px; }
+.chk-a .btn.small.ghost { background: var(--surface-3); color: var(--text, #fff); }

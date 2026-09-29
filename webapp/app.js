@@ -337,6 +337,7 @@ function refShare() {
 
 async function profileEnter() {
   loadVip();
+  loadMyChecks();
   try {
     const [p, me] = await Promise.all([api("/api/profile"), loadMe()]);
     const av = $("#prof-av");
@@ -644,6 +645,77 @@ async function activateCheck() {
     toast("Чек активирован: +" + stars(r.amount));
     fxBurstAt($("#balance-btn"), { count: 30 });
     haptic("win");
+  });
+}
+
+// ---------- чеки игрока ----------
+
+function checkShare(c) {
+  const url = `https://t.me/share/url?url=${encodeURIComponent(c.link)}&text=${encodeURIComponent(`Чек на ${c.amount} ⭐ в Svag Gifts 🎁`)}`;
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+  else window.open(url, "_blank");
+}
+
+function renderMyChecks(list) {
+  const box = $("#chk-list");
+  box.innerHTML = "";
+  list.forEach((c) => {
+    const row = document.createElement("div");
+    row.className = "chk";
+    const t = document.createElement("div");
+    t.className = "chk-t";
+    const b = document.createElement("b");
+    b.textContent = `${stars(c.amount)} × ${c.left}/${c.total}`;
+    const sm = document.createElement("small");
+    sm.textContent = c.code;
+    t.append(b, sm);
+    const acts = document.createElement("div");
+    acts.className = "chk-a";
+    const mk = (label, fn, cls) => {
+      const btn = document.createElement("button");
+      btn.className = "btn small " + (cls || "");
+      btn.textContent = label;
+      btn.addEventListener("click", fn);
+      acts.append(btn);
+    };
+    if (c.link) {
+      mk("📤", () => checkShare(c));
+      mk("Копировать", () => copyText(c.link), "ghost");
+    }
+    mk("✕", () => revokeCheck(c), "ghost");
+    row.append(t, acts);
+    box.append(row);
+  });
+}
+
+async function loadMyChecks() {
+  try {
+    const r = await api("/api/checks");
+    renderMyChecks(r.checks);
+  } catch (_) { /* не критично */ }
+}
+
+async function createCheck() {
+  await guard(async () => {
+    const amount = parseInt($("#chk-amount").value, 10);
+    const activations = parseInt($("#chk-count").value, 10) || 1;
+    if (!(amount > 0)) throw new Error("Укажите сумму чека");
+    const r = await api("/api/checks/create", { amount, activations });
+    setBalance(r.balance, "stars");
+    $("#chk-amount").value = "";
+    toast(`Чек создан: ${stars(amount)} × ${activations}`);
+    haptic("win");
+    await loadMyChecks();
+    if (r.check.link) checkShare(r.check);
+  });
+}
+
+async function revokeCheck(c) {
+  await guard(async () => {
+    const r = await api("/api/checks/revoke", { code: c.code });
+    setBalance(r.balance, "stars");
+    toast(r.refund ? `Чек отозван, вернули ${stars(r.refund)}` : "Чек отозван");
+    await loadMyChecks();
   });
 }
 
@@ -2670,6 +2742,7 @@ function bind() {
   $$("#wallet-tabs button").forEach((b) => b.addEventListener("click", () => { walletTab(b.dataset.tab); haptic(); }));
   $("#dep-btn").addEventListener("click", () => deposit(parseInt($("#dep-amount").value, 10)));
   $("#check-btn").addEventListener("click", activateCheck);
+  $("#chk-create").addEventListener("click", createCheck);
   $("#slots-spin").addEventListener("click", slotsSpin);
   $("#plinko-btn").addEventListener("click", plinkoDrop);
   $("#bonus-btn").addEventListener("click", claimBonus);

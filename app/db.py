@@ -263,6 +263,8 @@ class Database:
                                           "rake_ton": "INTEGER NOT NULL DEFAULT 0",
                                           "bonus_at": "REAL NOT NULL DEFAULT 0"})
         await self.conn.executescript(TON_SCHEMA)
+        # чеки игроков оплачены из их баланса (paid=1), чеки админа — бесплатные
+        await self._add_columns("checks", {"paid": "INTEGER NOT NULL DEFAULT 0"})
 
     async def _add_columns(self, table: str, columns: dict[str, str]) -> None:
         async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
@@ -464,9 +466,10 @@ class Database:
             "SELECT COALESCE(SUM(CASE WHEN status='sent' THEN amount END),0) sent, "
             "COALESCE(SUM(CASE WHEN status='pending' THEN amount END),0) pending FROM ton_withdrawals")
         checks = await self.one(
-            "SELECT COALESCE(SUM(amount*left),0) liab, COUNT(*) n FROM checks WHERE active=1 AND left>0"
+            "SELECT COALESCE(SUM(amount*left),0) liab, COUNT(*) n FROM checks WHERE active=1 AND left>0 AND paid=0"
         )
-        issued = await self.one("SELECT COALESCE(SUM(delta),0) s FROM ledger WHERE kind='check'")
+        issued = await self.one("SELECT COALESCE(SUM(l.delta),0) s FROM ledger l JOIN checks c ON c.code=l.ref "
+                                "WHERE l.kind='check' AND c.paid=0")
         wd = await self.one(
             "SELECT COALESCE(SUM(CASE WHEN status='sent' THEN amount END),0) sent, "
             "COALESCE(SUM(CASE WHEN status IN ('pending','sending') THEN amount END),0) pending FROM withdrawals"
