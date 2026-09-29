@@ -2,3 +2,4 @@ aiogram>=3.31,<4
 aiosqlite>=0.22,<1
 telethon>=1.45,<2
 cryptography>=42
+Pillow>=10

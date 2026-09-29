@@ -242,6 +242,26 @@ class Casino:
             for r in rows
         ]
 
+    async def case_drops(self, limit: int = 20) -> list[dict]:
+        """Лента последних дропов из кейсов всех игроков (NFT и призы дороже кейса — отмечены)."""
+        rows = await self.db.all(
+            "SELECT b.id, b.bet, b.win, b.detail, b.cur, u.id uid, u.first_name, u.username FROM bets b "
+            "LEFT JOIN users u ON u.id = b.user_id WHERE b.game='case' ORDER BY b.id DESC LIMIT ?", limit)
+        drops = []
+        for r in rows:
+            try:
+                d = json.loads(r["detail"] or "{}")
+            except ValueError:
+                d = {}
+            model = d.get("model") or d.get("demo_nft")
+            drops.append({
+                "id": r["id"], "case": d.get("case"), "emoji": d.get("gift") or "🎁", "prize": r["win"], "cur": r["cur"],
+                "nft": {"title": d.get("title"), "model": model, "demo": "demo_nft" in d} if d.get("kind") == "nft" else None,
+                "good": d.get("kind") == "nft" or r["win"] >= r["bet"] * 1.5,
+                "name": display_name({"id": r["uid"], "first_name": r["first_name"], "username": r["username"]}),
+            })
+        return drops
+
     # ---------- чеки ----------
 
     async def create_check(self, admin_id: int, amount: int, activations: int) -> str:
@@ -549,6 +569,7 @@ class Casino:
                     if amount > 0:
                         await self.db.change_balance(c, user_id, amount, "win", "case", cur)
                     detail["demo_nft"] = prize["model"]
+                    detail["title"] = prize["title"]
                     item["nft"] = {"win_id": None, "demo": True, "title": prize["title"], "model": prize["model"]}
                 elif prize["kind"] == "nft":
                     # Резервируем подарок этой модели у релейера; конкретный NFT выберется при передаче
@@ -564,6 +585,7 @@ class Casino:
                     )
                     detail["nft_win"] = win.lastrowid
                     detail["model"] = prize["model"]
+                    detail["title"] = prize["title"]
                     item["nft"] = {"win_id": win.lastrowid, "title": prize["title"], "model": prize["model"]}
                 elif amount > 0:
                     await self.db.change_balance(c, user_id, amount, "win", "case", cur)

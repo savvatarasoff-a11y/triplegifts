@@ -438,6 +438,8 @@ async function loadMe() {
   const me = await api("/api/me");
   state.me = me;
   state.config = me.config;
+  // картинки NFT из кейсов начинают качаться сразу после входа
+  setTimeout(() => nftPreload((me.config.cases || []).flatMap((c) => c.prizes.filter((p) => p.kind === "nft").map(caseNft))), 800);
   state.bal = { stars: me.balance, ton: me.ton || 0 };
   renderBalance();
   $("#hello").textContent = me.user.name;
@@ -831,31 +833,58 @@ async function withdraw(gift) {
 const myGifts = { relayer: null, list: [], timer: 0 };
 const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится" };
 
-// ---------- картинки NFT: настоящий подарок (Fragment) или модель (changes.tg) ----------
-
-const nftSlug = (collection) => (collection || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// ---------- картинки NFT: превью с нашего сервера (ужатые и закэшированные) ----------
 
 function nftImgUrl(o) {
   if (!o || !o.collection) return null;
-  if (o.number) return `https://nft.fragment.com/gift/${nftSlug(o.collection)}-${o.number}.webp`;
-  if (o.model) {
-    return `https://cdn.changes.tg/gifts/models/${encodeURIComponent(o.collection)}/png/${encodeURIComponent(o.model)}.png`;
-  }
+  if (o.number) return `/nftimg?c=${encodeURIComponent(o.collection)}&n=${o.number}`;
+  if (o.model) return `/nftimg?c=${encodeURIComponent(o.collection)}&m=${encodeURIComponent(o.model)}`;
   return null;
 }
 
-// Эмодзи сразу, картинка — как только загрузится (если не загрузится, остаётся эмодзи)
+// url → загруженная картинка (или false, если её нет): второй раз иконка появляется мгновенно
+const nftImgCache = new Map();
+function nftImgLoad(url) {
+  if (!nftImgCache.has(url)) {
+    nftImgCache.set(url, new Promise((resolve) => {
+      const img = new Image();
+      img.decoding = "async";
+      img.onload = () => { nftImgCache.set(url, img); resolve(img); };
+      img.onerror = () => { nftImgCache.set(url, false); resolve(false); };
+      img.src = url;
+    }));
+  }
+  return nftImgCache.get(url);
+}
+
+// Прогрев: картинки призов кейсов/целей апгрейда качаются заранее, по несколько за раз
+function nftPreload(list) {
+  const urls = [...new Set(list.map(nftImgUrl).filter((u) => u && !nftImgCache.has(u)))];
+  let i = 0;
+  const next = () => { if (i < urls.length) nftImgLoad(urls[i++]).then(next); };
+  for (let k = 0; k < 6; k++) next();
+}
+
+function nftImgPut(el, img) {
+  const c = img.cloneNode();
+  c.alt = "";
+  el.textContent = "";
+  el.append(c);
+  el.classList.add("has-img");
+}
+
+// Эмодзи — пока картинка грузится (если не загрузится, остаётся эмодзи)
 function nftIcon(o, cls) {
   const el = document.createElement("span");
   el.className = (cls || "em") + " nft-ic";
-  el.textContent = o.emoji || "🎁";
   const url = nftImgUrl(o);
-  if (url) {
-    const img = new Image();
-    img.alt = "";
-    img.onload = () => { el.textContent = ""; el.append(img); el.classList.add("has-img"); };
-    img.src = url;
+  const hit = url && nftImgCache.get(url);
+  if (hit instanceof HTMLImageElement) {
+    nftImgPut(el, hit);
+    return el;
   }
+  el.textContent = o.emoji || "🎁";
+  if (url && hit !== false) nftImgLoad(url).then((img) => { if (img) nftImgPut(el, img); });
   return el;
 }
 
@@ -1200,6 +1229,7 @@ async function upgradeEnter() {
     upg.cfg = data;
     upg.gifts = data.gifts;
     upg.targets = data.targets;
+    nftPreload(upg.targets.map(upgTargetNft));
     const ids = new Set(upg.gifts.map((g) => g.id));
     upg.chosen = new Set([...upg.chosen].filter((id) => ids.has(id)));
     if (upg.target) upg.target = upg.targets.find((t) => t.id === upg.target.id) || null;
@@ -1983,25 +2013,99 @@ async function crashAction() {
 // ---------- кейсы ----------
 
 let currentCase = null;
+let casesFilter = "all";
+const caseLive = { timer: 0, seen: new Set() };
+
+const caseNft = (p) => ({ collection: p.title, model: p.model, emoji: p.emoji });
+const caseTop = (c) => c.prizes.reduce((a, p) => (p.amount > a.amount ? p : a), c.prizes[0]);
+const caseNftChance = (c) => c.prizes.filter((p) => p.kind === "nft").reduce((a, p) => a + p.chance, 0);
+
+// Иконка кейса: картинка самого дорогого NFT внутри, иначе эмодзи кейса
+function caseIcon(c, cls) {
+  const top = caseTop(c);
+  if (top.kind === "nft" && top.title) return nftIcon(caseNft(top), cls);
+  const e = document.createElement("span");
+  e.className = cls;
+  e.textContent = c.emoji;
+  return e;
+}
 
 function renderCases() {
   const box = $("#cases-list");
   box.innerHTML = "";
-  const cases = state.config ? state.config.cases : [];
-  if (!cases.length) box.innerHTML = '<div class="note">Кейсы временно недоступны — обновляем цены подарков.</div>';
+  const all = state.config ? state.config.cases : [];
+  // картинки всех NFT из кейсов качаем заранее — к открытию они уже в кэше
+  nftPreload(all.flatMap((c) => c.prizes.filter((p) => p.kind === "nft").map(caseNft)));
+  const cases = all.filter((c) => casesFilter === "all" || (casesFilter === "nft") === c.id.startsWith("nft"));
+  if (!all.length) box.innerHTML = '<div class="note">Кейсы временно недоступны — обновляем цены подарков.</div>';
   cases.forEach((c) => {
     const b = document.createElement("button");
-    b.className = "case-card" + (c.id.startsWith("nft") ? " nft" : "");
-    const top = c.prizes.reduce((a, p) => (p.amount > a.amount ? p : a), c.prizes[0]);
+    const nft = c.id.startsWith("nft");
+    b.className = "case-card" + (nft ? " nft" : "");
+    const top = caseTop(c);
     b.innerHTML = '<div class="e"></div><div class="n"></div><div class="j"></div><div class="p"></div>';
-    b.querySelector(".e").textContent = c.emoji;
+    b.querySelector(".e").append(caseIcon(c, "case-ic"));
     b.querySelector(".n").textContent = c.name;
     b.querySelector(".j").textContent = top.kind === "nft" ? `NFT до ${nftPrice(top.amount)}`
       : `до ${top.emoji} ${casePriceText(top.amount)}`;
     b.querySelector(".p").textContent = casePriceText(c.price, true);
+    if (nft) {
+      const badge = document.createElement("span");
+      badge.className = "case-badge";
+      badge.textContent = `NFT ${caseNftChance(c).toFixed(caseNftChance(c) < 1 ? 2 : 1)}%`;
+      b.append(badge);
+    }
     b.addEventListener("click", () => openCaseScreen(c));
     box.append(b);
   });
+  caseLiveStart();
+}
+
+// ---------- лента дропов (live) ----------
+
+function caseDropEl(d) {
+  const el = document.createElement("div");
+  el.className = "ld" + (d.good ? " good" : "") + (d.nft ? " nft" : "");
+  const ic = d.nft && d.nft.title ? nftIcon({ collection: d.nft.title, model: d.nft.model, emoji: d.emoji }, "ld-ic")
+    : Object.assign(document.createElement("span"), { className: "ld-ic", textContent: d.emoji });
+  const t = document.createElement("div");
+  t.className = "ld-t";
+  const v = document.createElement("b");
+  v.textContent = d.nft ? (d.nft.model || "NFT") : money(d.prize, d.cur);
+  const nm = document.createElement("small");
+  nm.textContent = d.name;
+  t.append(v, nm);
+  el.append(ic, t);
+  return el;
+}
+
+async function caseLiveTick() {
+  if (state.screen !== "cases" && state.screen !== "case") { caseLiveStop(); return; }
+  try {
+    const r = await api("/api/case/drops");
+    const box = $("#case-live");
+    const fresh = r.drops.filter((d) => !caseLive.seen.has(d.id));
+    if (!caseLive.seen.size) box.innerHTML = "";
+    fresh.reverse().forEach((d) => {
+      caseLive.seen.add(d.id);
+      const el = caseDropEl(d);
+      if (caseLive.seen.size > r.drops.length) el.classList.add("new");
+      box.prepend(el);
+    });
+    while (box.children.length > 20) box.lastChild.remove();
+    if (!box.children.length) box.innerHTML = '<div class="note">Здесь появятся дропы игроков</div>';
+  } catch (_) { /* лента не критична */ }
+}
+
+function caseLiveStart() {
+  if (caseLive.timer) return;
+  caseLiveTick();
+  caseLive.timer = setInterval(caseLiveTick, 6000);
+}
+
+function caseLiveStop() {
+  clearInterval(caseLive.timer);
+  caseLive.timer = 0;
 }
 
 // Цены кейсов — в звёздах; в режиме TON показываем по курсу
@@ -2010,16 +2114,20 @@ function casePriceText(starsAmount, up) {
   return v === null ? "курс TON недоступен" : money(v);
 }
 
-// Редкость — оттенками фирменного цвета: от тёмного к белому
-function prizeItem(p, price) {
+// Редкость приза по отношению к цене кейса
+function prizeTier(p, price) {
   const ratio = p.amount / price;
-  const [bg, fg] = p.kind === "nft" || ratio >= 20 ? ["#FFFFFF", "#0B0A10"]
-    : ratio >= 3 ? ["#A78BFA", "#0B0A10"]
-    : ratio >= 1.5 ? ["#8B5CF6", "#FFFFFF"]
-    : ratio >= 1 ? ["#6D28D9", "#FFFFFF"]
-    : ["#242033", "#FFFFFF"];
-  return { em: p.emoji, sub: p.label || (p.kind === "nft" ? "NFT" : casePriceText(p.amount)), bg, fg,
-    nft: p.kind === "nft" && p.title ? { collection: p.title, model: p.model, emoji: p.emoji } : null };
+  if (p.kind === "nft" || ratio >= 20) return { cls: "t-leg", name: "легендарный", bg: "#FFFFFF", fg: "#0B0A10" };
+  if (ratio >= 3) return { cls: "t-epic", name: "эпический", bg: "#A78BFA", fg: "#0B0A10" };
+  if (ratio >= 1.5) return { cls: "t-rare", name: "редкий", bg: "#8B5CF6", fg: "#FFFFFF" };
+  if (ratio >= 1) return { cls: "t-unc", name: "окупает", bg: "#6D28D9", fg: "#FFFFFF" };
+  return { cls: "t-com", name: "обычный", bg: "#242033", fg: "#FFFFFF" };
+}
+
+function prizeItem(p, price) {
+  const t = prizeTier(p, price);
+  return { em: p.emoji, sub: p.label || (p.kind === "nft" ? (p.model || "NFT") : casePriceText(p.amount)), bg: t.bg, fg: t.fg,
+    cls: t.cls, nft: p.kind === "nft" && p.title ? caseNft(p) : null };
 }
 
 function pickPrize(c) {
@@ -2031,22 +2139,34 @@ function pickPrize(c) {
 function openCaseScreen(c) {
   currentCase = c;
   go("case");
+  caseLiveStart();
   $("#title").textContent = c.name;
-  $("#case-emoji").textContent = c.emoji;
-  $("#case-btn").textContent = "Открыть за " + casePriceText(c.price, true);
+  const hero = $("#case-emoji");
+  hero.innerHTML = "";
+  hero.append(caseIcon(c, "case-ic big"));
+  const nftCh = caseNftChance(c);
+  $("#case-meta").innerHTML = "";
+  [`RTP ${(c.rtp * 100).toFixed(1)}%`, nftCh ? `шанс NFT ${nftCh.toFixed(nftCh < 1 ? 2 : 1)}%` : null,
+    `${c.prizes.length} призов`].filter(Boolean).forEach((txt) => {
+    const s = document.createElement("span");
+    s.textContent = txt;
+    $("#case-meta").append(s);
+  });
   $("#case-result").textContent = "";
   const box = $("#case-prizes");
   box.innerHTML = "";
   c.prizes.slice().sort((a, b) => b.amount - a.amount).forEach((p) => {
+    const tier = prizeTier(p, c.price);
     const d = document.createElement("div");
+    d.className = tier.cls;
     const e = document.createElement("span");
     e.className = "em";
-    if (p.kind === "nft") e.append(nftIcon({ collection: p.title, model: p.model, emoji: p.emoji }, "nft-inline big"));
+    if (p.kind === "nft") e.append(nftIcon(caseNft(p), "nft-inline big"));
     else e.textContent = p.emoji;
     const sm = document.createElement("small");
     sm.textContent = (p.chance < 0.1 ? p.chance.toFixed(3) : p.chance.toFixed(2)) + "%";
     if (p.kind === "nft") {
-      d.className = "nft";
+      d.classList.add("nft");
       const ttl = document.createElement("span");
       ttl.className = "ttl";
       ttl.textContent = p.title;
@@ -2063,6 +2183,8 @@ function openCaseScreen(c) {
 }
 
 let caseCount = 1;
+let caseFast = false;
+let caseBusy = false;
 
 // Рулетки кейса: по одной на каждый открываемый кейс
 function caseRollers(n) {
@@ -2092,15 +2214,77 @@ function caseSetCount(n) {
   });
 }
 
+function caseSetFast(on) {
+  caseFast = on;
+  store("case:fast", on ? "1" : "");
+  $("#case-fast").classList.toggle("hi", on);
+}
+
+// Прокрутка рулеток до выпавших призов; рулетки останавливаются по очереди
+function caseSpin(prizes) {
+  const rollers = caseRollers(prizes.length);
+  const base = caseFast ? 1300 : 4600;
+  const step = caseFast ? 150 : 350;
+  return Promise.all(prizes.map((p, k) => {
+    const items = [];
+    for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? p : pickPrize(currentCase), currentCase.price));
+    return roll(rollers[k], items, 50, base + k * step);
+  }));
+}
+
+function caseLock(on) {
+  caseBusy = on;
+  ["#case-btn", "#case-demo"].forEach((s) => { $(s).disabled = on; });
+  $$("#case-count button").forEach((b) => { b.disabled = on; });
+}
+
+// Бесплатная прокрутка: ничего не списывает, просто показывает, что могло бы выпасть
+async function caseDemo() {
+  if (!currentCase || caseBusy) return;
+  caseLock(true);
+  try {
+    const n = caseCount;
+    const prizes = Array.from({ length: n }, () => pickPrize(currentCase));
+    $("#case-drops").classList.add("hidden");
+    $("#case-result").className = "result";
+    $("#case-result").textContent = "Демо-прокрутка…";
+    haptic();
+    await caseSpin(prizes);
+    const total = prizes.reduce((a, p) => a + p.amount, 0);
+    const nft = prizes.find((p) => p.kind === "nft");
+    $("#case-result").className = "result reveal";
+    $("#case-result").textContent = "Демо: " + (nft ? `выпал бы NFT ${nft.title} «${nft.model}»`
+      : `выпало бы ${n > 1 ? "на " : ""}${casePriceText(total)}`) + " — откройте по-настоящему!";
+  } finally {
+    caseLock(false);
+  }
+}
+
+function caseDropsList(r) {
+  const drops = $("#case-drops");
+  drops.innerHTML = "";
+  r.items.forEach((it) => {
+    const s = document.createElement("span");
+    if (it.kind === "nft" && it.nft) {
+      s.append(nftIcon({ collection: it.nft.title, model: it.nft.model, emoji: it.gift }, "nft-inline"),
+        ` «${it.nft.model}»`);
+    } else {
+      s.textContent = `${it.gift} ${money(it.prize, r.cur)}`;
+    }
+    if (it.kind === "nft" || it.prize >= r.price) s.className = "good";
+    drops.append(s);
+  });
+  drops.classList.remove("hidden");
+}
+
 async function openCase() {
-  if (!currentCase) return;
+  if (!currentCase || caseBusy) return;
   await guard(async () => {
     const n = caseCount;
     const cost = fromStars(currentCase.price, null, true) * n;
     if (!(cost > 0)) throw new Error("Курс TON недоступен — откройте кейс за звёзды");
     if (state.me && curBalance() < cost) throw new Error(state.cur === "ton" ? "Недостаточно TON на балансе" : "Недостаточно звёзд на балансе");
-    $("#case-btn").disabled = true;
-    $$("#case-count button").forEach((b) => { b.disabled = true; });
+    caseLock(true);
     try {
       const r = await api("/api/case", { case: currentCase.id, count: n, cur: state.cur }, { deferBalance: true });
       showBetTaken(cost);
@@ -2108,14 +2292,10 @@ async function openCase() {
       $("#case-drops").classList.add("hidden");
       $("#case-result").className = "result";
       $("#case-result").textContent = n > 1 ? `Открываем ${n} кейса…` : "Открываем…";
-      const rollers = caseRollers(r.items.length);
-      await Promise.all(r.items.map((it, k) => {
-        const items = [];
-        for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? { kind: it.kind, emoji: it.gift, label: it.kind === "nft" ? "NFT" : money(it.prize, r.cur),
-          title: it.nft && it.nft.title, model: it.nft && it.nft.model,
-          amount: r.cur === "ton" ? Math.round(it.prize / NANO * (tonRate() || 0)) : it.prize } : pickPrize(currentCase), currentCase.price));
-        return roll(rollers[k], items, 50, 4600 + k * 350);   // рулетки останавливаются по очереди
-      }));
+      await caseSpin(r.items.map((it) => ({ kind: it.kind, emoji: it.gift,
+        label: it.kind === "nft" ? (it.nft && it.nft.model) || "NFT" : money(it.prize, r.cur),
+        title: it.nft && it.nft.title, model: it.nft && it.nft.model,
+        amount: r.cur === "ton" ? Math.round(it.prize / NANO * (tonRate() || 0)) : it.prize })));
       setBalance(r.balance, r.cur);
       const res = $("#case-result");
       const good = r.total >= r.cost;
@@ -2129,25 +2309,17 @@ async function openCase() {
           : `${r.gift} ${money(r.prize, r.cur)}`;
       } else {
         res.textContent = `Выпало на ${money(r.total, r.cur)} из ${money(r.cost, r.cur)}` + (nfts.some((x) => !x.nft.demo) ? " · NFT передаём в Telegram!" : "");
-        const drops = $("#case-drops");
-        drops.innerHTML = "";
-        r.items.forEach((it) => {
-          const s = document.createElement("span");
-          s.textContent = it.kind === "nft" ? `${it.gift} NFT «${it.nft.model}»` : `${it.gift} ${money(it.prize, r.cur)}`;
-          if (it.kind === "nft" || it.prize >= r.price) s.className = "good";
-          drops.append(s);
-        });
-        drops.classList.remove("hidden");
+        caseDropsList(r);
       }
       haptic(good ? "win" : "lose");
       celebrate(r.cost, r.total, $("#case-rollers"));
+      caseLiveTick();
       if (nfts.length) {
         await loadMe().catch(() => {});
         renderCases();
       }
     } finally {
-      $("#case-btn").disabled = false;
-      $$("#case-count button").forEach((b) => { b.disabled = false; });
+      caseLock(false);
     }
   });
 }
@@ -2506,6 +2678,14 @@ function bind() {
   $("#mines-btn").addEventListener("click", minesAction);
   $("#crash-btn").addEventListener("click", crashAction);
   $("#case-btn").addEventListener("click", openCase);
+  $("#case-demo").addEventListener("click", caseDemo);
+  caseSetFast(!!store("case:fast"));
+  $("#case-fast").addEventListener("click", () => caseSetFast(!caseFast));
+  $$("#cases-filter button").forEach((b) => b.addEventListener("click", () => {
+    casesFilter = b.dataset.f;
+    $$("#cases-filter button").forEach((x) => x.classList.toggle("sel", x === b));
+    renderCases();
+  }));
   caseCount = Math.min(5, Math.max(1, parseInt(store("case:count"), 10) || 1));
   $$("#case-count button").forEach((b) => b.addEventListener("click", () => {
     haptic();

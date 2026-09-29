@@ -403,10 +403,15 @@
 
     <!-- Кейсы -->
     <section class="screen" id="cases">
+      <div class="live-drops"><span class="live-dot">LIVE</span><div class="live-track" id="case-live"></div></div>
+      <div class="seg cases-filter" id="cases-filter">
+        <button data-f="all" class="sel">Все</button><button data-f="gift">Подарки</button><button data-f="nft">NFT</button>
+      </div>
       <div class="cases-list" id="cases-list"></div>
     </section>
     <section class="screen" id="case">
-      <div class="case-hero"><div class="case-emoji" id="case-emoji">🎁</div></div>
+      <div class="case-hero"><div class="case-emoji" id="case-emoji">🎁</div>
+        <div class="case-meta" id="case-meta"></div></div>
       <div class="case-rollers" id="case-rollers"></div>
       <div class="result" id="case-result"></div>
       <div class="case-drops hidden" id="case-drops"></div>
@@ -414,6 +419,10 @@
         <button data-n="1" class="sel">×1</button><button data-n="2">×2</button><button data-n="3">×3</button><button data-n="4">×4</button><button data-n="5">×5</button>
       </div>
       <button class="btn big" id="case-btn">Открыть</button>
+      <div class="case-tools">
+        <button class="chip" id="case-demo">🎲 Прокрутить бесплатно</button>
+        <button class="chip" id="case-fast">⚡ Быстро</button>
+      </div>
       <div class="panel"><div class="panel-title">Что внутри</div><div id="case-prizes" class="prizes"></div></div>
     </section>
 

@@ -22,6 +22,7 @@ from .games import logic as g
 from .cases import CaseCatalog
 from .gifts import withdraw as withdraw_gift
 from .nft import deliver as deliver_nft
+from .nftimg import NftImages, source_url as nft_source_url
 from .relayer import Relayer
 from .withdraw import GiftCatalog, notify_admins, notify_admins_ton
 
@@ -89,7 +90,8 @@ def parse_deposit_payload(payload: str) -> tuple[int, int] | None:
     return int(parts[1]), int(parts[2])
 
 
-def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = None) -> web.Application:
+def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = None,
+              images: NftImages | None = None) -> web.Application:
     @web.middleware
     async def errors(request: web.Request, handler: Handler) -> web.StreamResponse:
         try:
@@ -173,6 +175,31 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             raise web.HTTPNotFound()
         return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 
+    images = images or NftImages(Path(cfg.db_path).parent / "nftimg")
+
+    @routes.get("/nftimg")
+    async def nft_image(request: web.Request) -> web.Response:
+        """Маленькое превью NFT (модель или конкретный номер) — только для коллекций, известных казино."""
+        q = request.query
+        collection, model, number = q.get("c", ""), q.get("m") or None, q.get("n") or None
+        if not collection or len(collection) > 64 or (model and len(model) > 64):
+            raise web.HTTPNotFound()
+        if number is not None:
+            if not number.isdigit() or len(number) > 9:
+                raise web.HTTPNotFound()
+            number = int(number)
+        known = await casino.db.one(
+            "SELECT 1 FROM nft_models WHERE collection_name=? UNION ALL "
+            "SELECT 1 FROM user_gifts WHERE collection_name=? LIMIT 1", collection, collection)
+        url = nft_source_url(collection, model, number)
+        if not known or not url:
+            raise web.HTTPNotFound()
+        img = await images.get(url)
+        if not img:
+            raise web.HTTPNotFound(headers={"Cache-Control": "public, max-age=300"})
+        return web.Response(body=img[0], content_type=img[1],
+                            headers={"Cache-Control": "public, max-age=2592000, immutable"})
+
     @routes.get("/")
     async def index(_: web.Request) -> web.FileResponse:
         return web.FileResponse(WEBAPP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
@@ -198,7 +225,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "plinko": {"rows": list(g.PLINKO_ROWS), "risks": list(g.PLINKO_RISKS),
                            "tables": {f"{r}:{k}": t for (r, k), t in g.PLINKO_TABLES.items()}},
                 "cases": [
-                    {**{k: c[k] for k in ("id", "name", "emoji", "price")},
+                    {**{k: c[k] for k in ("id", "name", "emoji", "price", "rtp")},
                      "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity",
                                                        "demo")}
                                 for p in c["prizes"]]}
@@ -273,6 +300,10 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         data = await body(request)
         return web.json_response(await casino.plinko(request[USER_ID], data.get("bet"), data.get("rows", 12),
                                                      data.get("risk", "medium"), data.get("cur")))
+
+    @routes.get("/api/case/drops")
+    async def case_drops(_: web.Request) -> web.Response:
+        return web.json_response({"drops": await casino.case_drops()})
 
     @routes.post("/api/case")
     async def open_case(request: web.Request) -> web.Response:
@@ -418,4 +449,9 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     app = web.Application(middlewares=[errors, auth], client_max_size=64 * 1024)
     app.add_routes(routes)
     app.router.add_static("/static/", WEBAPP_DIR, show_index=False)
+
+    async def close_images(_: web.Application) -> None:
+        await images.close()
+
+    app.on_cleanup.append(close_images)
     return app

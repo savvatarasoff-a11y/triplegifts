@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -18,6 +19,7 @@ from .config import Config, ConfigError
 from .db import Database
 from .logging_setup import setup_logging
 from .gifts import notify_deposits, scan as gifts_scan
+from .nftimg import NftImages, source_url as nft_source_url
 from .nft import deliver_waiting, reprice_demo, sync as sync_nfts
 from .relayer import Relayer
 from . import ton as ton_mod
@@ -82,7 +84,16 @@ async def background(casino: Casino, bot: Bot) -> None:
         await asyncio.sleep(1)
 
 
-async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> None:
+async def prewarm_images(casino: Casino, images: NftImages) -> None:
+    """Качает и ужимает картинки моделей из кейсов и апгрейда, чтобы у игроков они открывались мгновенно."""
+    rows = await casino.db.all(
+        "SELECT collection_name, model FROM nft_models WHERE enabled=1 AND price > 0 ORDER BY price DESC LIMIT 400")
+    urls = [u for r in rows if (u := nft_source_url(r["collection_name"], r["model"]))]
+    ready = await images.prewarm(urls)
+    log.info("Картинки NFT: готово %s из %s", ready, len(urls))
+
+
+async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, images: NftImages | None = None) -> None:
     """Каждые 10 минут обновляет запас моделей у релейера и цены с маркета."""
     while True:
         try:
@@ -93,6 +104,11 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> N
             await reprice_demo(casino.db, relayer)
         except Exception:
             log.warning("Не удалось обновить цены демо-NFT")
+        if images is not None:
+            try:
+                await prewarm_images(casino, images)
+            except Exception:
+                log.warning("Не удалось прогреть картинки NFT")
         await asyncio.sleep(600)
 
 
@@ -154,6 +170,7 @@ async def run() -> None:
     db = Database(cfg.db_path)
     await db.connect()
     casino = Casino(db, cfg)
+    images = NftImages(Path(cfg.db_path).parent / "nftimg")
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
     relayer = Relayer(db, cfg.bot_token)
@@ -171,7 +188,7 @@ async def run() -> None:
     if await relayer.start():
         relayer.on_private_message(on_relayer_message)
 
-    runner = web.AppRunner(build_app(cfg, casino, bot, relayer), access_log=None)
+    runner = web.AppRunner(build_app(cfg, casino, bot, relayer, images), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", cfg.port).start()
     dp = Dispatcher()
@@ -182,7 +199,7 @@ async def run() -> None:
     await setup_bot_ui(bot, cfg)
     bg = asyncio.create_task(background(casino, bot))
     crash_task = asyncio.create_task(crash_loop(casino))
-    nft_task = asyncio.create_task(nft_loop(bot, cfg, casino, relayer))
+    nft_task = asyncio.create_task(nft_loop(bot, cfg, casino, relayer, images))
     gifts_task = asyncio.create_task(gifts_loop(bot, cfg, casino, relayer))
     ton_task = asyncio.create_task(ton_loop(bot, casino))
 
