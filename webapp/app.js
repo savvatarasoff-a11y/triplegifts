@@ -866,7 +866,7 @@ function minesRender(game, reveal) {
 }
 
 function minesPreview() {
-  const edge = diceCfg().edge;
+  const edge = state.config && state.config.mines_edge !== undefined ? state.config.mines_edge : 0.1;
   $("#mines-mult").textContent = "×1.00";
   $("#mines-next").textContent = fmtX(Math.floor((1 - edge) * 25 / (25 - minesCount) * 10000) / 10000);
   $("#mines-win").textContent = "0";

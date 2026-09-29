@@ -159,6 +159,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                     for c in await cases.list()
                 ],
                 "mines_min": g.MINES_MIN,
+                "mines_edge": g.MINES_EDGE,
                 "crash_growth": g.CRASH_GROWTH,
                 "pvp_commission": g.PVP_COMMISSION,
             },

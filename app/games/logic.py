@@ -12,7 +12,8 @@ from typing import Any, Sequence
 
 RNG = secrets.SystemRandom()
 
-HOUSE_EDGE = 0.05  # комиссия казино в костях, минах и краше
+HOUSE_EDGE = 0.05  # комиссия казино в костях и краше
+MINES_EDGE = 0.10  # в минах жёстче: игроки слишком часто доходили до больших иксов
 
 
 # ---------------- Слоты ----------------
@@ -93,10 +94,10 @@ def mines_multiplier(mines: int, opened: int) -> float:
     fair = 1.0
     for i in range(opened):
         fair *= (MINES_CELLS - i) / (MINES_CELLS - mines - i)
-    return round((1 - HOUSE_EDGE) * fair, 4)
+    return round((1 - MINES_EDGE) * fair, 4)
 
 
-MINES_MIN = 2   # с одной миной первый клик давал бы множитель меньше ×1
+MINES_MIN = 3   # меньше трёх мин — слишком лёгкие серии
 
 
 def mines_place(mines: int, rng: random.Random = RNG) -> list[int]:

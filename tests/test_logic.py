@@ -51,16 +51,16 @@ def test_dice_roll_under_and_over():
 
 
 def test_mines_multiplier_expected_value():
-    # EV любого стоп-правила = 0.95: вероятность пройти k клеток × множитель
-    for mines in (2, 3, 10, 24):
+    # EV любого стоп-правила = 0.90: вероятность пройти k клеток × множитель
+    for mines in (3, 10, 24):
         for k in range(1, 25 - mines + 1):
             survive = math.comb(25 - mines, k) / math.comb(25, k)
-            assert survive * g.mines_multiplier(mines, k) == pytest.approx(0.95, rel=1e-3)
+            assert survive * g.mines_multiplier(mines, k) == pytest.approx(0.90, rel=1e-3)
     assert g.mines_multiplier(3, 0) == 1.0
     assert len(set(g.mines_place(5))) == 5
-    assert g.mines_multiplier(2, 1) > 1
+    assert g.mines_multiplier(3, 1) > 1
     with pytest.raises(ValueError):
-        g.mines_place(1)
+        g.mines_place(2)
 
 
 def test_crash_distribution():
