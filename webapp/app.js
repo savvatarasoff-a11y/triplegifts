@@ -1051,19 +1051,42 @@ function nftImgUrl(o) {
 
 // url → загруженная картинка (или false, если её нет): второй раз иконка появляется мгновенно
 const nftImgCache = new Map();
+
+// Если наш сервер не отдал картинку — берём её напрямую: номерной NFT с Fragment, модель с changes.tg
+function nftImgFallbacks(url) {
+  if (!url.startsWith("/nftimg?")) return [];
+  const q = new URLSearchParams(url.slice(8));
+  const c = q.get("c") || "", m = q.get("m"), n = q.get("n");
+  const out = [];
+  if (n) out.push(`https://nft.fragment.com/gift/${c.toLowerCase().replace(/[^a-z0-9]/g, "")}-${n}.webp`);
+  if (m) out.push(`https://cdn.changes.tg/gifts/models/${encodeURIComponent(c)}/png/${encodeURIComponent(m)}.png`);
+  return out;
+}
+
+function loadImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(false);
+    img.src = src;
+  });
+}
+
 function nftImgLoad(url) {
   if (!nftImgCache.has(url)) {
-    nftImgCache.set(url, new Promise((resolve) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.onload = () => { nftImgCache.set(url, img); resolve(img); };
-      img.onerror = () => {
-        nftImgCache.set(url, false);
-        setTimeout(() => nftImgCache.delete(url), 30000);   // сервер мог ещё готовить картинку — повторим позже
-        resolve(false);
-      };
-      img.src = url;
-    }));
+    nftImgCache.set(url, (async () => {
+      for (const src of [url, ...nftImgFallbacks(url)]) {
+        const img = await loadImage(src);
+        if (img) {
+          nftImgCache.set(url, img);
+          return img;
+        }
+      }
+      nftImgCache.set(url, false);
+      setTimeout(() => nftImgCache.delete(url), 30000);   // сервер мог ещё готовить картинку — повторим позже
+      return false;
+    })());
   }
   return Promise.resolve(nftImgCache.get(url));     // в кэше может лежать уже картинка или false
 }
