@@ -126,3 +126,25 @@ async def test_demo_nft_from_case_goes_to_profile(env):
     assert r["balance"] == 1000 - 100                                   # не звёздами, а подарком в профиль
     gift = (await casino.gifts(42))[0]
     assert gift["id"] == r["nft"]["gift_id"] and gift["demo"] and gift["value"] == 5000 and gift["sell"] == 5000
+
+
+async def test_top_up_demo_skips_models_without_upgrades(env):
+    from app import main
+    db, casino = env
+
+    class Market:
+        async def sample_models(self, count, per_collection=3):
+            return [{"title": t, "model": m, "emoji": "🎁", "rarity": 1.0, "price": 500} for t, m in (
+                ("Lol Pop", "Pink"), ("Lol Pop", "Blue"), ("New Gift", "Premarket"))]
+
+    class Rel:
+        ready, market = True, Market()
+
+        async def has_model(self, collection, model):
+            return collection == "Lol Pop"          # у «New Gift» улучшения ещё не вышли
+
+    await casino.demo_fill([{"title": "Old Gift", "model": "X", "emoji": "🎁", "price": 300}])
+    await main.top_up_demo(casino, Rel())
+    rows = await db.all("SELECT collection_name, model, enabled FROM nft_models WHERE test=1 ORDER BY id")
+    assert [(r["collection_name"], r["model"], r["enabled"]) for r in rows] == [
+        ("Old Gift", "X", 0), ("Lol Pop", "Pink", 1), ("Lol Pop", "Blue", 1)]

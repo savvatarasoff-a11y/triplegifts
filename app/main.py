@@ -94,17 +94,25 @@ async def prewarm_images(casino: Casino, images: NftImages) -> None:
     log.info("Картинки NFT: готово %s из %s (источники: %s)", ready, len(items), images.stats)
 
 
-DEMO_TARGET = 40   # сколько разных NFT-моделей держать в кейсах (демо — с MRKT, пока идёт разработка)
+DEMO_TARGET = 100  # сколько разных NFT-моделей держать в кейсах (демо — с MRKT, пока идёт разработка)
 
 
 async def top_up_demo(casino: Casino, relayer: Relayer) -> None:
+    """Убирает демо-модели без улучшений (модели нет в Telegram) и добирает новые с MRKT до DEMO_TARGET."""
     if not relayer.ready:
         return
+    for m in await casino.db.all("SELECT id, collection_name, model FROM nft_models WHERE test=1 AND enabled=1"):
+        if await relayer.has_model(m["collection_name"], m["model"]) is False:
+            async with casino.db.tx() as c:
+                await c.execute("UPDATE nft_models SET enabled=0 WHERE id=?", (m["id"],))
+            log.info("Демо-NFT %s «%s» убран: у коллекции нет такой модели", m["collection_name"], m["model"])
     have = (await casino.db.one("SELECT COUNT(*) n FROM nft_models WHERE test=1 AND enabled=1"))["n"]
     if have >= DEMO_TARGET:
         return
-    added = await casino.demo_fill(await relayer.market.sample_models(min(20, DEMO_TARGET - have)))
-    log.info("Демо-NFT: было %s, добавлено %s", have, added)
+    sampled = await relayer.market.sample_models(min(40, DEMO_TARGET - have))
+    upgraded = [m for m in sampled if await relayer.has_model(m["title"], m["model"])]
+    added = await casino.demo_fill(upgraded)
+    log.info("Демо-NFT: было %s, добавлено %s (без улучшений отброшено %s)", have, added, len(sampled) - len(upgraded))
 
 
 async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, images: NftImages | None = None) -> None:

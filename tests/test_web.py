@@ -141,7 +141,10 @@ async def test_me_and_start_bonus(client):
     data = await r.json()
     assert data["balance"] == 25 and data["user"]["name"] == "Петя"
     cases = {c["id"]: c for c in data["config"]["cases"]}
-    assert cases == {}                        # только NFT-кейсы — их нет, пока нет NFT с ценой
+    assert set(cases) == {"bear", "rocket", "heart", "party", "lux"}   # NFT-кейсов нет, пока нет NFT с ценой
+    bear = cases["bear"]["prizes"]
+    assert {p["emoji"]: p["amount"] for p in bear}["🧸"] == 15    # реальная цена из каталога
+    assert sum(p["chance"] for p in bear) == pytest.approx(100, abs=0.01)
     # повторный вход бонус не начисляет
     data = await (await client.get("/api/me", headers=auth())).json()
     assert data["balance"] == 25
@@ -225,7 +228,9 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
     casino = client.app[CASINO]
     await client.get("/api/me", headers=auth(8))
     await casino.db.conn.execute("UPDATE users SET balance=1000 WHERE id=8")
-    assert (await client.post("/api/case", headers=auth(8), json={"case": "bear"})).status == 400
+    r = await client.post("/api/case", headers=auth(8), json={"case": "bear"})
+    data = await r.json()
+    assert data["kind"] == "gift" and data["prize"] in (15, 25, 50, 100)
     assert (await client.post("/api/case", headers=auth(8), json={"case": "nft"})).status == 400
 
     # Модель у релейера с ценой с маркета -> NFT-кейс; выигравшему релейер передаёт случайный подарок модели
@@ -239,8 +244,6 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
         "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at) "
         "VALUES ('555','Plush Pepe','Frog Prince',1.5,'🐸',2,5000,?)", (_t.time(),))
     cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(8))).json())["config"]["cases"]}
-    assert {p["kind"] for p in cases["nft"]["prizes"]} == {"nft", "stars"}   # обычных подарков в кейсах нет
-    assert sum(p["chance"] for p in cases["nft"]["prizes"]) == pytest.approx(100, abs=0.01)
     nft_prize = next(p for p in cases["nft"]["prizes"] if p["kind"] == "nft")
     assert nft_prize["title"] == "Plush Pepe" and nft_prize["amount"] == 5000 and nft_prize["model"] == "Frog Prince"
     monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[0])
@@ -252,6 +255,14 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
     assert client.app[RELAYER].transfers == []
     assert (await casino.db.one("SELECT status FROM nft_wins"))["status"] == "sent"
     assert (await casino.db.one("SELECT stock, reserved FROM nft_models")) == {"stock": 1, "reserved": 0}
+
+
+async def test_case_disabled_when_real_prices_too_generous(client):
+    client.app[BOT].prices = {"🧸": 60}      # подарок «подорожал» до первого запроса каталога
+    cases = [c["id"] for c in (await (await client.get("/api/me", headers=auth(9))).json())["config"]["cases"]]
+    assert cases == ["lux"]                  # кейсы с подорожавшим 🧸 убыточны — выключены, «Люкс» без него
+    r = await client.post("/api/case", headers=auth(9), json={"case": "bear"})
+    assert r.status == 400
 
 
 async def test_slots_777_nft_via_api(client, monkeypatch):

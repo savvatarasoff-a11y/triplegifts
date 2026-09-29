@@ -217,7 +217,7 @@ class Mrkt:
 
     # ---------- настоящие модели для демо-NFT ----------
 
-    async def sample_models(self, count: int) -> list[dict[str, Any]]:
+    async def sample_models(self, count: int, per_collection: int = 3) -> list[dict[str, Any]]:
         """Случайные настоящие модели с MRKT с их флором в звёздах (для демо-NFT)."""
         rate = await self.ton_rate()
         if not rate:
@@ -230,9 +230,12 @@ class Mrkt:
             if len(picked) >= count:
                 break
             name = coll.get("name") or coll.get("title")
-            lots = await self.saling(name, count=20)
+            lots = await self.saling(name, count=30)
             random.shuffle(lots)
+            taken = 0
             for lot in lots:
+                if taken >= per_collection or len(picked) >= count:
+                    break
                 key = (lot.get("collectionName") or name, lot.get("modelName"))
                 if not key[1] or key in seen:
                     continue
@@ -240,8 +243,8 @@ class Mrkt:
                 if not floor:
                     continue
                 seen.add(key)
+                taken += 1
                 picked.append({"collection": key[0], "title": coll.get("title") or key[0], "model": key[1],
                                "rarity": (lot.get("modelRarityPerMille") or 0) / 10 or None,
                                "emoji": emoji_for(key[0]), "price": max(1, int(floor * rate))})
-                break
         return picked

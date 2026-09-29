@@ -207,6 +207,16 @@ class Relayer:
         cache[key] = (time.time(), docs)
         return docs
 
+    async def has_model(self, collection: str, model: str) -> bool | None:
+        """Есть ли у коллекции такая модель в Telegram (улучшения вышли). None — проверить нельзя."""
+        if not self.ready:
+            return None
+        from .nftimg import norm
+        docs = await self.model_documents(collection)
+        if not docs:
+            return None if norm(collection) not in (await self._gifts_by_title()) else False
+        return norm(model) in docs
+
     async def model_image(self, collection: str, model: str | None) -> bytes | None:
         """Картинка модели: стикер модели из Telegram (или самого подарка, если улучшений ещё нет) в PNG."""
         if not self.ready or not collection:
