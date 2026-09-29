@@ -241,13 +241,6 @@
         <div class="stat"><small>Пополнено</small><b id="prof-deposited">0</b></div>
         <div class="stat"><small>Выведено</small><b id="prof-withdrawn">0</b></div>
       </div>
-      <div class="panel best hidden" id="prof-best"></div>
-      <div class="wager hidden" id="prof-wager"></div>
-      <button class="promo slim" data-wallet="nft">
-        <span class="promo-x">🎁</span>
-        <span class="promo-t"><b>Мои подарки</b><small>NFT, которые можно ставить в PvP</small></span>
-        <span class="promo-go">›</span>
-      </button>
       <div class="panel" id="checks-panel">
         <div class="panel-title">🎁 Чеки</div>
         <p class="note left">Раздайте звёзды друзьям: сумма × активации спишется с баланса, неактивированное можно вернуть.</p>
@@ -256,8 +249,19 @@
           <input id="chk-count" type="number" inputmode="numeric" min="1" value="1" placeholder="Активаций">
         </div>
         <button class="btn big" id="chk-create">Создать чек</button>
+        <div class="row chk-activate">
+          <input id="chk-code" placeholder="Код или ссылка чека" autocomplete="off">
+          <button class="btn" id="chk-activate">Забрать</button>
+        </div>
         <div id="chk-list" class="chk-list"></div>
       </div>
+      <div class="panel best hidden" id="prof-best"></div>
+      <div class="wager hidden" id="prof-wager"></div>
+      <button class="promo slim" data-wallet="nft">
+        <span class="promo-x">🎁</span>
+        <span class="promo-t"><b>Мои подарки</b><small>NFT, которые можно ставить в PvP</small></span>
+        <span class="promo-go">›</span>
+      </button>
       <div class="panel">
         <div class="panel-title">Мои игры</div>
         <div id="history" class="history"></div>

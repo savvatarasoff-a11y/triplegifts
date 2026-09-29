@@ -228,8 +228,13 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                             headers={"Cache-Control": "public, max-age=2592000, immutable"})
 
     @routes.get("/")
-    async def index(_: web.Request) -> web.FileResponse:
-        return web.FileResponse(WEBAPP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    async def index(_: web.Request) -> web.Response:
+        # к app.js/app.css добавляем версию файла — Telegram не отдаст старый закэшированный скрипт после обновления
+        page = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+        for name in ("app.js", "app.css"):
+            ver = int((WEBAPP_DIR / name).stat().st_mtime)
+            page = page.replace(f"/static/{name}\"", f"/static/{name}?v={ver}\"")
+        return web.Response(text=page, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
     @routes.get("/api/me")
     async def me(request: web.Request) -> web.Response:

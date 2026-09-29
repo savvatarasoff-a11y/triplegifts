@@ -618,3 +618,5 @@ button { -webkit-user-select: none; user-select: none; }
 .chk-a { display: flex; gap: 4px; flex: none; }
 .chk-a .btn.small { padding: 7px 10px; font-size: 13px; }
 .chk-a .btn.small.ghost { background: var(--surface-3); color: var(--text, #fff); }
+.chk-activate { margin-top: 10px; }
+.chk-activate input { flex: 1; min-width: 0; }

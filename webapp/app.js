@@ -636,12 +636,14 @@ function tickerStop() {
   clearTimeout(tickerTimer);
 }
 
-async function activateCheck() {
+async function activateCheck(inputSel) {
+  const input = $(typeof inputSel === "string" ? inputSel : "#check-code");
   await guard(async () => {
-    const code = $("#check-code").value.trim();
+    const code = input.value.trim();
     if (!code) throw new Error("Введите код чека");
     const r = await api("/api/check", { code });
-    $("#check-code").value = "";
+    input.value = "";
+    setBalance(r.balance, "stars");
     toast("Чек активирован: +" + stars(r.amount));
     fxBurstAt($("#balance-btn"), { count: 30 });
     haptic("win");
@@ -2786,6 +2788,7 @@ function bind() {
   $("#dep-btn").addEventListener("click", () => deposit(parseInt($("#dep-amount").value, 10)));
   $("#check-btn").addEventListener("click", activateCheck);
   $("#chk-create").addEventListener("click", createCheck);
+  $("#chk-activate").addEventListener("click", () => activateCheck("#chk-code"));
   $("#slots-spin").addEventListener("click", slotsSpin);
   $("#plinko-btn").addEventListener("click", plinkoDrop);
   $("#bonus-btn").addEventListener("click", claimBonus);
