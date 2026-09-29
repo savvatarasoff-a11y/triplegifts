@@ -43,12 +43,12 @@ def test_mines_multiplier_expected_value():
     for mines in (3, 10, 24):
         for k in range(1, 25 - mines + 1):
             survive = math.comb(25 - mines, k) / math.comb(25, k)
-            assert survive * g.mines_multiplier(mines, k) == pytest.approx(0.90, rel=1e-3)
-    assert g.mines_multiplier(3, 0) == 1.0
+            assert survive * g.mines_multiplier(mines, k) == pytest.approx(1 - g.MINES_EDGE, rel=1e-3)
+    assert g.mines_multiplier(5, 0) == 1.0
     assert len(set(g.mines_place(5))) == 5
-    assert g.mines_multiplier(3, 1) > 1
+    assert g.mines_multiplier(5, 1) > 1                      # с минимумом мин первая клетка уже в плюс
     with pytest.raises(ValueError):
-        g.mines_place(2)
+        g.mines_place(4)
 
 
 def test_crash_distribution():

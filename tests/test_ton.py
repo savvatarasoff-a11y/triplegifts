@@ -74,7 +74,7 @@ async def test_games_in_ton(casino, monkeypatch):
         await casino.plinko(2, NANO, 8, "low", cur="ton")                               # у игрока 2 нет TON
     with pytest.raises(GameError):
         await casino.plinko(1, NANO, 8, "low", cur="btc")
-    m = await casino.mines_start(1, NANO, 3, cur="ton")
+    m = await casino.mines_start(1, NANO, 5, cur="ton")
     assert m["cur"] == "ton"
     bets = await db.all("SELECT cur FROM bets")
     assert {b["cur"] for b in bets} == {"ton"}

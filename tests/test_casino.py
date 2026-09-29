@@ -126,19 +126,19 @@ async def test_checks(casino):
 async def test_mines_win_and_lose(casino, monkeypatch):
     await fund(casino, 1, 100)
     monkeypatch.setattr(g, "mines_place", lambda mines, rng=None: [0, 1, 2])
-    await casino.mines_start(1, 10, 3)
+    await casino.mines_start(1, 10, 5)
     with pytest.raises(GameError, match="закончите"):
-        await casino.mines_start(1, 10, 3)
+        await casino.mines_start(1, 10, 5)
     s = await casino.mines_open(1, 10)
-    assert s["opened"] == [10] and s["multiplier"] == g.mines_multiplier(3, 1)
+    assert s["opened"] == [10] and s["multiplier"] == g.mines_multiplier(5, 1)
     with pytest.raises(GameError):
         await casino.mines_open(1, 10)
     r = await casino.mines_cashout(1)
-    assert r["win"] == g.payout(10, g.mines_multiplier(3, 1))
+    assert r["win"] == g.payout(10, g.mines_multiplier(5, 1))
     assert r["layout"] == [0, 1, 2]
     assert await balance(casino, 1) == 90 + r["win"]
 
-    await casino.mines_start(1, 10, 3)
+    await casino.mines_start(1, 10, 5)
     r = await casino.mines_open(1, 1)
     assert r["boom"] == 1 and r["win"] == 0
     assert await casino.mines_state(1) is None

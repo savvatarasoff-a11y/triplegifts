@@ -1724,7 +1724,7 @@ async function plinkoDrop() {
 // ---------- мины ----------
 
 let minesGame = null;
-let minesCount = 3;
+let minesCount = 5;
 
 function minesRender(game, reveal) {
   const grid = $("#mines-grid");

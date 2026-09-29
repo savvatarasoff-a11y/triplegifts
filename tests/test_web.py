@@ -160,10 +160,10 @@ async def test_play_and_errors(client):
     assert r.status == 400
     r = await client.post("/api/plinko", headers=auth(), json={"bet": 1, "rows": 8, "risk": "high"})
     assert r.status == 200 and len((await r.json())["path"]) == 8
-    r = await client.post("/api/mines/start", headers=auth(), json={"bet": 1, "mines": 3})
+    r = await client.post("/api/mines/start", headers=auth(), json={"bet": 1, "mines": 5})
     assert r.status == 200
     r = await client.get("/api/mines", headers=auth())
-    assert (await r.json())["game"]["mines"] == 3
+    assert (await r.json())["game"]["mines"] == 5
     await client.app[CASINO].crash_tick()
     r = await client.post("/api/crash/bet", headers=auth(), json={"bet": 1, "auto": 2})
     assert r.status == 200

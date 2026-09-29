@@ -13,7 +13,7 @@ from typing import Any, Sequence
 RNG = secrets.SystemRandom()
 
 HOUSE_EDGE = 0.05  # комиссия казино в костях и краше
-MINES_EDGE = 0.10  # в минах жёстче: игроки слишком часто доходили до больших иксов
+MINES_EDGE = 0.12  # в минах жёстче: игроки слишком часто выигрывали
 
 
 # ---------------- Слоты ----------------
@@ -122,7 +122,7 @@ def mines_multiplier(mines: int, opened: int) -> float:
     return round((1 - MINES_EDGE) * fair, 4)
 
 
-MINES_MIN = 3   # меньше трёх мин — слишком лёгкие серии
+MINES_MIN = 5   # меньше пяти мин — слишком частые мелкие выигрыши (с 3 минами первая клетка безопасна в 88%)
 
 
 def mines_place(mines: int, rng: random.Random = RNG) -> list[int]:
@@ -208,12 +208,12 @@ class NftCaseDef:
 
 
 NFT_CASE_DEFS = [
-    NftCaseDef("nft_starter", "NFT Starter", "🍀", 50, 0.4, 0.87),
-    NftCaseDef("nft_mini", "NFT Mini", "🎲", 100, 0.5, 0.86),
-    NftCaseDef(NFT_CASE_ID, "NFT-кейс", "💎", None, 0.6, 0.83),
-    NftCaseDef("nft_gold", "NFT Gold", "🏆", 500, 0.62, 0.79),
-    NftCaseDef("nft_premium", "NFT Premium", "👑", 1000, 0.66, 0.76),
-    NftCaseDef("nft_legend", "NFT Legend", "🐉", 2500, 0.66, 0.72),
+    NftCaseDef("nft_starter", "NFT Starter", "🍀", 50, 0.5, 0.87),
+    NftCaseDef("nft_mini", "NFT Mini", "🎲", 100, 0.6, 0.86),
+    NftCaseDef(NFT_CASE_ID, "NFT-кейс", "💎", None, 0.7, 0.83),
+    NftCaseDef("nft_gold", "NFT Gold", "🏆", 500, 0.73, 0.79),
+    NftCaseDef("nft_premium", "NFT Premium", "👑", 1000, 0.72, 0.76),
+    NftCaseDef("nft_legend", "NFT Legend", "🐉", 2500, 0.69, 0.72),
 ]
 CASE_RTP_TOLERANCE = 0.07   # кейс, который с текущими ценами отдаёт меньше (rtp − 7%), не показываем
 
@@ -229,7 +229,7 @@ def expected_value(prizes: Sequence[tuple[float, float]]) -> float:
 
 
 # NFT-джекпот в кейсах с подарками: модели от 3 до 100 цен кейса, в среднем 15% цены кейса уходит на них
-GIFT_CASE_JACKPOT_SHARE = 0.15
+GIFT_CASE_JACKPOT_SHARE = 0.22
 GIFT_CASE_JACKPOT_RANGE = (3, 100)
 GIFT_CASE_JACKPOT_MAX_MODELS = 8
 
