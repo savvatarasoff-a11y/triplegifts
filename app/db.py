@@ -265,6 +265,7 @@ class Database:
         await self.conn.executescript(TON_SCHEMA)
         # чеки игроков оплачены из их баланса (paid=1), чеки админа — бесплатные
         await self._add_columns("checks", {"paid": "INTEGER NOT NULL DEFAULT 0"})
+        await self._add_columns("users", {"free_case_at": "REAL NOT NULL DEFAULT 0"})
 
     async def _add_columns(self, table: str, columns: dict[str, str]) -> None:
         async with self.conn.execute(f"PRAGMA table_info({table})") as cur:

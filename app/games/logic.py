@@ -277,6 +277,14 @@ def gift_case_with_jackpot(price: int, gifts: Sequence[tuple[float, int]], nft_p
     return None
 
 
+# Ежедневный бесплатный кейс (для подписчиков канала): почти всегда 1–3 ★, крупные призы — с крошечным,
+# но настоящим шансом (показывается игроку как есть). Звёзды — бонусные: их нужно один раз отыграть.
+FREE_CASE_EVERY = 24 * 3600
+FREE_CASE_STARS = ((1, 6000), (2, 2500), (3, 900), (5, 400), (10, 150), (25, 40), (100, 8), (500, 1.5))
+FREE_CASE_NFT_WEIGHT = 0.5            # 0.005%
+FREE_CASE_NFT_RANGE = (300, 3000)     # NFT-приз — модель в этом диапазоне цен (ближе к 1000 ★)
+
+
 def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequence[int],
                      target_rtp: float = CASE_TARGET_RTP, share: float = NFT_SHARE
                      ) -> tuple[list[float], list[float]] | None:

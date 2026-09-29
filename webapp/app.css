@@ -637,3 +637,34 @@ button { -webkit-user-select: none; user-select: none; }
 .btn { box-shadow: 0 10px 26px -12px var(--accent-glow); }
 .wordmark { font-size: 13px; letter-spacing: .3px; flex-direction: column; gap: 0; line-height: 1.05; }
 .wordmark i { color: #fff; font-size: 11px; letter-spacing: 2.6px; }
+
+/* ---------- бесплатный кейс ---------- */
+.free-card { display: flex; align-items: center; gap: 12px; width: 100%; margin: 14px 0 0; padding: 12px 14px;
+  border-radius: var(--radius); text-align: left; border: 1px solid var(--line);
+  background: radial-gradient(120% 140% at 0% 0%, rgba(245, 185, 60, .22), transparent 60%), var(--surface); }
+.free-card.ready { border-color: var(--accent); box-shadow: 0 10px 30px -18px var(--accent-glow); }
+.free-ic { flex: none; width: 48px; height: 48px; display: grid; place-items: center; font-size: 30px;
+  border-radius: 14px; background: var(--surface-2); }
+.free-card.ready .free-ic { animation: wiggle 1.6s ease-in-out infinite; }
+.free-t { flex: 1; min-width: 0; }
+.free-t b { display: block; font-family: var(--font-head); font-size: 15px; }
+.free-t small { display: block; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.free-go { flex: none; padding: 9px 14px; border-radius: 12px; font-weight: 800; font-size: 14px;
+  background: var(--surface-3); color: var(--muted); }
+.free-card.ready .free-go { background: var(--accent); color: var(--on-accent); }
+#free-roller { margin-top: 14px; }
+#free-btn:disabled { opacity: .55; font-variant-numeric: tabular-nums; }
+
+/* ---------- подписка на канал ---------- */
+.gate { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px;
+  background: rgba(6, 6, 8, .92); backdrop-filter: blur(10px); animation: fadein .25s; }
+.gate-box { width: 100%; max-width: 360px; text-align: center; padding: 26px 20px 20px; border-radius: 26px;
+  background: radial-gradient(120% 80% at 50% 0%, rgba(245, 185, 60, .18), transparent 60%), var(--surface);
+  border: 1px solid var(--line); }
+.gate-logo { width: 86px; height: 86px; border-radius: 24px; box-shadow: 0 16px 40px -14px var(--accent-glow); }
+.gate h2 { font-family: var(--font-head); font-size: 21px; margin: 16px 0 8px; }
+.gate p { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+.gate p b { color: var(--accent); }
+.gate .btn { width: 100%; }
+.gate .btn + .btn { margin-top: 8px; }
+.btn.ghost { background: var(--surface-3); color: var(--text); box-shadow: none; }

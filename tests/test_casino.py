@@ -500,3 +500,32 @@ async def test_player_checks_paid_from_balance(casino):
     with pytest.raises(GameError):
         await casino.activate_check(3, code)
     assert (await db.stats())["checks_redeemed"] == 0                # чеки игроков — не расход казино
+
+
+async def test_free_case_daily_bonus_stars(casino, monkeypatch):
+    db = casino.db
+    await db.touch_user(1, "u1", "U1")
+    info = await casino.free_case_info(1)
+    assert info["available"] and info["prizes"][0]["amount"] == 1
+    chances = {p["amount"]: p["chance"] for p in info["prizes"]}
+    assert chances[1] > 55 and chances[500] < 0.02                     # крупное — редко, но шанс честный
+    assert sum(p["chance"] for p in info["prizes"]) == pytest.approx(100, abs=0.01)
+    monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[1])
+    r = await casino.open_free_case(1)
+    assert r["prize"] == 2 and r["balance"] == 2
+    assert (await casino.wager_status(1))["left"] == 2                  # бонусные — нужно отыграть
+    with pytest.raises(GameError, match="через сутки"):
+        await casino.open_free_case(1)
+    assert not (await casino.free_case_info(1))["available"]
+
+
+async def test_free_case_nft_prize_goes_to_profile(casino, monkeypatch):
+    db = casino.db
+    await db.touch_user(1, "u1", "U1")
+    await db.conn.execute("INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at, "
+                          "test) VALUES ('demo:Lol Pop','Lol Pop','Pink','🍭',999,900,?,1)", (time.time(),))
+    prizes = (await casino.free_case_info(1))["prizes"]
+    assert prizes[-1]["kind"] == "nft" and prizes[-1]["chance"] < 0.01
+    monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[-1])
+    r = await casino.open_free_case(1)
+    assert r["nft"]["demo"] and [x["model"] for x in await casino.gifts(1)] == ["Pink"]

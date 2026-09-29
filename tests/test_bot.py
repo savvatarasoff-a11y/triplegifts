@@ -113,8 +113,9 @@ async def test_non_admin_cannot_issue_checks(env):
 
 async def test_stars_payment(env):
     feed, session, db = env["feed"], env["session"], env["db"]
-    await feed(msg(1, PLAYER, "/deposit 100"))
-    inv = [c for c in session.calls if isinstance(c, SendInvoice)][-1]
+    from types import SimpleNamespace
+    from app.web import deposit_invoice_kwargs
+    inv = SimpleNamespace(**deposit_invoice_kwargs(PLAYER, 100))   # счёт создаёт мини-приложение
     assert inv.currency == "XTR" and inv.prices[0].amount == 100
 
     def pcq(uid, payload, amount, from_id=PLAYER):
@@ -180,22 +181,10 @@ async def test_withdraw_admin_buttons(env):
     assert (await db.get_user(PLAYER))["balance"] == 150
 
 
-async def test_slot_in_chat_uses_telegram_dice(env, monkeypatch):
-    import app.bot as bot_mod
-    async def no_sleep(_):
-        return None
-    monkeypatch.setattr(bot_mod.asyncio, "sleep", no_sleep)
-    feed, session, db = env["feed"], env["session"], env["db"]
-    await db.touch_user(PLAYER, "p", "P")
-    await db.credit_payment("c1", PLAYER, 100)
-    await feed(msg(1, PLAYER, "/slot 10"))                       # 🎰 выпало 64 = 777, NFT нет -> ×40 звёздами
-    assert any(isinstance(c, SendDice) and c.emoji == "🎰" for c in session.calls)
-    assert "7️⃣ 7️⃣ 7️⃣" in session.texts(PLAYER)[-1] and "×40" in session.texts(PLAYER)[-1]
-    assert (await db.get_user(PLAYER))["balance"] == 490
-    session.dice_value = 48                                       # 7 7 🍋 — две семёрки, возврат ставки
-    await feed(msg(2, PLAYER, "/slot 10"))
-    assert "ставка возвращена" in session.texts(PLAYER)[-1]
-    assert (await db.get_user(PLAYER))["balance"] == 490
-    await feed(msg(3, PLAYER, "/slot 1000"))                     # не хватает звёзд — кубик не бросается
-    assert "Недостаточно" in session.texts(PLAYER)[-1]
-    assert sum(isinstance(c, SendDice) for c in session.calls) == 2
+async def test_player_commands_only_open_the_app(env):
+    """Для игроков в боте только запуск мини-приложения: остальные команды и текст ведут туда же."""
+    feed, session = env["feed"], env["session"]
+    for i, text in enumerate(("/slot 10", "/balance", "/deposit 100", "привет"), start=10):
+        await feed(msg(i, PLAYER, text))
+        assert "мини-приложении" in session.texts(PLAYER)[-1]
+

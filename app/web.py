@@ -91,8 +91,34 @@ def parse_deposit_payload(payload: str) -> tuple[int, int] | None:
     return int(parts[1]), int(parts[2])
 
 
+# Игровые действия — только для подписчиков канала (вывод, пополнение и продажа подарков доступны всем)
+SUB_REQUIRED = frozenset({
+    "/api/slots", "/api/plinko", "/api/case", "/api/mines/start", "/api/crash/bet", "/api/pvp/bet",
+    "/api/upgrade", "/api/bonus", "/api/free_case",
+})
+SUB_OK_STATUSES = {"member", "administrator", "creator", "restricted"}
+
+
 def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = None,
               images: NftImages | None = None) -> web.Application:
+    sub_cache: dict[int, tuple[float, bool]] = {}
+
+    async def subscribed(user_id: int, fresh: bool = False) -> bool:
+        """Подписан ли игрок на канал. Если бот не админ канала и проверить нельзя — не блокируем."""
+        if user_id in cfg.admin_ids:
+            return True
+        hit = sub_cache.get(user_id)
+        if hit and not fresh and time.time() - hit[0] < (600 if hit[1] else 20):
+            return hit[1]
+        try:
+            member = await bot.get_chat_member(CHANNEL, user_id)
+            ok = getattr(member, "status", "") in SUB_OK_STATUSES
+        except Exception as e:
+            log.warning("Не удалось проверить подписку на %s (бот — админ канала?): %s", CHANNEL, type(e).__name__)
+            return True
+        sub_cache[user_id] = (time.time(), ok)
+        return ok
+
     @web.middleware
     async def errors(request: web.Request, handler: Handler) -> web.StreamResponse:
         try:
@@ -123,6 +149,10 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         ref = parse_referral(data.start_param)
         if ref and await casino.db.set_referrer(data.user.id, ref):
             await notify_referrer(bot, ref, data.user.first_name)
+        # играть можно только подписчикам канала
+        if request.method == "POST" and request.path in SUB_REQUIRED and not await subscribed(data.user.id):
+            return web.json_response({"error": f"Чтобы играть, подпишитесь на наш канал {CHANNEL}",
+                                      "need_sub": CHANNEL.lstrip("@")}, status=403)
         return await handler(request)
 
     async def body(request: web.Request) -> dict[str, Any]:
@@ -244,6 +274,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         user = await casino.db.get_user(uid)
         return web.json_response({
             "user": {"id": uid, "name": display_name(user)},
+            "subscribed": await subscribed(uid),
+            "free_case": await casino.free_case_info(uid),
             "balance": user["balance"],
             "ton": user["ton"],
             "history": await casino.db.recent_bets(uid, 15),
@@ -350,6 +382,18 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         if refund is None:
             raise GameError("Чек не найден или уже отозван")
         return web.json_response({"refund": refund, "balance": (await casino.db.get_user(request[USER_ID]))["balance"]})
+
+    @routes.get("/api/sub")
+    async def sub_status(request: web.Request) -> web.Response:
+        return web.json_response({"subscribed": await subscribed(request[USER_ID], fresh=True),
+                                  "channel": CHANNEL.lstrip("@")})
+
+    @routes.post("/api/free_case")
+    async def free_case(request: web.Request) -> web.Response:
+        result = await casino.open_free_case(request[USER_ID])
+        if result.get("nft") and result["nft"].get("win_id"):
+            await to_profile(result["nft"])
+        return web.json_response(result)
 
     @routes.post("/api/slots")
     async def slots(request: web.Request) -> web.Response:

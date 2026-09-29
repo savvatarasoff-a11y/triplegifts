@@ -319,3 +319,22 @@ async def test_gift_cases_get_nft_jackpot(client):
     for c in cases.values():
         assert sum(p["chance"] for p in c["prizes"]) == pytest.approx(100, abs=0.05)
         assert c["rtp"] <= 0.92
+
+
+async def test_play_requires_channel_subscription(client):
+    bot = client.app[BOT]
+    status = {"s": "left"}
+
+    async def get_chat_member(chat_id, user_id):
+        return type("M", (), {"status": status["s"]})()
+
+    bot.get_chat_member = get_chat_member
+    me = await (await client.get("/api/me", headers=auth(31))).json()
+    assert me["subscribed"] is False and me["free_case"]["available"]
+    r = await client.post("/api/free_case", headers=auth(31))
+    assert r.status == 403 and (await r.json())["need_sub"] == "TripleGifts"
+    assert (await client.post("/api/slots", headers=auth(31), json={"bet": 1})).status == 403
+    status["s"] = "member"
+    assert (await (await client.get("/api/sub", headers=auth(31))).json())["subscribed"] is True
+    r = await client.post("/api/free_case", headers=auth(31))
+    assert r.status == 200 and (await r.json())["prize"] >= 1

@@ -54,15 +54,21 @@
 
       <div class="sec-head"><span>Популярное</span><button data-go="games">Все игры ›</button></div>
       <div class="games">
-        <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10000</span><span class="gn">Краш</span></button>
+        <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10 000</span><span class="gn">Краш</span></button>
         <button class="game" data-go="plinko"><svg class="gi"><use href="#i-plinko"/></svg><span class="gx">новинка</span><span class="gn">Plinko</span></button>
         <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT внутри</span><span class="gn">Кейсы</span></button>
         <button class="game accent" data-go="upgrade"><svg class="gi"><use href="#i-upgrade"/></svg><span class="gx">NFT → дороже</span><span class="gn">Апгрейд</span></button>
       </div>
 
+      <button class="free-card" id="free-card" data-go="free">
+        <span class="free-ic">📦</span>
+        <span class="free-t"><b>Бесплатный кейс</b><small id="free-sub">каждый день — для подписчиков канала</small></span>
+        <span class="free-go" id="free-go">Открыть</span>
+      </button>
+
       <div class="bonus-card" id="bonus-card">
         <div class="bonus-ic" id="bonus-ic">🎁</div>
-        <div class="bonus-t"><b>Ежедневный бонус</b><small id="bonus-sub">до 100 ★ каждый день</small></div>
+        <div class="bonus-t"><b>Ежедневный бонус</b><small id="bonus-sub">до 100 ★ раз в сутки</small></div>
         <button class="btn small" id="bonus-btn">Забрать</button>
       </div>
 
@@ -90,17 +96,16 @@
         </div>
       </div>
 
-      <p class="note">Слоты можно крутить и прямо в чате с ботом: /slot 10 — настоящий 🎰 Telegram.</p>
       <p class="note">Пополнение — Telegram Stars, вывод — подарками Telegram. Играйте ответственно. 18+</p>
     </section>
 
     <!-- Игры -->
     <section class="screen" id="games">
-      <div class="page-head"><h1>Игры</h1><p>Выберите режим — ставки в звёздах, выигрыши сразу на баланс.</p></div>
+      <div class="page-head"><h1>Игры</h1><p>Ставки в звёздах или TON — выигрыш сразу на баланс.</p></div>
       <div class="sec-head"><span>Казино</span></div>
       <div class="games">
         <button class="game" data-go="slots"><svg class="gi"><use href="#i-slots"/></svg><span class="gx">777 — NFT ×40</span><span class="gn">Слоты</span></button>
-        <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10000</span><span class="gn">Краш</span></button>
+        <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10 000</span><span class="gn">Краш</span></button>
         <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×1000+</span><span class="gn">Мины</span></button>
         <button class="game" data-go="plinko"><svg class="gi"><use href="#i-plinko"/></svg><span class="gx">до ×949</span><span class="gn">Plinko</span></button>
         <button class="game wide" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">подарки и NFT</span><span class="gn">Кейсы</span></button>
@@ -114,7 +119,7 @@
         <button class="game accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">ставки подарками</span><span class="gn">Рулетка</span></button>
         <button class="game accent" data-go="hockey"><svg class="gi"><use href="#i-hockey"/></svg><span class="gx">ставки подарками</span><span class="gn">Хоккей</span></button>
       </div>
-      <p class="note">В PvP шанс пропорционален ставке, казино берёт лишь комиссию 5%. Слоты можно крутить и в чате: /slot 10.</p>
+      <p class="note">В PvP шанс пропорционален ставке, казино берёт лишь комиссию 5%.</p>
     </section>
 
     <!-- Апгрейд NFT -->
@@ -167,7 +172,7 @@
         <input class="search" id="upg-search" placeholder="Поиск: коллекция или модель" autocomplete="off">
         <div class="upg-targets" id="upg-targets"></div>
       </div>
-      <p class="note">Ставка — ваши NFT (Кошелёк → Подарки). Шанс = стоимость ставки / цена цели × 0.9, максимум 75%. Цены — флор MRKT. Выиграли — NFT цели придёт в Telegram, поставленные NFT забирает казино.</p>
+      <p class="note">Ставка — ваши NFT (Кошелёк → Подарки). Шанс = стоимость ставки / цена цели × 0,9, максимум 75%. Цены — флор MRKT. Выиграли — NFT цели появится в профиле → «Мои подарки»; поставленные NFT забирает казино.</p>
     </section>
 
     <!-- Рефералы -->
@@ -193,7 +198,7 @@
         <ol class="steps">
           <li>Отправьте другу свою ссылку.</li>
           <li>Друг запускает бота по ней — он становится вашим рефералом.</li>
-          <li>Каждый раз, когда он покупает звёзды, вы получаете <b><span class="ref-rate">10</span>%</b> от суммы.</li>
+          <li>Каждый раз, когда он пополняет баланс, вы получаете <b><span class="ref-rate">10</span>%</b> от суммы.</li>
         </ol>
         <p class="note left">Бонус нужно один раз отыграть ставками, как звёзды из чеков. Пригласить можно только новых игроков.</p>
       </div>
@@ -255,7 +260,7 @@
       <div class="wager hidden" id="prof-wager"></div>
       <button class="promo slim" data-wallet="nft">
         <span class="promo-x">🎁</span>
-        <span class="promo-t"><b>Мои подарки</b><small>NFT, которые можно ставить в PvP</small></span>
+        <span class="promo-t"><b>Мои подарки</b><small>вывести, продать или поставить в игру</small></span>
         <span class="promo-go">›</span>
       </button>
       <div class="panel">
@@ -298,7 +303,7 @@
           <div class="panel-title">Ставьте свои подарки</div>
           <p class="note" id="nft-howto">Отправьте NFT или подарок в Telegram аккаунту казино — он появится здесь через несколько секунд.</p>
           <button class="btn" id="nft-open">Отправить подарок</button>
-          <p class="note">NFT оценивается по полу маркета своей модели: его можно поставить в PvP, продать казино за <span id="nft-rate">90</span>% или вывести обратно. Обычные подарки сразу зачисляются звёздами.</p>
+          <p class="note">NFT оценивается по полу маркета своей модели: его можно поставить в PvP, краш или апгрейд, продать казино за <span id="nft-rate">90</span>% или вывести обратно. Обычные подарки сразу зачисляются звёздами.</p>
         </div>
         <div class="panel">
           <div class="panel-title">Мои подарки</div>
@@ -408,10 +413,20 @@
         <div class="betbox" data-bet="plinko"></div>
         <button class="btn big" id="plinko-btn">Бросить шарик</button>
       </div>
-      <p class="note">Можно бросать несколько шариков подряд. Возврат игроку — 93%.</p>
+      <p class="note">Можно бросать несколько шариков подряд.</p>
     </section>
 
     <!-- Кейсы -->
+    <section class="screen" id="free">
+      <div class="case-hero"><div class="case-emoji">📦</div>
+        <div class="case-meta"><span>раз в 24 часа</span><span>бесплатно</span><span>для подписчиков</span></div></div>
+      <div class="roller tall" id="free-roller"><div class="roller-track"></div><div class="roller-pointer"></div></div>
+      <div class="result" id="free-result"></div>
+      <button class="btn big" id="free-btn">Открыть бесплатно</button>
+      <p class="note">Звёзды из бесплатного кейса — бонусные: их нужно один раз поставить в любой игре, прежде чем вывести.</p>
+      <div class="panel"><div class="panel-title">Что внутри</div><div id="free-prizes" class="prizes"></div></div>
+    </section>
+
     <section class="screen" id="cases">
       <div class="live-drops"><span class="live-dot">LIVE</span><div class="live-track" id="case-live"></div></div>
       <div class="seg cases-filter" id="cases-filter">
@@ -492,6 +507,18 @@
     <button data-tab="ref"><svg><use href="#i-ref"/></svg><span>Друзья</span></button>
     <button data-tab="profile"><svg><use href="#i-user"/></svg><span>Профиль</span></button>
   </nav>
+
+  <!-- Обязательная подписка на канал -->
+  <div class="gate hidden" id="sub-gate">
+    <div class="gate-box">
+      <img class="gate-logo" src="/static/logo.svg" alt="">
+      <h2>Подпишитесь на канал</h2>
+      <p>Играть в Triple Gifts могут подписчики <b id="gate-channel">@TripleGifts</b>. Там новости, раздачи чеков и
+        крупные выигрыши.</p>
+      <button class="btn big" id="gate-open">📢 Подписаться</button>
+      <button class="btn big ghost" id="gate-check">Я подписался</button>
+    </div>
+  </div>
 
   <div class="sheet hidden" id="sheet">
     <div class="sheet-box">

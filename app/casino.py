@@ -217,6 +217,69 @@ class Casino:
         return {"amount": amount, "balance": balance, "cur": money.STARS,
                 "table": [a for a, _ in g.DAILY_BONUS]}
 
+    # ---------- ежедневный бесплатный кейс ----------
+
+    async def _free_case_nft(self) -> dict | None:
+        lo, hi = g.FREE_CASE_NFT_RANGE
+        return await self.db.one(
+            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price BETWEEN ? AND ? AND price_at > ? "
+            "AND model GLOB '*[^0-9]*' ORDER BY ABS(price - 1000), test LIMIT 1", lo, hi, time.time() - NFT_PRICE_MAX_AGE)
+
+    async def _free_case_prizes(self) -> list[dict]:
+        prizes = [{"kind": "stars", "emoji": "⭐", "amount": a, "weight": w} for a, w in g.FREE_CASE_STARS]
+        m = await self._free_case_nft()
+        if m:
+            prizes.append({"kind": "nft", "model_id": m["id"], "emoji": m["emoji"] or "💎", "title": m["collection_name"],
+                           "model": m["model"], "rarity": m["rarity"], "amount": m["price"], "demo": bool(m["test"]),
+                           "weight": g.FREE_CASE_NFT_WEIGHT})
+        total = sum(p["weight"] for p in prizes)
+        for p in prizes:
+            p["chance"] = round(p["weight"] / total * 100, 4)
+        return prizes
+
+    async def free_case_info(self, user_id: int) -> dict:
+        user = await self.db.get_user(user_id)
+        next_at = (user.get("free_case_at") or 0) + g.FREE_CASE_EVERY if user else 0
+        return {"available": next_at <= time.time(), "next_at": next_at,
+                "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "demo")}
+                           for p in await self._free_case_prizes()]}
+
+    async def open_free_case(self, user_id: int) -> dict:
+        """Раз в сутки. Звёзды — бонусные (отыгрываются), NFT — в «Мои подарки»."""
+        now = time.time()
+        prizes = await self._free_case_prizes()
+        prize = g.pick_weighted(prizes, [p["weight"] for p in prizes])
+        async with self.db.tx() as c:
+            res = await c.execute("UPDATE users SET free_case_at=? WHERE id=? AND free_case_at <= ?",
+                                  (now, user_id, now - g.FREE_CASE_EVERY))
+            if res.rowcount != 1:
+                raise GameError("Бесплатный кейс уже открыт — следующий через сутки")
+            item: dict[str, Any] = {"kind": prize["kind"], "prize": prize["amount"], "gift": prize["emoji"]}
+            detail: dict[str, Any] = {"case": "free", "prize": prize["amount"], "gift": prize["emoji"],
+                                      "kind": prize["kind"]}
+            if prize["kind"] == "nft" and prize["demo"]:
+                gift_id = await self._demo_gift(c, user_id, prize["title"], prize["model"], prize["emoji"],
+                                                prize["rarity"], prize["amount"])
+                detail.update(demo_nft=prize["model"], title=prize["title"])
+                item["nft"] = {"win_id": None, "demo": True, "title": prize["title"], "model": prize["model"],
+                               "gift_id": gift_id}
+            elif prize["kind"] == "nft":
+                ok = await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=? AND stock > reserved",
+                                     (prize["model_id"],))
+                if ok.rowcount == 1:
+                    win = await c.execute("INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
+                                          (prize["model_id"], user_id, prize["amount"], now))
+                    detail.update(nft_win=win.lastrowid, model=prize["model"], title=prize["title"])
+                    item["nft"] = {"win_id": win.lastrowid, "title": prize["title"], "model": prize["model"]}
+                else:                                   # модель закончилась — утешительные 25 ⭐
+                    item = {"kind": "stars", "prize": 25, "gift": "⭐"}
+                    await self.db.change_balance(c, user_id, 25, "bonus", "free_case")
+            else:
+                await self.db.change_balance(c, user_id, prize["amount"], "bonus", "free_case")
+            await self.db.log_bet(c, user_id, "free_case", 0, item["prize"], json.dumps(detail, ensure_ascii=False))
+            balance = await self._balance(c, user_id)
+        return {**item, "balance": balance, "next_at": now + g.FREE_CASE_EVERY}
+
     async def leaders(self, user_id: int | None = None, days: int = 7) -> dict:
         """Лидеры по сумме ставок за неделю (TON — по LEVEL_TON_STARS звёзд за 1 TON)."""
         since = time.time() - days * 86400

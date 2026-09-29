@@ -48,9 +48,10 @@ RULES = (
 def play_keyboard(cfg: Config) -> InlineKeyboardMarkup | None:
     if not cfg.webapp_url:
         return None
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎁 Играть в Triple Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
-    ]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎰 Открыть Triple Gifts", web_app=WebAppInfo(url=cfg.webapp_url))],
+        [InlineKeyboardButton(text="📢 Наш канал", url=f"https://t.me/{CHANNEL.lstrip('@')}")],
+    ])
 
 
 def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on_relayer_ready=None) -> Router:
@@ -77,92 +78,10 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                 await message.answer(f"⚠️ {html.escape(str(e))}")
             user = await casino.db.get_user(user["id"])
         await message.answer(
-            f"🎁 <b>Добро пожаловать в Triple Gifts!</b>\n\n"
-            f"Слоты, краш, мины, Plinko, кейсы с NFT, апгрейд NFT, PvP-рулетка и PvP-хоккей — в мини-приложении.\n"
-            f"Вывод — подарками Telegram.\n"
-            f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
-            f"/slot 10 — слоты прямо в чате (настоящий 🎰)\n"
-            f"/deposit — пополнить звёздами\n/balance — баланс\n/ref — пригласить друзей (+10%)\n/help — правила\n\n"
-            f"📢 Новости, чеки и выигрыши: {CHANNEL}",
+            "🎰 <b>Triple Gifts</b> — казино на подарках Telegram.\n\n"
+            "Все игры, кошелёк, кейсы и NFT — в мини-приложении. Жмите кнопку ниже 👇",
             reply_markup=play_keyboard(cfg),
         )
-
-    @router.message(Command("ref", "referral"))
-    async def ref(message: Message) -> None:
-        await register(message)
-        me = await message.bot.get_me()
-        info = await casino.referrals(message.from_user.id)
-        await message.answer(
-            f"🤝 <b>Реферальная программа</b>\n\nПриглашайте друзей и получайте "
-            f"<b>{int(REFERRAL_RATE * 100)}%</b> от каждой их покупки звёзд — навсегда.\n"
-            f"Бонус нужно один раз отыграть ставками, как чеки.\n\n"
-            f"Ваша ссылка:\n{referral_link(me.username, message.from_user.id)}\n\n"
-            f"Приглашено: <b>{info['count']}</b> · заработано: <b>{info['earned']} ⭐</b>",
-            reply_markup=play_keyboard(cfg),
-        )
-
-    @router.message(Command("help", "rules"))
-    async def rules(message: Message) -> None:
-        await register(message)
-        text = RULES + "\n\n/deposit — пополнить\n/balance — баланс\n/paysupport — вопросы по оплате"
-        if cfg.is_admin(message.from_user.id):
-            text += "\n\n/admin — команды администратора"
-        await message.answer(text, reply_markup=play_keyboard(cfg))
-
-    @router.message(Command("balance"))
-    async def balance(message: Message) -> None:
-        user = await register(message)
-        await message.answer(f"Баланс: <b>{user['balance']} ⭐</b> · <b>{money.fmt(user.get('ton') or 0, money.TON)}</b>",
-                             reply_markup=play_keyboard(cfg))
-
-    @router.message(Command("deposit"))
-    async def deposit(message: Message, command: CommandObject) -> None:
-        await register(message)
-        arg = (command.args or "").strip()
-        if not arg.isdigit() or not DEPOSIT_MIN <= int(arg) <= DEPOSIT_MAX:
-            await message.answer(
-                f"Напишите сумму от {DEPOSIT_MIN} до {DEPOSIT_MAX}, например: <code>/deposit 100</code>\n"
-                "Или пополните баланс в мини-приложении."
-            )
-            return
-        await message.answer_invoice(**deposit_invoice_kwargs(message.from_user.id, int(arg)))
-
-    @router.message(Command("slot", "spin"))
-    async def slot(message: Message, command: CommandObject) -> None:
-        """Слоты прямо в чате: бот кидает настоящий 🎰 Telegram, выпавшее значение решает исход."""
-        user = await register(message)
-        arg = (command.args or "").strip()
-        bet = int(arg) if arg.isdigit() else 10
-        if bet < cfg.min_bet or bet > cfg.max_bet:
-            await message.answer(f"Ставка — от {cfg.min_bet} до {cfg.max_bet} ⭐, например <code>/slot 10</code>")
-            return
-        if user["balance"] < bet:
-            await message.answer(f"Недостаточно звёзд: на балансе {user['balance']} ⭐. /deposit — пополнить")
-            return
-        dice_msg = await message.answer_dice(emoji="🎰")
-        try:
-            r = await casino.slots(user["id"], bet, value=dice_msg.dice.value)
-        except GameError as e:
-            await message.answer(f"⚠️ {html.escape(str(e))}")
-            return
-        await asyncio.sleep(2.2)   # ждём, пока докрутится анимация
-        combo = " ".join(SLOT_TEXT[s] for s in r["reels"])
-        if r.get("nft") and r["nft"].get("demo"):
-            n = r["nft"]
-            text = (f"{combo}\n🎉 <b>ДЖЕКПОТ! Демо-NFT {n['emoji']} {html.escape(n['title'])} "
-                    f"«{html.escape(n['model'])}» (≈ {n['price']} ⭐)</b> — он в профиле → «Мои подарки»")
-        elif r.get("nft"):
-            n = r["nft"]
-            await deliver_nft(message.bot, casino.db, cfg, relayer, n["win_id"])
-            text = (f"{combo}\n🎉 <b>ДЖЕКПОТ! NFT {n['emoji']} {html.escape(n['title'])} "
-                    f"(модель «{html.escape(n['model'])}», ≈ {n['price']} ⭐)</b> — он в профиле → «Мои подарки»")
-        elif r["win"] > bet:
-            text = f"{combo}\n🎉 <b>×{r['multiplier']:g} — выигрыш {r['win']} ⭐</b>"
-        elif r["win"] == bet:
-            text = f"{combo}\nДве семёрки — ставка возвращена"
-        else:
-            text = f"{combo}\nМимо"
-        await dice_msg.reply(f"{text}\nБаланс: {r['balance']} ⭐\nЕщё раз: <code>/slot {bet}</code>")
 
     @router.message(Command("paysupport"))
     async def paysupport(message: Message) -> None:
@@ -210,9 +129,22 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                 reply_markup=play_keyboard(cfg),
             )
 
-    # ---------- чеки (для всех: админ — бесплатно, игрок — из своего баланса) ----------
+    @router.message(F.chat.type == "private")
+    async def anything(message: Message) -> None:
+        """Всё, кроме /start и оплаты, — только в мини-приложении."""
+        await register(message)
+        await message.answer("🎰 Играть, пополнять и выводить — в мини-приложении Triple Gifts 👇",
+                             reply_markup=play_keyboard(cfg))
 
-    @router.message(Command("check"))
+    # ---------- администратор ----------
+
+    admin = Router(name="admin")
+    admin.message.filter(F.from_user.id.in_(cfg.admin_ids))
+    admin.callback_query.filter(F.from_user.id.in_(cfg.admin_ids))
+
+    # ---------- чеки админа (игроки создают чеки в мини-приложении) ----------
+
+    @admin.message(Command("check"))
     async def make_check(message: Message, command: CommandObject, bot: Bot) -> None:
         await register(message)
         is_admin = message.from_user.id in cfg.admin_ids
@@ -246,7 +178,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             ]),
         )
 
-    @router.message(Command("mychecks"))
+    @admin.message(Command("mychecks"))
     async def my_checks(message: Message) -> None:
         checks = await casino.my_checks(message.from_user.id)
         if not checks:
@@ -255,7 +187,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         lines = [f"<code>{c['code']}</code> — {c['amount']} ⭐, осталось {c['left']}/{c['total']}" for c in checks]
         await message.answer("<b>Ваши чеки</b>\n" + "\n".join(lines) + "\n\nОтозвать и вернуть остаток: /revoke код")
 
-    @router.message(Command("revoke"))
+    @admin.message(Command("revoke"))
     async def revoke(message: Message, command: CommandObject) -> None:
         code = (command.args or "").strip().removeprefix("c_")
         if not code:
@@ -268,11 +200,6 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         else:
             await message.answer("🗑 Чек отозван." + (f" Возвращено {refund} ⭐ создателю чека." if refund else ""))
 
-    # ---------- администратор ----------
-
-    admin = Router(name="admin")
-    admin.message.filter(F.from_user.id.in_(cfg.admin_ids))
-    admin.callback_query.filter(F.from_user.id.in_(cfg.admin_ids))
 
     @admin.message(Command("admin"))
     async def admin_help(message: Message) -> None:

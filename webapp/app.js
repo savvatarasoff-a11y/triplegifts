@@ -12,10 +12,10 @@ const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", mines: "Мины", c
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
 const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
 const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko",
-  cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
-// Оттенки фирменного фиолетового и белый: [фон, цвет текста]
-const PVP_COLORS = [["#F5B93C", "#FFFFFF"], ["#FFFFFF", "#0A0A0D"], ["#C98512", "#FFFFFF"], ["#FFE3A3", "#0A0A0D"],
-  ["#7A4F08", "#FFFFFF"], ["#FFF4DC", "#0A0A0D"], ["#E0A020", "#FFFFFF"], ["#FFD166", "#0A0A0D"]];
+  cases: "Кейсы", case: "Кейс", free: "Кейс дня", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
+// Оттенки фирменного золотого и белый: [фон, цвет текста]
+const PVP_COLORS = [["#F5B93C", "#1A1305"], ["#FFFFFF", "#0A0A0D"], ["#9A6508", "#FFFFFF"], ["#FFE3A3", "#0A0A0D"],
+  ["#5C3B06", "#FFFFFF"], ["#FFF4DC", "#0A0A0D"], ["#E0A020", "#1A1305"], ["#FFD166", "#0A0A0D"]];
 const WD_STATUS = { pending: "на проверке", sending: "отправляется", sent: "отправлен", rejected: "отклонён" };
 const BIG_WIN_X = 10;
 const COLOR = { accent: "#F5B93C", soft: "#FFD166", pale: "#FFF4DC", deep: "#C98512", white: "#FFFFFF", muted: "#6A665C", bg: "#0A0A0D" };
@@ -52,8 +52,14 @@ function store(key, value) {
 }
 
 const fmt = (n) => Number(n).toLocaleString("ru-RU");
+// Шанс в процентах: 60 %, 13,8 %, 1,5 %, 0,08 %, 0,005 % — без лишних нулей, с запятой
+function fmtChance(c) {
+  const digits = c >= 10 ? 1 : c >= 1 ? 2 : Math.min(4, 1 - Math.floor(Math.log10(c || 1)));
+  return Number(c.toFixed(Math.max(0, digits))).toLocaleString("ru-RU", { maximumFractionDigits: 4 }) + "%";
+}
 const stars = (n) => `${fmt(n)} ${STAR}`;
-const fmtX = (x) => "×" + (x >= 100 ? Math.round(x) : Number(x).toFixed(2));
+const fmtX = (x) => "×" + (x >= 100 ? fmt(Math.round(x))
+  : Number(Number(x).toFixed(2)).toLocaleString("ru-RU", { maximumFractionDigits: 2 }));
 
 // ---------- валюты: звёзды и TON (TON приходит с сервера в nanoTON) ----------
 
@@ -98,6 +104,7 @@ async function api(path, body, opts) {
     throw new Error("Нет связи с сервером");
   }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 403 && data.need_sub) showSubGate(data.need_sub);
   if (!res.ok) throw new Error(data.error || "Ошибка " + res.status);
   if (typeof data.balance === "number" && !(opts && opts.deferBalance)) setBalance(data.balance, data.cur);
   return data;
@@ -275,7 +282,7 @@ function go(screen) {
   window.scrollTo(0, 0);
   const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
     pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
-    upgrade: upgradeEnter, plinko: plinkoEnter };
+    upgrade: upgradeEnter, plinko: plinkoEnter, free: freeEnter };
   if (enter[screen]) enter[screen]();
 }
 
@@ -439,6 +446,9 @@ async function loadMe() {
   const me = await api("/api/me");
   state.me = me;
   state.config = me.config;
+  if (me.subscribed === false) showSubGate(me.config.channel);
+  state.free = me.free_case;
+  freeTick();
   // картинки NFT из кейсов начинают качаться сразу после входа
   setTimeout(() => nftPreload((me.config.cases || []).flatMap((c) => c.prizes.map(prizePic).filter(Boolean))), 800);
   state.bal = { stars: me.balance, ton: me.ton || 0 };
@@ -458,7 +468,7 @@ async function homeEnter() {
 // ---------- VIP-уровень, рейкбек, ежедневный бонус ----------
 
 const vipState = { data: null, timer: 0 };
-const pctText = (x) => `${Number((x * 100).toFixed(2))}%`;
+const pctText = (x) => fmtChance(x * 100);
 const hms = (s) => {
   s = Math.max(0, Math.ceil(s));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
@@ -647,6 +657,127 @@ async function activateCheck(inputSel) {
     toast("Чек активирован: +" + stars(r.amount));
     fxBurstAt($("#balance-btn"), { count: 30 });
     haptic("win");
+  });
+}
+
+// ---------- обязательная подписка на канал ----------
+
+function showSubGate(channel) {
+  state.subChannel = channel || (state.config && state.config.channel) || "TripleGifts";
+  $("#gate-channel").textContent = "@" + state.subChannel;
+  $("#sub-gate").classList.remove("hidden");
+}
+
+function gateOpenChannel() {
+  const url = `https://t.me/${state.subChannel || "TripleGifts"}`;
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
+  else window.open(url, "_blank");
+}
+
+async function gateCheck() {
+  await guard(async () => {
+    const r = await api("/api/sub");
+    if (!r.subscribed) throw new Error("Подписка пока не видна — подпишитесь и нажмите ещё раз");
+    $("#sub-gate").classList.add("hidden");
+    toast("Спасибо за подписку! Удачной игры 🎰");
+    haptic("win");
+  });
+}
+
+// ---------- ежедневный бесплатный кейс ----------
+
+let freeTimer = 0;
+
+function fmtLeft(sec) {
+  sec = Math.max(0, Math.ceil(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+// Карточка на главной и кнопка на экране кейса: «доступен» или обратный отсчёт
+function freeTick() {
+  if (!state.free) return;
+  const left = state.free.next_at - Date.now() / 1000;
+  const ready = left <= 0;
+  $("#free-card").classList.toggle("ready", ready);
+  $("#free-sub").textContent = ready ? "доступен — забирайте!" : `следующий через ${fmtLeft(left)}`;
+  $("#free-go").textContent = ready ? "Открыть" : "Скоро";
+  const btn = $("#free-btn");
+  if (btn && !btn.dataset.busy) {
+    btn.disabled = !ready;
+    btn.textContent = ready ? "Открыть бесплатно" : `Через ${fmtLeft(left)}`;
+  }
+  clearTimeout(freeTimer);
+  freeTimer = setTimeout(freeTick, 1000);
+}
+
+function freePrizePick() {
+  const prizes = state.free.prizes;
+  let r = Math.random() * 100;
+  for (const p of prizes) { r -= p.chance; if (r <= 0) return p; }
+  return prizes[0];
+}
+
+function freeEnter() {
+  if (!state.free) return;
+  const box = $("#free-prizes");
+  box.innerHTML = "";
+  state.free.prizes.slice().sort((a, b) => b.amount - a.amount).forEach((p) => {
+    const tier = prizeTier(p, 5);
+    const d = document.createElement("div");
+    d.className = tier.cls + (p.kind === "nft" ? " nft" : "");
+    const e = document.createElement("span");
+    e.className = "em";
+    const pic = prizePic(p);
+    if (pic) e.append(nftIcon(pic, "nft-inline big"));
+    else e.textContent = p.emoji;
+    const sm = document.createElement("small");
+    sm.textContent = fmtChance(p.chance);
+    if (p.kind === "nft") {
+      const t = document.createElement("span");
+      t.className = "ttl";
+      t.textContent = `${p.title} «${p.model}»`;
+      d.append(e, t, document.createTextNode("флор " + nftPrice(p.amount)), sm);
+    } else {
+      d.append(e, document.createTextNode(stars(p.amount)), sm);
+    }
+    box.append(d);
+  });
+  const items = [];
+  for (let i = 0; i < 12; i++) items.push(prizeItem(freePrizePick(), 5));
+  roll("#free-roller", items, 5, 0);
+  $("#free-result").textContent = "";
+  freeTick();
+}
+
+async function openFree() {
+  const btn = $("#free-btn");
+  if (btn.dataset.busy) return;
+  await guard(async () => {
+    btn.dataset.busy = "1";
+    btn.disabled = true;
+    try {
+      const r = await api("/api/free_case", {}, { deferBalance: true });
+      haptic();
+      const won = r.kind === "nft"
+        ? { kind: "nft", emoji: r.gift, title: r.nft.title, model: r.nft.model, amount: 1000 }
+        : { kind: "stars", emoji: "⭐", amount: r.prize };
+      const items = [];
+      for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? won : freePrizePick(), 5));
+      await roll("#free-roller", items, 50, 4200);
+      setBalance(r.balance, "stars");
+      state.free.next_at = r.next_at;
+      const res = $("#free-result");
+      res.className = "result reveal win";
+      res.textContent = r.kind === "nft"
+        ? `NFT ${r.nft.title} «${r.nft.model}»! Он в профиле → «Мои подарки»`
+        : `+${stars(r.prize)} — приходите завтра за новым кейсом`;
+      haptic("win");
+      fxBurstAt($("#free-roller"), { count: r.prize >= 25 || r.kind === "nft" ? 90 : 30 });
+    } finally {
+      delete btn.dataset.busy;
+      freeTick();
+    }
   });
 }
 
@@ -1181,7 +1312,7 @@ function upgChanceFor(stake, price) {
 }
 
 const upgChance = () => upgChanceFor(upgStake(), upg.target && upg.target.price);
-const pct = (c) => (c ? (c * 100).toFixed(c < 0.1 ? 2 : 1) : "0") + "%";
+const pct = (c) => (c ? fmtChance(c * 100) : "0%");
 
 // Автоподбор: цель с ценой ближе всего к ставке × X (дороже ставки, шанс не меньше минимального)
 function upgPick(mult) {
@@ -1205,7 +1336,7 @@ function upgUpdate() {
   const chance = upgChance();
   $("#upg-arc").style.strokeDashoffset = UPG_C * (1 - chance);
   $("#upg-chance").textContent = pct(chance);
-  $("#upg-x").textContent = stake && upg.target ? "×" + (upg.target.price / stake).toFixed(2) : "—";
+  $("#upg-x").textContent = stake && upg.target ? fmtX(upg.target.price / stake) : "—";
   const picked = upg.gifts.filter((g) => upg.chosen.has(g.id));
   const from = $("#upg-from-em");
   from.innerHTML = "";
@@ -1235,7 +1366,7 @@ function upgUpdate() {
     el.classList.toggle("off", !!stake && t.price <= stake);
     const x = el.querySelector(".x");
     const c = upgChanceFor(stake, t.price);
-    x.textContent = stake && t.price > stake ? `×${(t.price / stake).toFixed(1)} · ${pct(c)}` : "";
+    x.textContent = stake && t.price > stake ? `${fmtX(t.price / stake)} · ${pct(c)}` : "";
   });
 }
 
@@ -1369,11 +1500,11 @@ async function upgradeGo() {
         haptic("win");
         fxBurstAt(wheel, { count: 80, speed: 7 });
         $("#bigwin-label").textContent = "UPGRADE";
-        $("#bigwin-x").textContent = "×" + (r.target / r.stake).toFixed(2);
+        $("#bigwin-x").textContent = fmtX(r.target / r.stake);
         $("#bigwin-sum").textContent = `${r.nft.title} «${r.nft.model}»`;
         $("#bigwin").classList.remove("hidden");
       } else {
-        res.textContent = `Мимо: выпало ${(r.roll * 100).toFixed(1)}, нужно было меньше ${pct(r.chance)}`;
+        res.textContent = `Мимо: выпало ${fmtChance(r.roll * 100)}, нужно было меньше ${pct(r.chance)}`;
         haptic("lose");
       }
       upg.chosen.clear();
@@ -2181,7 +2312,7 @@ function renderCases() {
     if (nft) {
       const badge = document.createElement("span");
       badge.className = "case-badge";
-      badge.textContent = `NFT ${caseNftChance(c).toFixed(caseNftChance(c) < 1 ? 2 : 1)}%`;
+      badge.textContent = `NFT ${fmtChance(caseNftChance(c))}`;
       b.append(badge);
     }
     b.addEventListener("click", () => openCaseScreen(c));
@@ -2277,7 +2408,7 @@ function openCaseScreen(c) {
   hero.append(caseIcon(c, "case-ic big"));
   const nftCh = caseNftChance(c);
   $("#case-meta").innerHTML = "";
-  [c.rtp != null ? `RTP ${(c.rtp * 100).toFixed(1)}%` : null, nftCh ? `шанс NFT ${nftCh.toFixed(nftCh < 1 ? 2 : 1)}%` : null,
+  [c.rtp != null ? `RTP ${fmtChance(c.rtp * 100)}` : null, nftCh ? `шанс NFT ${fmtChance(nftCh)}` : null,
     `${c.prizes.length} призов`].filter(Boolean).forEach((txt) => {
     const s = document.createElement("span");
     s.textContent = txt;
@@ -2296,7 +2427,7 @@ function openCaseScreen(c) {
     if (pic) e.append(nftIcon(pic, "nft-inline big"));
     else e.textContent = p.emoji;
     const sm = document.createElement("small");
-    sm.textContent = (p.chance < 0.1 ? p.chance.toFixed(3) : p.chance.toFixed(2)) + "%";
+    sm.textContent = fmtChance(p.chance);
     if (p.kind === "nft") {
       d.classList.add("nft");
       const ttl = document.createElement("span");
@@ -2788,6 +2919,9 @@ function bind() {
   $("#dep-btn").addEventListener("click", () => deposit(parseInt($("#dep-amount").value, 10)));
   $("#check-btn").addEventListener("click", activateCheck);
   $("#chk-create").addEventListener("click", createCheck);
+  $("#free-btn").addEventListener("click", openFree);
+  $("#gate-open").addEventListener("click", gateOpenChannel);
+  $("#gate-check").addEventListener("click", gateCheck);
   $("#channel-btn").addEventListener("click", () => {
     const url = `https://t.me/${(state.config && state.config.channel) || "TripleGifts"}`;
     if (tg && tg.openTelegramLink) tg.openTelegramLink(url);

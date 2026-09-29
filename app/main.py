@@ -30,17 +30,11 @@ log = logging.getLogger("casino")
 
 PLAYER_COMMANDS = [
     ("start", "Открыть Triple Gifts"),
-    ("slot", "Слоты 🎰 в чате"),
-    ("deposit", "Пополнить звёздами"),
-    ("balance", "Баланс"),
-    ("check", "Создать чек"),
-    ("mychecks", "Мои чеки"),
-    ("ref", "Пригласить друзей (+10%)"),
-    ("help", "Правила"),
-    ("paysupport", "Вопросы по оплате"),
 ]
 ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("admin", "Команды администратора"),
+    ("check", "Чек (бесплатный)"),
+    ("mychecks", "Мои чеки"),
     ("checks", "Активные чеки"),
     ("revoke", "Отозвать чек"),
     ("stats", "Статистика"),
