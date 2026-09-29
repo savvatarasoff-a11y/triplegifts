@@ -422,24 +422,23 @@ class Casino:
         return {"win_id": cur.lastrowid, "title": row["collection_name"], "model": row["model"],
                 "emoji": row["emoji"] or "💎", "price": row["price"]}
 
-    # ---------- кости ----------
+    # ---------- Plinko ----------
 
-    async def dice(self, user_id: int, bet: Any, chance: Any, over: Any = False, cur: Any = money.STARS) -> dict:
+    async def plinko(self, user_id: int, bet: Any, rows: Any = 12, risk: Any = "medium", cur: Any = money.STARS) -> dict:
         cur = self._cur(cur)
         bet = self._check_bet(bet, cur)
-        if not isinstance(chance, (int, float)) or isinstance(chance, bool) or not g.dice_valid_chance(float(chance)):
-            raise GameError(f"Шанс — от {g.DICE_MIN_CHANCE} до {g.DICE_MAX_CHANCE:g}%, не больше двух знаков после точки")
-        chance = float(chance)
-        over = over is True
-        roll, won, mult = g.dice_roll(chance, over)
+        if rows not in g.PLINKO_ROWS:
+            raise GameError("Рядов — 8, 12 или 16")
+        if risk not in g.PLINKO_RISKS:
+            raise GameError("Риск — низкий, средний или высокий")
+        path, bucket, mult = g.plinko_drop(rows, risk)
         win = g.payout(bet, mult)
         async with self.db.tx() as c:
-            await self._take(c, user_id, bet, "dice", cur)
-            balance = await self._settle(
-                c, user_id, "dice", bet, win, {"roll": roll, "chance": chance, "over": over}, cur
-            )
-        return {"roll": roll, "chance": chance, "over": over, "won": won,
-                "multiplier": g.dice_multiplier(chance), "win": win, "balance": balance, "cur": cur}
+            await self._take(c, user_id, bet, "plinko", cur)
+            balance = await self._settle(c, user_id, "plinko", bet, win,
+                                         {"rows": rows, "risk": risk, "bucket": bucket, "multiplier": mult}, cur)
+        return {"path": path, "bucket": bucket, "multiplier": mult, "win": win, "rows": rows, "risk": risk,
+                "balance": balance, "cur": cur}
 
     # ---------- кейсы ----------
 

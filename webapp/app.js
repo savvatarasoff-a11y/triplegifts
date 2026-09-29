@@ -8,10 +8,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const STAR = "★";
 const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null,
   cur: "stars", bal: { stars: 0, ton: 0 } };
-const GAME_NAMES = { slots: "Слоты", dice: "Кости", mines: "Мины", crash: "Краш", case: "Кейс",
+const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
 const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
-const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", dice: "Кости",
+const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko",
   cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного фиолетового и белый: [фон, цвет текста]
 const PVP_COLORS = [["#8B5CF6", "#FFFFFF"], ["#FFFFFF", "#0B0A10"], ["#6D28D9", "#FFFFFF"], ["#C4B5FD", "#0B0A10"],
@@ -275,7 +275,7 @@ function go(screen) {
   window.scrollTo(0, 0);
   const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
     pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
-    upgrade: upgradeEnter };
+    upgrade: upgradeEnter, plinko: plinkoEnter };
   if (enter[screen]) enter[screen]();
 }
 
@@ -1298,71 +1298,168 @@ async function roll(rollerSel, items, targetIndex, duration) {
   if (target) fxBurstAt(target, { count: 24, speed: 5 });
 }
 
-// ---------- кости ----------
+// ---------- Plinko ----------
 
-let diceOver = false;
+const plk = { rows: 12, risk: "medium", balls: [], raf: 0, inFlight: 0, hits: {}, pending: 0 };
+const PLK_MAX_BALLS = 6;
 
-function diceCfg() {
-  return (state.config && state.config.dice) || { min: 0.01, max: 90, edge: 0.05 };
+function plkTable() {
+  const t = state.config && state.config.plinko && state.config.plinko.tables;
+  return t ? t[`${plk.rows}:${plk.risk}`] : null;
 }
 
-function diceChance() {
-  return Math.round(parseFloat(String($("#dice-chance-input").value).replace(",", ".")) * 100) / 100;
+function plkCanvas() {
+  const c = $("#plinko-canvas");
+  const w = c.clientWidth || 360;
+  const h = Math.round(w * 0.95);
+  const dpr = window.devicePixelRatio || 1;
+  if (c.width !== w * dpr || c.height !== h * dpr) {
+    c.width = w * dpr;
+    c.height = h * dpr;
+    c.style.height = h + "px";
+  }
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
 }
 
-function diceUpdate(fromSlider) {
-  const cfg = diceCfg();
-  if (fromSlider) $("#dice-chance-input").value = $("#dice-chance").value;
-  let chance = diceChance();
-  if (!Number.isFinite(chance)) return;
-  chance = Math.min(cfg.max, Math.max(cfg.min, chance));
-  if (!fromSlider) $("#dice-chance").value = chance;
-  const mult = Math.floor((1 - cfg.edge) * 100 / chance * 10000) / 10000;
-  $("#dice-mult").textContent = fmtX(mult);
-  const target = diceOver ? 100 - chance : chance;
-  $("#dice-cond-label").textContent = diceOver ? "Больше" : "Меньше";
-  $("#dice-under").textContent = target.toFixed(2);
-  const win = $("#dice-win");
-  win.style.left = diceOver ? target + "%" : "0";
-  win.style.width = chance + "%";
+// Геометрия поля: ряд i (0..rows-1) — i+3 штырька; лунок rows+1
+function plkGeom(w, h) {
+  const rows = plk.rows;
+  const gap = w / (rows + 2);
+  const top = gap * 0.9;
+  const rowH = (h - top - gap * 1.3) / rows;
+  const peg = (i, j) => ({ x: w / 2 + (j - (i + 2) / 2) * gap, y: top + i * rowH });
+  const bucketX = (k) => w / 2 + (k - rows / 2) * gap;
+  return { gap, top, rowH, peg, bucketX, bucketY: top + rows * rowH - rowH * 0.2 };
 }
 
-async function diceRoll() {
-  await guard(async () => {
-    const bet = getBet("dice");
-    const chance = diceChance();
-    $("#dice-btn").disabled = true;
-    try {
-      const r = await api("/api/dice", { bet, chance, over: diceOver, cur: state.cur }, { deferBalance: true });
-      showBetTaken(bet);
-      haptic();
-      const el = $("#dice-roll");
-      el.className = "dice-roll";
-      const marker = $("#dice-marker");
-      marker.style.left = r.roll + "%";
-      marker.textContent = Math.round(r.roll);
-      const start = performance.now();
-      await new Promise((resolve) => {
-        const tick = (now) => {
-          const t = Math.min(1, (now - start) / 800);
-          el.textContent = t < 1 ? (Math.random() * 100).toFixed(2) : r.roll.toFixed(2);
-          t < 1 ? requestAnimationFrame(tick) : resolve();
-        };
-        requestAnimationFrame(tick);
-      });
-      setBalance(r.balance, r.cur);
-      el.className = "dice-roll pop " + (r.won ? "win" : "lose");
-      if (r.won) {
-        toast(`${fmtX(r.multiplier)} · +${money(r.win, r.cur)}`);
-        haptic("win");
-        celebrate(bet, r.win, marker);
-      } else {
-        haptic("lose");
-      }
-    } finally {
-      $("#dice-btn").disabled = false;
+function plkColor(m) {
+  if (m >= 10) return ["#FFFFFF", "#0B0A10"];
+  if (m >= 3) return ["#C4B5FD", "#0B0A10"];
+  if (m >= 1.2) return ["#8B5CF6", "#FFFFFF"];
+  if (m >= 1) return ["#6D28D9", "#FFFFFF"];
+  return ["#2A2440", "#C4B5FD"];
+}
+
+function plkDraw(now) {
+  const { ctx, w, h } = plkCanvas();
+  const G = plkGeom(w, h);
+  ctx.clearRect(0, 0, w, h);
+  // штырьки
+  ctx.fillStyle = "rgba(237, 233, 254, .85)";
+  const pr = Math.max(2, G.gap * 0.09);
+  for (let i = 0; i < plk.rows; i++) {
+    for (let j = 0; j < i + 3; j++) {
+      const p = G.peg(i, j);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, pr, 0, Math.PI * 2);
+      ctx.fill();
     }
+  }
+  // лунки с множителями
+  const table = plkTable() || [];
+  const bw = G.gap * 0.92;
+  const bh = Math.max(20, G.gap * 0.8);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `800 ${Math.max(8, Math.min(12, G.gap * 0.34))}px Manrope, sans-serif`;
+  table.forEach((m, k) => {
+    const x = G.bucketX(k);
+    const hit = plk.hits[k] && now - plk.hits[k] < 350;
+    const [bg, fg] = plkColor(m);
+    const y = G.bucketY + (hit ? 5 : 0);
+    ctx.fillStyle = bg;
+    ctx.globalAlpha = hit ? 1 : 0.92;
+    ctx.beginPath();
+    ctx.roundRect(x - bw / 2, y, bw, bh, 6);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = fg;
+    ctx.fillText(m >= 100 ? Math.round(m) : m >= 10 ? m.toFixed(0) : String(m), x, y + bh / 2);
   });
+  // шарики
+  plk.balls.forEach((b) => {
+    const pos = plkBallPos(b, now, G);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.shadowColor = "rgba(167, 139, 250, .9)";
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, Math.max(4, G.gap * 0.17), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+}
+
+const PLK_STEP_MS = 115;
+
+// Позиция шарика: между рядами — прыжок по дуге к следующему штырьку
+function plkBallPos(b, now, G) {
+  const t = (now - b.start) / PLK_STEP_MS;
+  const step = Math.min(Math.floor(t), plk.rows);
+  const f = Math.min(1, t - step);
+  const xAt = (s) => {
+    let off = 0;
+    for (let i = 0; i < s; i++) off += b.path[i] ? 0.5 : -0.5;
+    return G.peg(0, 1).x + off * G.gap;
+  };
+  const yAt = (s) => (s >= plk.rows ? G.bucketY - G.gap * 0.2 : G.peg(s, 0).y - G.gap * 0.28);
+  if (step >= plk.rows) return { x: xAt(plk.rows), y: yAt(plk.rows) };
+  const x0 = xAt(step);
+  const x1 = xAt(step + 1);
+  const y0 = step === 0 ? G.top - G.gap * 0.9 : yAt(step);
+  const y1 = yAt(step + 1);
+  const ease = f * f;
+  return { x: x0 + (x1 - x0) * f, y: y0 + (y1 - y0) * ease - Math.sin(f * Math.PI) * G.rowH * 0.35 };
+}
+
+function plkLoop(now) {
+  const done = plk.balls.filter((b) => now - b.start >= PLK_STEP_MS * (plk.rows + 1));
+  done.forEach((b) => {
+    plk.hits[b.r.bucket] = now;
+    b.resolve();
+  });
+  plk.balls = plk.balls.filter((b) => !done.includes(b));
+  plkDraw(now);
+  const active = plk.balls.length || Object.values(plk.hits).some((t) => now - t < 400);
+  plk.raf = active && state.screen === "plinko" ? requestAnimationFrame(plkLoop) : 0;
+}
+
+function plkKick() {
+  if (!plk.raf) plk.raf = requestAnimationFrame(plkLoop);
+}
+
+function plinkoEnter() {
+  plkDraw(performance.now());
+}
+
+async function plinkoDrop() {
+  if (plk.inFlight >= PLK_MAX_BALLS) return;
+  let bet;
+  try { bet = getBet("plinko"); } catch (e) { toast(e.message, true); return; }
+  plk.inFlight += 1;
+  $$("#plinko-rows button, #plinko-risk button").forEach((b) => { b.disabled = true; });
+  try {
+    const r = await api("/api/plinko", { bet, rows: plk.rows, risk: plk.risk, cur: state.cur }, { deferBalance: true });
+    // выигрыш показываем, только когда шарик упадёт в лунку
+    state.bal[r.cur] = r.balance;
+    plk.pending += r.win;
+    showBetTaken(plk.pending);
+    haptic();
+    await new Promise((resolve) => { plk.balls.push({ path: r.path, r, start: performance.now(), resolve }); plkKick(); });
+    plk.pending -= r.win;
+    showBetTaken(plk.pending);
+    const res = $("#plinko-result");
+    res.className = "result reveal " + (r.multiplier >= 1 ? "win" : "lose");
+    res.textContent = `${fmtX(r.multiplier)} · ${r.win > bet ? "+" : ""}${money(r.win, r.cur)}`;
+    if (r.multiplier >= 1) haptic("win");
+    if (r.win >= bet * BIG_WIN_X) celebrate(bet, r.win, $("#plinko-canvas"));
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    plk.inFlight -= 1;
+    if (!plk.inFlight) $$("#plinko-rows button, #plinko-risk button").forEach((b) => { b.disabled = false; });
+  }
 }
 
 // ---------- мины ----------
@@ -2255,15 +2352,19 @@ function bind() {
   $("#dep-btn").addEventListener("click", () => deposit(parseInt($("#dep-amount").value, 10)));
   $("#check-btn").addEventListener("click", activateCheck);
   $("#slots-spin").addEventListener("click", slotsSpin);
-  $("#dice-chance").addEventListener("input", () => diceUpdate(true));
-  $("#dice-chance-input").addEventListener("input", () => diceUpdate(false));
-  $$("#dice-mode button").forEach((b) => b.addEventListener("click", () => {
-    diceOver = b.dataset.over === "1";
-    $$("#dice-mode button").forEach((x) => x.classList.toggle("sel", x === b));
-    diceUpdate(false);
+  $("#plinko-btn").addEventListener("click", plinkoDrop);
+  $$("#plinko-risk button").forEach((b) => b.addEventListener("click", () => {
+    plk.risk = b.dataset.risk;
+    $$("#plinko-risk button").forEach((x) => x.classList.toggle("sel", x === b));
     haptic();
+    plinkoEnter();
   }));
-  $("#dice-btn").addEventListener("click", diceRoll);
+  $$("#plinko-rows button").forEach((b) => b.addEventListener("click", () => {
+    plk.rows = Number(b.dataset.rows);
+    $$("#plinko-rows button").forEach((x) => x.classList.toggle("sel", x === b));
+    haptic();
+    plinkoEnter();
+  }));
   $$("#mines-seg button").forEach((b) => b.addEventListener("click", () => {
     minesCount = parseInt(b.dataset.m, 10);
     $$("#mines-seg button").forEach((x) => x.classList.toggle("sel", x === b));
@@ -2330,7 +2431,6 @@ async function init() {
   }
   betBoxes();
   bind();
-  diceUpdate(false);
   minesRender(null);
   slotsIdle();
   if (!tg || !tg.initData) {
@@ -2343,7 +2443,6 @@ async function init() {
     $$("#cur-switch button").forEach((x) => x.classList.toggle("sel", x.dataset.cur === "ton"));
     setCurrency("ton");
   }
-  diceUpdate(false);
   minesPreview();
   renderPaytable();
   renderPresets();

@@ -29,25 +29,13 @@ def test_slots_multiplier_rules():
     assert g.slots_multiplier(["bar", "grape", "lemon"]) == 0
 
 
-def test_dice_expected_value():
-    for chance in (0.01, 1, 10, 49.5, 50, 90):
-        ev = chance / 100 * g.dice_multiplier(chance)
-        assert ev == pytest.approx(0.95, abs=0.001)
-    assert g.dice_multiplier(50) == 1.9 and g.dice_multiplier(0.01) == 9500
-    for bad in (0, 90.01, 1.001):
-        with pytest.raises(ValueError):
-            g.dice_roll(bad)
-
-
-def test_dice_roll_under_and_over():
-    rng = random.Random(1)
-    for _ in range(1000):
-        roll, win, mult = g.dice_roll(50, False, rng)
-        assert 0 <= roll < 100 and win == (roll < 50) and mult == (1.9 if win else 0)
-        roll, win, _ = g.dice_roll(25, True, rng)
-        assert win == (roll >= 75)
-    # «больше» с шансом 0.01% выигрывает ровно на 99.99
-    assert sum(g.dice_roll(0.01, True, random.Random(i))[1] for i in range(3000)) < 5
+def test_plinko_tables():
+    for (rows, risk), table in g.PLINKO_TABLES.items():
+        assert len(table) == rows + 1 and table == table[::-1]                  # симметрия
+        assert sum(g.plinko_probs(rows)) == pytest.approx(1)
+        assert 0.92 < g.plinko_rtp(rows, risk) <= g.PLINKO_RTP                 # ≈ 93%, не выше 94%
+    path, bucket, mult = g.plinko_drop(12, "medium")
+    assert len(path) == 12 and bucket == sum(path) and mult == g.PLINKO_TABLES[(12, "medium")][bucket]
 
 
 def test_mines_multiplier_expected_value():

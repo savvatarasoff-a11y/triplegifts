@@ -65,15 +65,15 @@ async def test_games_in_ton(casino, monkeypatch):
     db = casino.db
     await db.credit_ton("d", 1, 10 * NANO)
     with pytest.raises(GameError, match="0.01 TON"):
-        await casino.dice(1, NANO // 1000, 50.0, cur="ton")
-    monkeypatch.setattr(g, "dice_roll", lambda chance, over=False, rng=None: (10.0, True, g.dice_multiplier(chance)))
-    r = await casino.dice(1, NANO, 50.0, cur="ton")
+        await casino.plinko(1, NANO // 1000, 8, "low", cur="ton")
+    monkeypatch.setattr(g, "plinko_drop", lambda rows, risk, rng=None: ([0] * rows, 0, 1.9))
+    r = await casino.plinko(1, NANO, 8, "low", cur="ton")
     assert r["cur"] == "ton" and r["win"] == int(NANO * 1.9) and r["balance"] == 9 * NANO + int(NANO * 1.9)
     assert (await db.get_user(1))["balance"] == 0 and (await db.get_user(1))["ton_wagered"] == NANO
     with pytest.raises(GameError, match="TON"):
-        await casino.dice(2, NANO, 50.0, cur="ton")                               # у игрока 2 нет TON
+        await casino.plinko(2, NANO, 8, "low", cur="ton")                               # у игрока 2 нет TON
     with pytest.raises(GameError):
-        await casino.dice(1, NANO, 50.0, cur="btc")
+        await casino.plinko(1, NANO, 8, "low", cur="btc")
     m = await casino.mines_start(1, NANO, 3, cur="ton")
     assert m["cur"] == "ton"
     bets = await db.all("SELECT cur FROM bets")

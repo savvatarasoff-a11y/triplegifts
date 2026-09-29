@@ -195,7 +195,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "deposit_presets": DEPOSIT_PRESETS,
                 "slots": {"symbols": g.SLOT_SYMBOLS, "777": g.SLOT_777, "triple": g.SLOT_TRIPLE,
                           "two_sevens": g.SLOT_TWO_SEVENS, "pair": g.SLOT_PAIR, "jackpot_nft": True},
-                "dice": {"min": g.DICE_MIN_CHANCE, "max": g.DICE_MAX_CHANCE, "edge": g.HOUSE_EDGE},
+                "plinko": {"rows": list(g.PLINKO_ROWS), "risks": list(g.PLINKO_RISKS),
+                           "tables": {f"{r}:{k}": t for (r, k), t in g.PLINKO_TABLES.items()}},
                 "cases": [
                     {**{k: c[k] for k in ("id", "name", "emoji", "price")},
                      "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity",
@@ -267,11 +268,11 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
         return web.json_response(result)
 
-    @routes.post("/api/dice")
-    async def dice(request: web.Request) -> web.Response:
+    @routes.post("/api/plinko")
+    async def plinko(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.dice(request[USER_ID], data.get("bet"), data.get("chance"),
-                                                   data.get("over", False), data.get("cur")))
+        return web.json_response(await casino.plinko(request[USER_ID], data.get("bet"), data.get("rows", 12),
+                                                     data.get("risk", "medium"), data.get("cur")))
 
     @routes.post("/api/case")
     async def open_case(request: web.Request) -> web.Response:

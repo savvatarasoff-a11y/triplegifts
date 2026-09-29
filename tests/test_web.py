@@ -157,8 +157,8 @@ async def test_play_and_errors(client):
     assert r.status == 400 and "Максимальная" in (await r.json())["error"]
     r = await client.post("/api/slots", headers=auth(), data="not json")
     assert r.status == 400
-    r = await client.post("/api/dice", headers=auth(), json={"bet": 1, "chance": 50})
-    assert r.status == 200
+    r = await client.post("/api/plinko", headers=auth(), json={"bet": 1, "rows": 8, "risk": "high"})
+    assert r.status == 200 and len((await r.json())["path"]) == 8
     r = await client.post("/api/mines/start", headers=auth(), json={"bet": 1, "mines": 3})
     assert r.status == 200
     r = await client.get("/api/mines", headers=auth())
@@ -170,8 +170,8 @@ async def test_play_and_errors(client):
     assert st["round"]["phase"] == "betting" and st["players"][0]["bet"] == 1
     r = await client.get("/api/pvp", headers=auth())
     assert r.status == 200
-    r = await client.post("/api/dice", headers=auth(), json={"bet": 1, "chance": 12.5, "over": True})
-    assert (await r.json())["multiplier"] == 7.6
+    r = await client.post("/api/plinko", headers=auth(), json={"bet": 1, "rows": 9})
+    assert r.status == 400
     assert (await client.get("/api/feed", headers=auth())).status == 200
 
 

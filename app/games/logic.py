@@ -58,28 +58,53 @@ def slots_rtp() -> float:
     return sum(slots_multiplier(slots_reels(v)) for v in range(1, 65)) / 64
 
 
-# ---------------- Кости (Dice) ----------------
+# ---------------- Plinko ----------------
 
-DICE_MIN_CHANCE = 0.01
-DICE_MAX_CHANCE = 90.0
+PLINKO_RTP = 0.94          # возврат игроку в Plinko (комиссия 6%)
+PLINKO_ROWS = (8, 12, 16)
+PLINKO_RISKS = ("low", "medium", "high")
+# Классические таблицы Plinko (левая половина + центр, симметричны); ниже масштабируются до PLINKO_RTP
+_PLINKO_BASE = {
+    (8, "low"): (5.6, 2.1, 1.1, 1, 0.5),
+    (8, "medium"): (13, 3, 1.3, 0.7, 0.4),
+    (8, "high"): (29, 4, 1.5, 0.3, 0.2),
+    (12, "low"): (10, 3, 1.6, 1.4, 1.1, 1, 0.5),
+    (12, "medium"): (33, 11, 4, 2, 1.1, 0.6, 0.3),
+    (12, "high"): (170, 24, 8.1, 2, 0.7, 0.2, 0.2),
+    (16, "low"): (16, 9, 2, 1.4, 1.4, 1.2, 1.1, 1, 0.5),
+    (16, "medium"): (110, 41, 10, 5, 3, 1.5, 1, 0.5, 0.3),
+    (16, "high"): (1000, 130, 26, 9, 4, 2, 0.2, 0.2, 0.2),
+}
 
 
-def dice_valid_chance(chance: float) -> bool:
-    return DICE_MIN_CHANCE <= chance <= DICE_MAX_CHANCE and round(chance, 2) == chance
+def plinko_probs(rows: int) -> list[float]:
+    """Вероятность попасть в лунку k: C(n, k) / 2ⁿ (шарик n раз отскакивает влево или вправо)."""
+    return [math.comb(rows, k) / 2 ** rows for k in range(rows + 1)]
 
 
-def dice_multiplier(chance: float) -> float:
-    """Шанс 50% -> ×1.9, 1% -> ×95, 0.01% -> ×9500."""
-    return math.floor((1 - HOUSE_EDGE) * 100 / chance * 10000) / 10000
+def _plinko_scale(rows: int, half: tuple[float, ...]) -> list[float]:
+    full = list(half) + list(reversed(half[:-1]))
+    rtp = sum(p * m for p, m in zip(plinko_probs(rows), full))
+    f = PLINKO_RTP / rtp
+    # округляем вниз: 2 знака до ×10, 1 знак до ×100, дальше целые — RTP не превышает PLINKO_RTP
+    def rnd(x: float) -> float:
+        step = 0.01 if x < 10 else 0.1 if x < 100 else 1
+        return round(math.floor(x * f / step + 1e-9) * step, 2)
+    return [rnd(m) for m in full]
 
 
-def dice_roll(chance: float, over: bool = False, rng: random.Random = RNG) -> tuple[float, bool, float]:
-    """Выпадает число 0.00–99.99. «Меньше»: выигрыш при roll < шанс; «больше»: при roll ≥ 100 − шанс."""
-    if not dice_valid_chance(chance):
-        raise ValueError("chance")
-    roll = rng.randrange(10000) / 100
-    win = roll >= round(100 - chance, 2) if over else roll < chance
-    return roll, win, dice_multiplier(chance) if win else 0.0
+PLINKO_TABLES = {key: _plinko_scale(key[0], half) for key, half in _PLINKO_BASE.items()}
+
+
+def plinko_rtp(rows: int, risk: str) -> float:
+    return sum(p * m for p, m in zip(plinko_probs(rows), PLINKO_TABLES[(rows, risk)]))
+
+
+def plinko_drop(rows: int, risk: str, rng: random.Random = RNG) -> tuple[list[int], int, float]:
+    """(путь 0=влево/1=вправо, лунка, множитель)."""
+    path = [rng.randrange(2) for _ in range(rows)]
+    bucket = sum(path)
+    return path, bucket, PLINKO_TABLES[(rows, risk)][bucket]
 
 
 # ---------------- Мины ----------------

@@ -93,15 +93,15 @@ async def test_slots_balance_consistent(casino):
     assert ledger_sum == await balance(casino, 1)
 
 
-async def test_dice(casino):
+async def test_plinko(casino):
     await fund(casino, 1, 1000)
-    r = await casino.dice(1, 10, 50)
-    assert r["win"] in (0, 19)
-    r = await casino.dice(1, 100, 0.5, over=True)
-    assert r["win"] in (0, 19000) and r["over"] is True
-    for bad in (91, 0, 1.234, "50", True):
+    r = await casino.plinko(1, 100, 16, "high")
+    assert len(r["path"]) == 16 and r["bucket"] == sum(r["path"])
+    assert r["multiplier"] == g.PLINKO_TABLES[(16, "high")][r["bucket"]] and r["win"] == g.payout(100, r["multiplier"])
+    assert r["balance"] == 900 + r["win"]
+    for rows, risk in ((10, "low"), (8, "insane"), ("8", "low")):
         with pytest.raises(GameError):
-            await casino.dice(1, 10, bad)
+            await casino.plinko(1, 10, rows, risk)
     with pytest.raises(GameError):
         await casino.mines_start(1, 10, 1)
 
