@@ -336,6 +336,7 @@ function refShare() {
 // ---------- профиль ----------
 
 async function profileEnter() {
+  loadVip();
   try {
     const [p, me] = await Promise.all([api("/api/profile"), loadMe()]);
     const av = $("#prof-av");
@@ -447,6 +448,135 @@ async function loadMe() {
 async function homeEnter() {
   try { await loadMe(); } catch (e) { toast(e.message, true); }
   loadTicker();
+  loadVip();
+  loadLeaders();
+}
+
+// ---------- VIP-уровень, рейкбек, ежедневный бонус ----------
+
+const vipState = { data: null, timer: 0 };
+const pctText = (x) => `${Number((x * 100).toFixed(2))}%`;
+const hms = (s) => {
+  s = Math.max(0, Math.ceil(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+};
+
+function renderBonus() {
+  const v = vipState.data;
+  if (!v) return;
+  const b = v.bonus;
+  const card = $("#bonus-card");
+  const btn = $("#bonus-btn");
+  card.classList.toggle("ready", b.allowed && b.ready);
+  btn.disabled = !b.allowed || !b.ready;
+  if (!b.allowed) {
+    $("#bonus-sub").textContent = "Откроется после первого пополнения";
+    btn.textContent = "🔒";
+  } else if (b.ready) {
+    $("#bonus-sub").textContent = "До 100 ★ — забирайте каждый день";
+    btn.textContent = "Забрать";
+  } else {
+    const left = b.in - (performance.now() - vipState.at) / 1000;
+    $("#bonus-sub").textContent = `Следующий через ${hms(left)}`;
+    btn.textContent = "Ждём";
+    if (left <= 0) { b.ready = true; renderBonus(); }
+  }
+}
+
+function renderVip() {
+  const v = vipState.data;
+  if (!v || !$("#vip-card")) return;
+  $("#vip-em").textContent = v.emoji;
+  $("#vip-name").textContent = `Уровень: ${v.name}`;
+  $("#vip-rb").textContent = `рейкбек ${pctText(v.rakeback)} с каждой ставки`;
+  const from = v.levels[v.level].at;
+  $("#vip-fill").style.width = v.next ? `${Math.min(100, (v.points - from) / (v.next.at - from) * 100)}%` : "100%";
+  $("#vip-next").textContent = v.next
+    ? `До «${v.next.name}» (${pctText(v.next.rakeback)}) — ещё ${fmt(v.next.at - v.points)} ★ ставок`
+    : "Максимальный уровень";
+  const rake = [v.rake.stars ? stars(v.rake.stars) : "", v.rake.ton >= 1e7 ? money(v.rake.ton, "ton") : ""].filter(Boolean).join(" + ");
+  const btn = $("#rake-btn");
+  btn.textContent = rake ? `Забрать ${rake}` : "Копится…";
+  btn.disabled = !rake;
+  const box = $("#vip-levels");
+  box.innerHTML = "";
+  v.levels.forEach((lv, i) => {
+    const d = document.createElement("div");
+    d.className = i === v.level ? "cur" : "";
+    d.innerHTML = `<span>${lv.emoji}</span>${pctText(lv.rakeback)}`;
+    d.title = `${lv.name}: от ${fmt(lv.at)} ★ ставок`;
+    box.append(d);
+  });
+}
+
+async function loadVip() {
+  try {
+    vipState.data = await api("/api/vip");
+    vipState.at = performance.now();
+    renderBonus();
+    renderVip();
+    clearInterval(vipState.timer);
+    vipState.timer = setInterval(() => { if (state.screen === "home") renderBonus(); }, 1000);
+  } catch (e) { /* не критично */ }
+}
+
+async function claimBonus() {
+  await guard(async () => {
+    const ic = $("#bonus-ic");
+    ic.classList.add("spin");
+    const r = await api("/api/bonus", {}, { deferBalance: true });
+    // короткая «рулетка» суммы
+    for (let i = 0; i < 14; i++) {
+      ic.textContent = String(r.table[Math.floor(Math.random() * r.table.length)]);
+      await sleep(60 + i * 12);
+    }
+    ic.classList.remove("spin");
+    ic.textContent = `+${r.amount}`;
+    setBalance(r.balance, "stars");
+    toast(`Ежедневный бонус: +${stars(r.amount)}`);
+    haptic("win");
+    fxBurstAt($("#bonus-card"), { count: 40, speed: 5 });
+    await loadVip();
+    setTimeout(() => { ic.textContent = "🎁"; }, 2500);
+  });
+}
+
+async function claimRakeback() {
+  await guard(async () => {
+    const r = await api("/api/vip/rakeback", {});
+    if (r.ton) state.bal.ton += r.ton;
+    toast(`Рейкбек: +${[r.stars ? stars(r.stars) : "", r.ton ? money(r.ton, "ton") : ""].filter(Boolean).join(" + ")}`);
+    haptic("win");
+    fxBurstAt($("#rake-btn"), { count: 30 });
+    await loadVip();
+    renderBalance();
+  });
+}
+
+async function loadLeaders() {
+  try {
+    const lb = await api("/api/leaders");
+    const box = $("#leaders");
+    box.innerHTML = "";
+    if (!lb.top.length) box.innerHTML = '<div class="note">На этой неделе ещё никто не играл — станьте первым!</div>';
+    lb.top.slice(0, 7).forEach((p, i) => {
+      const row = document.createElement("div");
+      row.className = "pl" + (state.me && p.id === state.me.user.id ? " me" : "");
+      const place = document.createElement("span");
+      place.className = "place";
+      place.textContent = i < 3 ? ["🥇", "🥈", "🥉"][i] : String(i + 1);
+      const nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = p.name;
+      const am = document.createElement("span");
+      am.className = "am";
+      am.textContent = stars(p.points);
+      row.append(place, avatarEl(p, "av", PVP_COLORS[p.id % PVP_COLORS.length]), nm, am);
+      box.append(row);
+    });
+    $("#lb-me").textContent = lb.me ? `вы #${lb.me.place}` : "";
+  } catch (e) { /* не критично */ }
 }
 
 function historyRow(label, value, positive) {
@@ -2353,6 +2483,8 @@ function bind() {
   $("#check-btn").addEventListener("click", activateCheck);
   $("#slots-spin").addEventListener("click", slotsSpin);
   $("#plinko-btn").addEventListener("click", plinkoDrop);
+  $("#bonus-btn").addEventListener("click", claimBonus);
+  $("#rake-btn").addEventListener("click", claimRakeback);
   $$("#plinko-risk button").forEach((b) => b.addEventListener("click", () => {
     plk.risk = b.dataset.risk;
     $$("#plinko-risk button").forEach((x) => x.classList.toggle("sel", x === b));

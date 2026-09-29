@@ -69,11 +69,22 @@
         <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT внутри</span><span class="gn">Кейсы</span></button>
       </div>
 
+      <div class="bonus-card" id="bonus-card">
+        <div class="bonus-ic" id="bonus-ic">🎁</div>
+        <div class="bonus-t"><b>Ежедневный бонус</b><small id="bonus-sub">до 100 ★ каждый день</small></div>
+        <button class="btn small" id="bonus-btn">Забрать</button>
+      </div>
+
       <button class="promo" data-go="ref">
         <span class="promo-x">10%</span>
         <span class="promo-t"><b>Приглашай друзей</b><small>и получай 10% от их пополнений</small></span>
         <span class="promo-go">›</span>
       </button>
+
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title">🏆 Лидеры недели</div><span class="muted" id="lb-me"></span></div>
+        <div class="plist" id="leaders"></div>
+      </div>
 
       <div class="panel">
         <div class="panel-title">Активировать чек</div>
@@ -211,6 +222,16 @@
           <button class="btn" data-wallet="dep">Пополнить</button>
           <button class="btn small" data-wallet="out">Вывести</button>
         </div>
+      </div>
+      <div class="vip-card" id="vip-card">
+        <div class="vip-top">
+          <span class="vip-em" id="vip-em">🥉</span>
+          <div class="vip-t"><b id="vip-name">Новичок</b><small id="vip-rb">рейкбек 0.2% с каждой ставки</small></div>
+          <button class="btn small" id="rake-btn">Забрать</button>
+        </div>
+        <div class="vip-bar"><i id="vip-fill"></i></div>
+        <small class="vip-next" id="vip-next"></small>
+        <div class="vip-levels" id="vip-levels"></div>
       </div>
       <div class="stats">
         <div class="stat"><small>Игр сыграно</small><b id="prof-games">0</b></div>

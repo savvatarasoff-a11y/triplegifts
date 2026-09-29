@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator
 import aiosqlite
 
 from . import money
+from .games import logic as g
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -257,6 +258,10 @@ class Database:
         for table in ("ledger", "bets", "payments", "mines_games", "crash_bets", "pvp_rounds"):
             await self._add_columns(table, {"cur": "TEXT NOT NULL DEFAULT 'stars'"})
         await self._add_columns("crash_bets", {"gifts": "TEXT"})   # JSON: NFT, поставленные в краш
+        # рейкбек копится с каждой ставки: звёзды — в тысячных долях звезды, TON — в nanoTON
+        await self._add_columns("users", {"rake_milli": "INTEGER NOT NULL DEFAULT 0",
+                                          "rake_ton": "INTEGER NOT NULL DEFAULT 0",
+                                          "bonus_at": "REAL NOT NULL DEFAULT 0"})
         await self.conn.executescript(TON_SCHEMA)
 
     async def _add_columns(self, table: str, columns: dict[str, str]) -> None:
@@ -374,6 +379,16 @@ class Database:
         await c.execute(
             f"UPDATE users SET {wagered} = {wagered} + ?, {won} = {won} + ? WHERE id=?", (bet, win, user_id)
         )
+        # рейкбек по VIP-уровню: доля ставки копится и забирается в профиле
+        async with c.execute("SELECT wagered, ton_wagered FROM users WHERE id=?", (user_id,)) as q:
+            row = await q.fetchone()
+        if row:
+            pct = g.LEVELS[g.level_for(g.level_points(row["wagered"], row["ton_wagered"]))][3]
+            if cur == money.STARS:
+                await c.execute("UPDATE users SET rake_milli = rake_milli + ? WHERE id=?",
+                                (int(bet * pct * 1000), user_id))
+            else:
+                await c.execute("UPDATE users SET rake_ton = rake_ton + ? WHERE id=?", (int(bet * pct), user_id))
 
     # ---------- платежи ----------
 

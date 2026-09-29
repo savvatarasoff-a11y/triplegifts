@@ -428,3 +428,51 @@ async def test_profile(casino):
     await casino.db.credit_payment("p", 1, 100)
     p = await casino.profile(1)
     assert p["deposited"] == 100 and p["games"] == 0 and p["best"] is None
+
+
+async def test_vip_rakeback(casino, monkeypatch):
+    db = casino.db
+    await fund(casino, 1, 20_000)
+    v = await casino.vip(1)
+    assert v["level"] == 0 and v["rakeback"] == 0.002 and v["next"]["at"] == 2_000
+    monkeypatch.setattr(g, "plinko_drop", lambda rows, risk, rng=None: ([0] * rows, 0, 0.0))
+    for _ in range(3):
+        await casino.plinko(1, 1000, 8, "low")                     # 3000 ставок: 0.2% → 0.4% после 2000
+    v = await casino.vip(1)
+    assert v["level"] == 1 and v["points"] == 3000
+    # 1000·0.2% + 1000·0.4% (уровень поднялся после 2-й ставки) + 1000·0.4% = 2 + 4 + 4 = 10 ⭐
+    assert v["rake"]["stars"] == 10
+    r = await casino.claim_rakeback(1)
+    assert r["stars"] == 10 and r["balance"] == 20_000 - 3000 + 10
+    with pytest.raises(GameError, match="копится"):
+        await casino.claim_rakeback(1)
+    assert (await casino.wager_status(1))["left"] == 0             # рейкбек не нужно отыгрывать
+    # рейкбек никогда не больше комиссии казино: максимум 1% при минимальной комиссии 5%
+    assert max(lv[3] for lv in g.LEVELS) <= 0.05 / 5
+
+
+async def test_daily_bonus(casino, monkeypatch):
+    with pytest.raises(GameError, match="пополнения"):
+        await casino.daily_bonus(1)                                # без пополнений — нельзя (против фарма)
+    await fund(casino, 1, 10)
+    monkeypatch.setattr(g, "daily_bonus_roll", lambda rng=None: 25)
+    r = await casino.daily_bonus(1)
+    assert r["amount"] == 25 and r["balance"] == 35
+    with pytest.raises(GameError, match="уже получен"):
+        await casino.daily_bonus(1)
+    assert (await casino.wager_status(1))["left"] == 25            # бонус нужно отыграть
+    await casino.db.conn.execute("UPDATE users SET bonus_at=0 WHERE id=1")
+    assert (await casino.daily_bonus(1))["amount"] == 25           # через сутки снова
+    assert 3 < g.daily_bonus_ev() < 5
+
+
+async def test_leaders(casino):
+    await fund(casino, 1, 1000)
+    await fund(casino, 2, 1000)
+    await casino.plinko(1, 100, 8, "low")
+    await casino.plinko(2, 300, 8, "low")
+    await casino.db.credit_ton("t", 3, 10 ** 9 * 5)
+    await casino.plinko(3, 5 * 10 ** 9, 8, "low", cur="ton")       # 5 TON = 500 очков
+    lb = await casino.leaders(1)
+    assert [p["id"] for p in lb["top"]] == [3, 2, 1] and lb["top"][0]["points"] == 500
+    assert lb["me"]["place"] == 3

@@ -377,3 +377,39 @@ def hockey_shot(zone: tuple[float, float], rng: random.Random = RNG) -> dict:
     points.append([round(tx, 3), round(ty, 3)])
     return {"field": [HOCKEY_W, HOCKEY_H], "points": points, "length": round(dist, 3),
             "angle": round(math.degrees(math.atan2(iy - sy, ix - sx)), 1)}
+
+
+# ---------------- VIP-уровни, рейкбек, ежедневный бонус ----------------
+
+# Уровень — по сумме ставок (TON считаются как LEVEL_TON_STARS звёзд за 1 TON).
+# Рейкбек — доля каждой ставки, которая возвращается игроку. Максимум 1% — это 1/5 самой
+# маленькой комиссии казино (5% в PvP и краше), так что казино в плюсе в любой игре.
+LEVEL_TON_STARS = 100
+LEVELS = (
+    # (название, эмодзи, ставок от, рейкбек)
+    ("Новичок", "🥉", 0, 0.002),
+    ("Серебро", "🥈", 2_000, 0.004),
+    ("Золото", "🥇", 10_000, 0.006),
+    ("Платина", "💠", 50_000, 0.008),
+    ("Бриллиант", "💎", 200_000, 0.01),
+)
+
+DAILY_BONUS_EVERY = 24 * 3600
+# ежедневный бонус: (звёзд, вес) — в среднем ≈ 4.2 ⭐, 100 ⭐ выпадает в 0.5% случаев
+DAILY_BONUS = ((1, 380), (2, 250), (3, 150), (5, 110), (10, 70), (25, 25), (50, 10), (100, 5))
+
+
+def level_points(wagered_stars: int, wagered_ton_nano: int) -> int:
+    return wagered_stars + wagered_ton_nano * LEVEL_TON_STARS // 1_000_000_000
+
+
+def level_for(points: int) -> int:
+    return max(i for i, lv in enumerate(LEVELS) if points >= lv[2])
+
+
+def daily_bonus_roll(rng: random.Random = RNG) -> int:
+    return pick_weighted([a for a, _ in DAILY_BONUS], [w for _, w in DAILY_BONUS], rng)
+
+
+def daily_bonus_ev() -> float:
+    return expected_value([(a, w) for a, w in DAILY_BONUS])

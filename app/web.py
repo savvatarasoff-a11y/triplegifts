@@ -351,6 +351,22 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         await notify_admins_ton(bot, cfg, casino, wd)
         return web.json_response(wd)
 
+    @routes.get("/api/vip")
+    async def vip(request: web.Request) -> web.Response:
+        return web.json_response(await casino.vip(request[USER_ID]))
+
+    @routes.post("/api/vip/rakeback")
+    async def rakeback(request: web.Request) -> web.Response:
+        return web.json_response(await casino.claim_rakeback(request[USER_ID]))
+
+    @routes.post("/api/bonus")
+    async def daily_bonus(request: web.Request) -> web.Response:
+        return web.json_response(await casino.daily_bonus(request[USER_ID]))
+
+    @routes.get("/api/leaders")
+    async def leaders(request: web.Request) -> web.Response:
+        return web.json_response(await casino.leaders(request[USER_ID]))
+
     @routes.get("/api/profile")
     async def profile(request: web.Request) -> web.Response:
         return web.json_response(await casino.profile(request[USER_ID]))
