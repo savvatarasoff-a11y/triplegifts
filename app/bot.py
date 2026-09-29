@@ -588,6 +588,34 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "Теперь замените секрет <b>BOT_TOKEN</b> в GitHub на новый токен и перезапустите хостинг — "
             "новый бот подхватит релейер без повторного входа. Сообщение с токеном я удалил.")
 
+    @admin.message(Command("relayer_restore"))
+    async def relayer_restore(message: Message, command: CommandObject) -> None:
+        """Бота сменили без /rekey: вернуть релейер, расшифровав его настройки токеном старого бота."""
+        import re
+        token = (command.args or "").strip()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        if not re.fullmatch(r"\d+:[A-Za-z0-9_-]{30,}", token):
+            await message.answer("Формат: <code>/relayer_restore токен_старого_бота</code> (есть в @BotFather)")
+            return
+        if relayer is None:
+            await message.answer("Релейер не настроен.")
+            return
+        count = await relayer.restore_from_token(token)
+        if count < 3:
+            await message.answer(f"⚠️ Этим токеном расшифровано {count} из 3 настроек — это не токен старого бота? "
+                                 "Можно войти заново: /relayer")
+            return
+        if await relayer.start():
+            if on_relayer_ready:
+                on_relayer_ready()
+            await message.answer(f"✅ Релейер снова подключён: {html.escape(await relayer.me() or '')}\n"
+                                 "Сообщение с токеном я удалил.")
+        else:
+            await message.answer("⚠️ Настройки восстановлены, но сессия релейера недействительна — войдите заново: /relayer")
+
     @admin.message(Command("rebrand"))
     async def rebrand(message: Message, command: CommandObject, bot: Bot) -> None:
         """Переименование в Triple Gifts: бот (имя) и аккаунт-релейер (имя, описание, аватарка, юзернейм)."""

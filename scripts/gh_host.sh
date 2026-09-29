@@ -4,7 +4,7 @@
 set -uo pipefail
 
 RUN_SECONDS="${RUN_SECONDS:-20400}"      # 5 ч 40 мин, лимит задачи Actions — 6 ч
-BACKUP_EVERY="${BACKUP_EVERY:-60}"
+BACKUP_EVERY="${BACKUP_EVERY:-30}"
 DATA_DIR="$PWD/data"
 REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 mkdir -p "$DATA_DIR"
@@ -72,7 +72,9 @@ while [ -z "$STOP" ] && [ $SECONDS -lt $END ] && kill -0 $BOT_PID 2>/dev/null; d
   fi
 done
 
-# 4. Корректная остановка: следующий запуск уже ждёт в очереди
+# 4. Корректная остановка: следующий запуск уже ждёт в очереди.
+# Сначала снимок базы (SQLite backup API работает на живой базе) — после отмены у нас всего несколько секунд
+[ -n "$STOP" ] && [ -f "$DATA_DIR/bot.db" ] && backup
 echo "Останавливаю бота"
 kill -TERM $BOT_PID 2>/dev/null
 wait $BOT_PID

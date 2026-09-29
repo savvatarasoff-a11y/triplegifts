@@ -71,6 +71,22 @@ class Relayer:
             log.warning("Не удалось расшифровать настройки релейера (сменился токен бота?)")
         return None
 
+    async def restore_from_token(self, old_token: str) -> int:
+        """После смены бота: расшифровывает настройки релейера старым токеном и перешифровывает текущим."""
+        f = _fernet(old_token)
+        done = 0
+        for key in ("api_id", "api_hash", "session"):
+            raw = await self.db.kv_get(f"relayer:{key}")
+            if raw is None:
+                continue
+            try:
+                value = f.decrypt(raw.encode()).decode()
+            except InvalidToken:
+                continue
+            await self._set(key, value)
+            done += 1
+        return done
+
     async def stage_rekey(self, new_token: str) -> int:
         """Перед сменой бота: копия настроек релейера, зашифрованная ключом нового токена.
 

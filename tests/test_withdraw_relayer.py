@@ -136,3 +136,19 @@ async def test_relayer_survives_bot_token_change(tmp_path):
     assert await db.kv_get("relayer_next:session") is None         # копия перенесена в основные настройки
     assert await Relayer(db, "222:new-token")._get("api_hash") == "hash"
     await db.close()
+
+
+async def test_relayer_restore_with_old_token(tmp_path):
+    from app.db import Database
+    from app.relayer import Relayer
+    db = Database(str(tmp_path / "r2.db"))
+    await db.connect()
+    old = Relayer(db, "111:old-token")
+    await old.set_api(12345, "hash")
+    await old._set("session", "SESSION")
+    new = Relayer(db, "222:new-token")
+    assert await new._get("session") is None                       # новый бот старые настройки не читает
+    assert await new.restore_from_token("333:wrong") == 0
+    assert await new.restore_from_token("111:old-token") == 3
+    assert await Relayer(db, "222:new-token")._get("session") == "SESSION"
+    await db.close()
