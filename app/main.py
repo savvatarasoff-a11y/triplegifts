@@ -103,6 +103,7 @@ async def top_up_demo(casino: Casino, relayer: Relayer) -> None:
     # неулучшенный подарок на MRKT: вместо имени модели — число (id подарка)
     async with casino.db.tx() as c:
         await c.execute("UPDATE nft_models SET enabled=0 WHERE test=1 AND enabled=1 AND model NOT GLOB '*[^0-9]*'")
+        await c.execute("DELETE FROM user_gifts WHERE test=1 AND status='owned' AND model NOT GLOB '*[^0-9]*'")
     if not relayer.ready:
         return
     for m in await casino.db.all("SELECT id, collection_name, model FROM nft_models WHERE test=1 AND enabled=1"):
