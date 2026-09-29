@@ -12,6 +12,7 @@ import aiosqlite
 from .config import Config
 from .db import Database, InsufficientFunds
 from .games import logic as g
+from .nft import PRICE_MAX_AGE as NFT_PRICE_MAX_AGE
 
 CRASH_BETTING_SECONDS = 7   # приём ставок перед стартом ракеты
 CRASH_PAUSE_SECONDS = 3     # пауза после краша
@@ -216,18 +217,54 @@ class Casino:
     # ---------- слоты ----------
 
     async def slots(self, user_id: int, bet: Any, value: int | None = None) -> dict:
-        """value — исход 1–64 (например, от 🎰 Telegram в чате); без него выпадает случайно на сервере."""
+        """value — исход 1–64 (например, от 🎰 Telegram в чате); без него выпадает случайно на сервере.
+
+        7️⃣7️⃣7️⃣ — NFT у релейера с рыночной ценой ≈ ×40 от ставки; если такого нет — ×40 звёздами.
+        """
         bet = self._check_bet(bet)
         if value is None:
             value, reels, mult = g.slots_spin()
         else:
             reels = g.slots_reels(value)
             mult = g.slots_multiplier(reels)
-        win = g.payout(bet, mult)
+        detail: dict[str, Any] = {"value": value, "reels": reels}
+        nft = None
         async with self.db.tx() as c:
             await self._take(c, user_id, bet, "slots")
-            balance = await self._settle(c, user_id, "slots", bet, win, {"value": value, "reels": reels})
-        return {"value": value, "reels": reels, "multiplier": mult, "win": win, "balance": balance}
+            if value == 64:
+                nft = await self._reserve_nft_near(c, user_id, bet * g.SLOT_777)
+            if nft:
+                detail["nft_win"] = nft["win_id"]
+                await self.db.log_bet(c, user_id, "slots", bet, nft["price"], json.dumps(detail, ensure_ascii=False))
+                async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
+                    balance = (await q.fetchone())["balance"]
+                win = nft["price"]
+            else:
+                win = g.payout(bet, mult)
+                balance = await self._settle(c, user_id, "slots", bet, win, detail)
+        result = {"value": value, "reels": reels, "multiplier": mult, "win": win, "balance": balance}
+        if nft:
+            result["nft"] = nft
+        return result
+
+    async def _reserve_nft_near(self, c: aiosqlite.Connection, user_id: int, target: int) -> dict | None:
+        """Резервирует у релейера модель с ценой ближе всего к target (±SLOT_NFT_TOLERANCE)."""
+        lo, hi = target * (1 - g.SLOT_NFT_TOLERANCE), target * (1 + g.SLOT_NFT_TOLERANCE)
+        async with c.execute(
+            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price BETWEEN ? AND ? "
+            "AND price_at > ? ORDER BY ABS(price - ?) LIMIT 1",
+            (lo, hi, time.time() - NFT_PRICE_MAX_AGE, target),
+        ) as q:
+            row = await q.fetchone()
+        if not row:
+            return None
+        await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=?", (row["id"],))
+        cur = await c.execute(
+            "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
+            (row["id"], user_id, row["price"], time.time()),
+        )
+        return {"win_id": cur.lastrowid, "title": row["collection_name"], "model": row["model"],
+                "emoji": row["emoji"] or "💎", "price": row["price"]}
 
     # ---------- кости ----------
 

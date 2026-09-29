@@ -121,10 +121,15 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             return
         await asyncio.sleep(2.2)   # ждём, пока докрутится анимация
         combo = " ".join(SLOT_TEXT[s] for s in r["reels"])
-        if r["win"] > bet:
+        if r.get("nft"):
+            n = r["nft"]
+            asyncio.create_task(deliver_nft(message.bot, casino.db, cfg, relayer, n["win_id"]))
+            text = (f"{combo}\n🎉 <b>ДЖЕКПОТ! NFT {n['emoji']} {html.escape(n['title'])} "
+                    f"(модель «{html.escape(n['model'])}», ≈ {n['price']} ⭐)</b> — передаём вам в Telegram")
+        elif r["win"] > bet:
             text = f"{combo}\n🎉 <b>×{r['multiplier']:g} — выигрыш {r['win']} ⭐</b>"
         elif r["win"] == bet:
-            text = f"{combo}\nПара — ставка возвращена"
+            text = f"{combo}\nДве семёрки — ставка возвращена"
         else:
             text = f"{combo}\nМимо"
         await dice_msg.reply(f"{text}\nБаланс: {r['balance']} ⭐\nЕщё раз: <code>/slot {bet}</code>")

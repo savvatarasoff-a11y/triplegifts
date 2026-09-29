@@ -457,19 +457,18 @@ function renderPaytable() {
   const box = $("#paytable");
   box.innerHTML = "";
   [
-    [["seven", "seven", "seven"], s["777"]],
-    [["bar", "bar", "bar"], s.triple],
-    [["grape", "grape", "grape"], s.triple],
-    [["lemon", "lemon", "lemon"], s.triple],
-    [["seven", "seven"], s.two_sevens],
-    [["lemon", "lemon"], s.pair, "любая пара"],
+    [["seven", "seven", "seven"], `NFT ≈ ×${s["777"]}`],
+    [["bar", "bar", "bar"], "×" + s.triple],
+    [["grape", "grape", "grape"], "×" + s.triple],
+    [["lemon", "lemon", "lemon"], "×" + s.triple],
+    [["seven", "seven"], "×" + s.two_sevens, "возврат ставки"],
   ].forEach(([combo, m, note]) => {
     const d = document.createElement("div");
     const c = document.createElement("span");
     c.className = "combo";
     c.innerHTML = combo.map(symHTML).join("") + (note ? `<small>${note}</small>` : "");
     const x = document.createElement("b");
-    x.textContent = "×" + m;
+    x.textContent = m;
     d.append(c, x);
     box.append(d);
   });
@@ -520,9 +519,18 @@ async function slotsSpin() {
       })));
       setBalance(r.balance);
       const res = $("#slots-result");
-      if (r.win === bet) {
+      if (r.nft) {
+        machine.classList.add("won");
+        res.className = "result win reveal";
+        res.textContent = `ДЖЕКПОТ! NFT ${r.nft.emoji} ${r.nft.title} · «${r.nft.model}» — передаём вам в Telegram`;
+        haptic("win");
+        fxBurstAt(machine, { count: 80, speed: 9 });
+        bigWin(r.nft.price / bet, r.nft.price);
+        $("#bigwin-label").textContent = "NFT JACKPOT";
+        $("#bigwin-sum").textContent = `${r.nft.emoji} ${r.nft.title} ≈ ${stars(r.nft.price)}`;
+      } else if (r.win === bet) {
         res.className = "result";
-        res.textContent = "Пара — ставка возвращена";
+        res.textContent = "Две семёрки — ставка возвращена";
       } else if (r.win > 0) {
         machine.classList.add("won");
         res.className = "result win reveal";

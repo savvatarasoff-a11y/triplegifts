@@ -188,14 +188,14 @@ async def test_slot_in_chat_uses_telegram_dice(env, monkeypatch):
     feed, session, db = env["feed"], env["session"], env["db"]
     await db.touch_user(PLAYER, "p", "P")
     await db.credit_payment("c1", PLAYER, 100)
-    await feed(msg(1, PLAYER, "/slot 10"))                       # 🎰 выпало 64 = 777 -> ×5
+    await feed(msg(1, PLAYER, "/slot 10"))                       # 🎰 выпало 64 = 777, NFT нет -> ×40 звёздами
     assert any(isinstance(c, SendDice) and c.emoji == "🎰" for c in session.calls)
-    assert "7️⃣ 7️⃣ 7️⃣" in session.texts(PLAYER)[-1] and "×5" in session.texts(PLAYER)[-1]
-    assert (await db.get_user(PLAYER))["balance"] == 140
-    session.dice_value = 3                                        # 🍋 BAR BAR — пара, возврат ставки
+    assert "7️⃣ 7️⃣ 7️⃣" in session.texts(PLAYER)[-1] and "×40" in session.texts(PLAYER)[-1]
+    assert (await db.get_user(PLAYER))["balance"] == 490
+    session.dice_value = 48                                       # 7 7 🍋 — две семёрки, возврат ставки
     await feed(msg(2, PLAYER, "/slot 10"))
     assert "ставка возвращена" in session.texts(PLAYER)[-1]
-    assert (await db.get_user(PLAYER))["balance"] == 140
-    await feed(msg(3, PLAYER, "/slot 500"))                      # не хватает звёзд — кубик не бросается
+    assert (await db.get_user(PLAYER))["balance"] == 490
+    await feed(msg(3, PLAYER, "/slot 1000"))                     # не хватает звёзд — кубик не бросается
     assert "Недостаточно" in session.texts(PLAYER)[-1]
     assert sum(isinstance(c, SendDice) for c in session.calls) == 2

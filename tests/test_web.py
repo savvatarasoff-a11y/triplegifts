@@ -258,3 +258,24 @@ async def test_case_disabled_when_real_prices_too_generous(client):
     assert cases == []                       # с такой ценой оба кейса убыточны — выключены
     r = await client.post("/api/case", headers=auth(9), json={"case": "bear"})
     assert r.status == 400
+
+
+async def test_slots_777_nft_via_api(client, monkeypatch):
+    import asyncio
+    import time as _t
+    from app.games import logic as g
+    from tests.test_nft import item
+    casino = client.app[CASINO]
+    await client.get("/api/me", headers=auth(8))
+    await casino.db.conn.execute("UPDATE users SET balance=1000 WHERE id=8")
+    await casino.db.conn.execute(
+        "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at) "
+        "VALUES ('555','Plush Pepe','Frog','🐸',1,4000,?)", (_t.time(),))
+    relayer = client.app[RELAYER]
+    relayer.items = [item(9, "555", "Plush Pepe", 77, "Frog")]
+    relayer.known = {8}
+    monkeypatch.setattr(g, "slots_spin", lambda rng=None: (64, ["seven", "seven", "seven"], 40))
+    data = await (await client.post("/api/slots", headers=auth(8), json={"bet": 100})).json()
+    assert data["nft"]["title"] == "Plush Pepe" and data["balance"] == 900
+    await asyncio.sleep(0.05)
+    assert relayer.transfers == [(9, 8)]

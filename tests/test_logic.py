@@ -13,19 +13,19 @@ def test_slots_like_telegram():
     assert g.slots_reels(22) == ["grape", "grape", "grape"]
     assert g.slots_reels(43) == ["lemon", "lemon", "lemon"]
     assert g.slots_reels(64) == ["seven", "seven", "seven"]
-    assert g.slots_rtp() == pytest.approx(56 / 64)
+    assert g.slots_rtp() == pytest.approx(55 / 64)
     mults = [g.slots_multiplier(g.slots_reels(v)) for v in range(1, 65)]
-    assert set(mults) == {0, 1, 2, 5}
-    assert mults.count(5) == 1 and mults.count(2) == 12 and mults.count(1) == 27 and mults.count(0) == 24
+    assert set(mults) == {0, 1, 2, 40}
+    assert mults.count(40) == 1 and mults.count(2) == 3 and mults.count(1) == 9 and mults.count(0) == 51
     with pytest.raises(ValueError):
         g.slots_reels(65)
 
 
 def test_slots_multiplier_rules():
-    assert g.slots_multiplier(["seven", "seven", "seven"]) == 5
+    assert g.slots_multiplier(["seven", "seven", "seven"]) == 40
     assert g.slots_multiplier(["bar", "bar", "bar"]) == 2
-    assert g.slots_multiplier(["seven", "lemon", "seven"]) == 2
-    assert g.slots_multiplier(["grape", "grape", "seven"]) == 1
+    assert g.slots_multiplier(["seven", "lemon", "seven"]) == 1
+    assert g.slots_multiplier(["grape", "grape", "seven"]) == 0
     assert g.slots_multiplier(["bar", "grape", "lemon"]) == 0
 
 

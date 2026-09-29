@@ -149,7 +149,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "max_bet": cfg.max_bet,
                 "deposit_presets": DEPOSIT_PRESETS,
                 "slots": {"symbols": g.SLOT_SYMBOLS, "777": g.SLOT_777, "triple": g.SLOT_TRIPLE,
-                          "two_sevens": g.SLOT_TWO_SEVENS, "pair": g.SLOT_PAIR},
+                          "two_sevens": g.SLOT_TWO_SEVENS, "pair": g.SLOT_PAIR, "jackpot_nft": True},
                 "dice": {"min": g.DICE_MIN_CHANCE, "max": g.DICE_MAX_CHANCE, "edge": g.HOUSE_EDGE},
                 "cases": [
                     {**{k: c[k] for k in ("id", "name", "emoji", "price")},
@@ -215,7 +215,10 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.post("/api/slots")
     async def slots(request: web.Request) -> web.Response:
         data = await body(request)
-        return web.json_response(await casino.slots(request[USER_ID], data.get("bet")))
+        result = await casino.slots(request[USER_ID], data.get("bet"))
+        if result.get("nft"):
+            asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
+        return web.json_response(result)
 
     @routes.post("/api/dice")
     async def dice(request: web.Request) -> web.Response:

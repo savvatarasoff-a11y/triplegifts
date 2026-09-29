@@ -55,10 +55,30 @@ async def test_bet_validation(casino):
 
 async def test_slots_with_telegram_value(casino):
     await fund(casino, 1, 100)
-    r = await casino.slots(1, 10, value=64)
-    assert r["reels"] == ["seven", "seven", "seven"] and r["win"] == 50 and r["balance"] == 140
-    r = await casino.slots(1, 10, value=2)      # grape bar bar -> пара, возврат
-    assert r["multiplier"] == 1 and r["win"] == 10
+    r = await casino.slots(1, 10, value=64)     # 777 без подходящего NFT -> ×40 звёздами
+    assert r["reels"] == ["seven", "seven", "seven"] and r["win"] == 400 and r["balance"] == 490 and "nft" not in r
+    r = await casino.slots(1, 10, value=2)      # 🍇 BAR BAR — пара больше ничего не даёт
+    assert r["multiplier"] == 0 and r["win"] == 0
+    r = await casino.slots(1, 10, value=48)     # 7 7 🍋 — две семёрки, возврат ставки
+    assert r["reels"].count("seven") == 2 and r["win"] == 10
+
+
+async def test_slots_777_gives_nft_near_x40(casino):
+    import time as _t
+    now = _t.time()
+    await casino.db.conn.execute(
+        "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at) VALUES "
+        "('1','Plush Pepe','Frog','🐸',1,4100,?), ('2','Durov''s Cap','Black','🧢',1,3000,?), "
+        "('3','Snoop Dogg','Old',NULL,1,9000,?)", (now, now, now))
+    await fund(casino, 1, 1000)
+    r = await casino.slots(1, 100, value=64)    # цель 4000 ⭐ -> ближе всего 4100 (3000 тоже в допуске, но дальше)
+    assert r["nft"]["title"] == "Plush Pepe" and r["nft"]["price"] == 4100 and r["win"] == 4100
+    assert r["balance"] == 900                   # NFT не зачисляется звёздами
+    assert (await casino.db.one("SELECT reserved FROM nft_models WHERE collection_id='1'"))["reserved"] == 1
+    r = await casino.slots(1, 100, value=64)    # 4100 уже зарезервирован -> следующий в допуске: 3000
+    assert r["nft"]["price"] == 3000
+    r = await casino.slots(1, 100, value=64)    # в допуске ±25% больше ничего -> ×40 звёздами
+    assert "nft" not in r and r["win"] == 4000
 
 
 async def test_slots_balance_consistent(casino):
@@ -264,10 +284,10 @@ async def test_pvp_refund_lonely(casino, monkeypatch):
 
 async def test_big_wins_feed(casino, monkeypatch):
     await fund(casino, 1, 100)
-    await casino.slots(1, 2, value=64)          # 777 -> ×5
-    await casino.slots(1, 2, value=3)           # 🍋 BAR BAR — пара, ×1, в ленту не попадает
+    await casino.slots(1, 2, value=64)          # 777 -> ×40
+    await casino.slots(1, 2, value=48)          # две семёрки, ×1 — в ленту не попадает
     feed = await casino.big_wins()
-    assert feed == [{"game": "slots", "bet": 2, "win": 10, "x": 5.0, "name": "User1"}]
+    assert feed == [{"game": "slots", "bet": 2, "win": 80, "x": 40.0, "name": "User1"}]
 
 
 async def test_stats(casino):
