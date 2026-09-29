@@ -36,6 +36,7 @@ class CaseCatalog:
             log.warning("Каталог подарков недоступен — кейсы временно выключены")
             return []
         cases = []
+        models = await self._models()
         for case in g.CASE_DEFS:
             if any(emoji not in prices for emoji, _ in case.items):
                 log.warning("Кейс %s выключен: не все подарки есть в каталоге", case.id)
@@ -45,10 +46,39 @@ class CaseCatalog:
                  "weight": w}
                 for emoji, w in case.items
             ]
+            prizes = self._with_jackpot(case.price, prizes, models)
+            if prizes is None:
+                continue
             cases.append(self._finish(case.id, case.name, case.emoji, case.price, prizes))
         for nft_def in g.NFT_CASE_DEFS:
             cases.append(await self._nft_case(prices, nft_def))
         return [c for c in cases if c is not None]
+
+    async def _models(self) -> list[dict[str, Any]]:
+        return await self.db.all(
+            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
+            "AND model GLOB '*[^0-9]*' ORDER BY price", time.time() - PRICE_MAX_AGE)
+
+    @staticmethod
+    def _with_jackpot(price: int, prizes: list[dict[str, Any]], models: list[dict[str, Any]]
+                      ) -> list[dict[str, Any]] | None:
+        """Кейс с подарками получает NFT-джекпот — модели от 3 до 100 цен кейса (без него кейс, в котором
+        все подарки не дороже цены, не показываем: выиграть в нём больше цены невозможно)."""
+        lo, hi = (k * price for k in g.GIFT_CASE_JACKPOT_RANGE)
+        fit = [m for m in models if lo <= m["price"] <= hi]
+        if len(fit) > g.GIFT_CASE_JACKPOT_MAX_MODELS:      # равномерно по цене — и дешёвые, и дорогие
+            step = (len(fit) - 1) / (g.GIFT_CASE_JACKPOT_MAX_MODELS - 1)
+            fit = [fit[round(i * step)] for i in range(g.GIFT_CASE_JACKPOT_MAX_MODELS)]
+        res = g.gift_case_with_jackpot(price, [(p["weight"], p["amount"]) for p in prizes],
+                                       [m["price"] for m in fit]) if fit else None
+        if res is None:
+            return prizes if max(p["amount"] for p in prizes) > price else None
+        p_nft, gift_w = res
+        out = [{**p, "weight": w} for p, w in zip(prizes, gift_w)]
+        out += [{"kind": "nft", "model_id": m["id"], "emoji": m["emoji"] or "💎", "title": m["collection_name"],
+                 "model": m["model"], "rarity": m["rarity"], "amount": m["price"], "weight": pw,
+                 "demo": bool(m["test"])} for m, pw in zip(fit, p_nft)]
+        return out
 
     async def _nft_case(self, prices: dict[str, dict[str, Any]], d: g.NftCaseDef) -> dict[str, Any] | None:
         """NFT-кейс из моделей, которые есть у релейера и чья цена проверена на маркете не позже часа назад."""

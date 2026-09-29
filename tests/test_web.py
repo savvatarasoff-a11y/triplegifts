@@ -141,7 +141,8 @@ async def test_me_and_start_bonus(client):
     data = await r.json()
     assert data["balance"] == 25 and data["user"]["name"] == "Петя"
     cases = {c["id"]: c for c in data["config"]["cases"]}
-    assert set(cases) == {"bear", "rocket", "heart", "party", "lux"}   # NFT-кейсов нет, пока нет NFT с ценой
+    # NFT-кейсов нет, пока нет NFT с ценой; «Люкс» без NFT-джекпота скрыт: все его подарки дешевле кейса
+    assert set(cases) == {"bear", "rocket", "heart", "party"}
     bear = cases["bear"]["prizes"]
     assert {p["emoji"]: p["amount"] for p in bear}["🧸"] == 15    # реальная цена из каталога
     assert sum(p["chance"] for p in bear) == pytest.approx(100, abs=0.01)
@@ -260,7 +261,7 @@ async def test_cases_api_real_prices_and_nft(client, monkeypatch):
 async def test_case_disabled_when_real_prices_too_generous(client):
     client.app[BOT].prices = {"🧸": 60}      # подарок «подорожал» до первого запроса каталога
     cases = [c["id"] for c in (await (await client.get("/api/me", headers=auth(9))).json())["config"]["cases"]]
-    assert cases == ["lux"]                  # кейсы с подорожавшим 🧸 убыточны — выключены, «Люкс» без него
+    assert cases == []                       # кейсы с подорожавшим 🧸 убыточны — выключены, «Люкс» без джекпота скрыт
     r = await client.post("/api/case", headers=auth(9), json={"case": "bear"})
     assert r.status == 400
 
@@ -300,3 +301,19 @@ async def test_referral_via_start_param_and_pages(client):
     assert (data["count"], data["earned"]) == (1, 10)
     r = await client.get("/api/profile", headers={"Authorization": "tma " + init_data(501)})
     assert (await r.json())["deposited"] == 100
+
+
+async def test_gift_cases_get_nft_jackpot(client):
+    import time as _t
+    casino = client.app[CASINO]
+    await casino.db.conn.execute(
+        "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at) VALUES "
+        "('1','Lol Pop','Pink','🍭',5,400,?), ('2','Plush Pepe','Frog','🐸',1,9000,?)", (_t.time(), _t.time()))
+    cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(3))).json())["config"]["cases"]}
+    lux = cases["lux"]
+    assert max(p["amount"] for p in lux["prizes"]) > lux["price"]          # есть ради чего открывать
+    jackpot = [p for p in lux["prizes"] if p["kind"] == "nft"]
+    assert {p["model"] for p in jackpot} == {"Pink", "Frog"} and 0 < sum(p["chance"] for p in jackpot) < 5
+    for c in cases.values():
+        assert sum(p["chance"] for p in c["prizes"]) == pytest.approx(100, abs=0.05)
+        assert c["rtp"] <= 0.92

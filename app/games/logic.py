@@ -226,6 +226,55 @@ def expected_value(prizes: Sequence[tuple[float, float]]) -> float:
     return sum(v * w for v, w in prizes) / total
 
 
+# NFT-джекпот в кейсах с подарками: модели от 3 до 100 цен кейса, в среднем 15% цены кейса уходит на них
+GIFT_CASE_JACKPOT_SHARE = 0.15
+GIFT_CASE_JACKPOT_RANGE = (3, 100)
+GIFT_CASE_JACKPOT_MAX_MODELS = 8
+
+
+def tilt_weights(weights: Sequence[float], amounts: Sequence[float], target_mean: float) -> list[float] | None:
+    """Сдвигает веса к дешёвым/дорогим призам (w·e^(−t·a)), сохраняя их разнообразие, так чтобы среднее
+    стало target_mean (не выше). None — если так не получить."""
+    lo_v, hi_v = min(amounts), max(amounts)
+    if not lo_v <= target_mean <= hi_v:
+        return None
+    scale = hi_v or 1
+
+    def tilted(t: float) -> list[float]:
+        return [w * math.exp(-t * a / scale) for w, a in zip(weights, amounts)]
+
+    def mean(t: float) -> float:
+        w = tilted(t)
+        return sum(x * a for x, a in zip(w, amounts)) / sum(w)
+
+    lo_t, hi_t = -60.0, 60.0                     # mean(t) убывает по t
+    for _ in range(100):
+        mid = (lo_t + hi_t) / 2
+        lo_t, hi_t = (mid, hi_t) if mean(mid) > target_mean else (lo_t, mid)
+    return tilted(hi_t)                          # hi_t: среднее не выше нужного
+
+
+def gift_case_with_jackpot(price: int, gifts: Sequence[tuple[float, int]], nft_prices: Sequence[int],
+                           target_rtp: float = CASE_TARGET_RTP, share: float = GIFT_CASE_JACKPOT_SHARE
+                           ) -> tuple[list[float], list[float]] | None:
+    """Кейс с подарками + NFT-джекпот: (вероятности NFT, новые веса подарков). None — если не сходится."""
+    if not nft_prices or not gifts:
+        return None
+    n = len(nft_prices)
+    weights = [w for w, _ in gifts]
+    amounts = [a for _, a in gifts]
+    # дешёвый кейс может не вытянуть полную долю джекпота — уменьшаем её, пока не сойдётся
+    for k in (1, 0.66, 0.33):
+        p_nft = [share * k * price / (n * pn) for pn in nft_prices]
+        q = 1 - sum(p_nft)
+        nft_ev = sum(p * pn for p, pn in zip(p_nft, nft_prices))
+        tilted = tilt_weights(weights, amounts, (target_rtp * price - nft_ev) / q)
+        if tilted is not None:
+            total = sum(tilted)
+            return p_nft, [q * w / total for w in tilted]
+    return None
+
+
 def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequence[int],
                      target_rtp: float = CASE_TARGET_RTP, share: float = NFT_SHARE
                      ) -> tuple[list[float], list[float]] | None:
