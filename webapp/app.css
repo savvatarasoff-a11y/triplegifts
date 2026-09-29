@@ -315,3 +315,16 @@ main { padding: 0 16px; max-width: 520px; margin: 0 auto; }
 .result.reveal { animation: numpop .5s cubic-bezier(.3, 1.6, .5, 1); }
 .balance.bump { animation: bump .35s cubic-bezier(.3, 1.6, .5, 1); }
 @keyframes bump { 50% { transform: scale(1.08); } }
+
+/* символы слотов как в 🎰 Telegram */
+.sym { display: inline-grid; place-items: center; font-size: 52px; line-height: 1; }
+.sym.bar { font-family: var(--font-head); font-weight: 900; font-size: 22px; letter-spacing: 1px; color: var(--bg);
+  background: #fff; border-radius: 8px; padding: 8px 8px; box-shadow: 0 0 0 3px var(--accent), 0 6px 16px rgba(0, 0, 0, .4); }
+.sym.seven { font-family: var(--font-head); font-weight: 900; font-size: 64px; color: var(--accent-soft);
+  -webkit-text-stroke: 2px #fff; text-shadow: 0 0 18px var(--accent-glow); }
+.paytable .combo { display: flex; align-items: center; gap: 4px; }
+.paytable .combo .sym { font-size: 18px; }
+.paytable .combo .sym.bar { font-size: 9px; padding: 3px 4px; box-shadow: 0 0 0 1.5px var(--accent); }
+.paytable .combo .sym.seven { font-size: 22px; -webkit-text-stroke: 1px #fff; }
+.paytable .combo small { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.paytable { grid-template-columns: 1fr; }

@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import AnswerPreCheckoutQuery, GetMe, SendGift, SendInvoice, SendMessage, TelegramMethod
+from aiogram.methods import AnswerPreCheckoutQuery, GetMe, SendDice, SendGift, SendInvoice, SendMessage, TelegramMethod
 from aiogram.types import Update
 
 from app.bot import build_router
@@ -27,6 +27,7 @@ class FakeSession(BaseSession):
         super().__init__()
         self.calls: list[TelegramMethod] = []
         self.gift_error: str | None = None
+        self.dice_value = 64
 
     async def make_request(self, bot: Bot, method: TelegramMethod, timeout: int | None = None) -> Any:
         self.calls.append(method)
@@ -35,6 +36,9 @@ class FakeSession(BaseSession):
         return TypeAdapter(method.__returning__).validate_python(self._raw(method), context={"bot": bot})
 
     def _raw(self, method: TelegramMethod) -> Any:
+        if isinstance(method, SendDice):
+            return {"message_id": 77, "date": int(time.time()), "chat": {"id": method.chat_id, "type": "private"},
+                    "dice": {"emoji": "🎰", "value": self.dice_value}}
         if isinstance(method, GetMe):
             return {"id": 1, "is_bot": True, "first_name": "Casino", "username": "casino_bot"}
         if isinstance(method, (SendMessage, SendInvoice)):
@@ -174,3 +178,24 @@ async def test_withdraw_admin_buttons(env):
     await feed(cb(4, ADMIN, f"w:no:{wd2['id']}"))
     assert (await casino.get_withdrawal(wd2["id"]))["status"] == "rejected"
     assert (await db.get_user(PLAYER))["balance"] == 150
+
+
+async def test_slot_in_chat_uses_telegram_dice(env, monkeypatch):
+    import app.bot as bot_mod
+    async def no_sleep(_):
+        return None
+    monkeypatch.setattr(bot_mod.asyncio, "sleep", no_sleep)
+    feed, session, db = env["feed"], env["session"], env["db"]
+    await db.touch_user(PLAYER, "p", "P")
+    await db.credit_payment("c1", PLAYER, 100)
+    await feed(msg(1, PLAYER, "/slot 10"))                       # 🎰 выпало 64 = 777 -> ×5
+    assert any(isinstance(c, SendDice) and c.emoji == "🎰" for c in session.calls)
+    assert "7️⃣ 7️⃣ 7️⃣" in session.texts(PLAYER)[-1] and "×5" in session.texts(PLAYER)[-1]
+    assert (await db.get_user(PLAYER))["balance"] == 140
+    session.dice_value = 3                                        # 🍋 BAR BAR — пара, возврат ставки
+    await feed(msg(2, PLAYER, "/slot 10"))
+    assert "ставка возвращена" in session.texts(PLAYER)[-1]
+    assert (await db.get_user(PLAYER))["balance"] == 140
+    await feed(msg(3, PLAYER, "/slot 500"))                      # не хватает звёзд — кубик не бросается
+    assert "Недостаточно" in session.texts(PLAYER)[-1]
+    assert sum(isinstance(c, SendDice) for c in session.calls) == 2

@@ -442,17 +442,32 @@ async function withdraw(gift) {
 
 const REEL_H = 104;
 
+const SLOT_SYMS = ["bar", "grape", "lemon", "seven"];
+
+// Символы как в 🎰 Telegram: BAR, виноград, лимон, семёрка
+function symHTML(sym) {
+  if (sym === "bar") return '<span class="sym bar">BAR</span>';
+  if (sym === "seven") return '<span class="sym seven">7</span>';
+  return `<span class="sym">${sym === "grape" ? "🍇" : "🍋"}</span>`;
+}
+
 function renderPaytable() {
   const s = state.config && state.config.slots;
   if (!s) return;
   const box = $("#paytable");
   box.innerHTML = "";
-  const rows = Object.entries(s.triple).reverse().map(([sym, m]) => [sym + sym + sym, m]);
-  rows.push(["💎💎", s.two_diamonds], ["🍒🍒", s.two_cherries]);
-  rows.forEach(([combo, m]) => {
+  [
+    [["seven", "seven", "seven"], s["777"]],
+    [["bar", "bar", "bar"], s.triple],
+    [["grape", "grape", "grape"], s.triple],
+    [["lemon", "lemon", "lemon"], s.triple],
+    [["seven", "seven"], s.two_sevens],
+    [["lemon", "lemon"], s.pair, "любая пара"],
+  ].forEach(([combo, m, note]) => {
     const d = document.createElement("div");
     const c = document.createElement("span");
-    c.textContent = combo;
+    c.className = "combo";
+    c.innerHTML = combo.map(symHTML).join("") + (note ? `<small>${note}</small>` : "");
     const x = document.createElement("b");
     x.textContent = "×" + m;
     d.append(c, x);
@@ -461,11 +476,18 @@ function renderPaytable() {
 }
 
 function reelStrip(finalSymbol, count) {
-  const syms = (state.config && state.config.slots.symbols) || ["🍒", "🍋", "🍇", "🔔", "⭐", "7️⃣", "💎"];
   const items = [];
-  for (let i = 0; i < count; i++) items.push(syms[Math.floor(Math.random() * syms.length)]);
+  for (let i = 0; i < count; i++) items.push(SLOT_SYMS[Math.floor(Math.random() * 4)]);
   items.push(finalSymbol);
   return items;
+}
+
+function slotsIdle() {
+  $$("#slots .strip").forEach((strip, i) => {
+    strip.innerHTML = `<div>${symHTML(["seven", "seven", "seven"][i])}</div>`;
+    strip.style.transition = "none";
+    strip.style.transform = "translateY(0)";
+  });
 }
 
 async function slotsSpin() {
@@ -484,7 +506,7 @@ async function slotsSpin() {
       await Promise.all(reels.map((reel, i) => new Promise((resolve) => {
         const strip = reel.querySelector(".strip");
         const items = reelStrip(r.reels[i], 22 + i * 8);
-        strip.innerHTML = items.map((sym) => `<div>${sym}</div>`).join("");
+        strip.innerHTML = items.map((sym) => `<div>${symHTML(sym)}</div>`).join("");
         strip.style.transition = "none";
         strip.style.transform = "translateY(0)";
         reel.classList.remove("stop");
@@ -498,10 +520,13 @@ async function slotsSpin() {
       })));
       setBalance(r.balance);
       const res = $("#slots-result");
-      if (r.win > 0) {
+      if (r.win === bet) {
+        res.className = "result";
+        res.textContent = "Пара — ставка возвращена";
+      } else if (r.win > 0) {
         machine.classList.add("won");
         res.className = "result win reveal";
-        res.textContent = `${fmtX(r.multiplier)} · +${stars(r.win)}`;
+        res.textContent = `${r.value === 64 ? "777! " : ""}${fmtX(r.multiplier)} · +${stars(r.win)}`;
         haptic("win");
         celebrate(bet, r.win, machine);
       } else {
@@ -1481,6 +1506,7 @@ async function init() {
   bind();
   diceUpdate(false);
   minesRender(null);
+  slotsIdle();
   if (!tg || !tg.initData) {
     toast("Откройте Svag Gifts через кнопку в Telegram-боте", true);
     return;

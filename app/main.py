@@ -25,6 +25,7 @@ log = logging.getLogger("casino")
 
 PLAYER_COMMANDS = [
     ("start", "Открыть Svag Gifts"),
+    ("slot", "Слоты 🎰 в чате"),
     ("deposit", "Пополнить звёздами"),
     ("balance", "Баланс"),
     ("help", "Правила"),

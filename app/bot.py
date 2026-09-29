@@ -1,6 +1,7 @@
 """Команды бота: запуск мини-приложения, пополнение Stars, чеки, админка."""
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import time
@@ -26,6 +27,8 @@ from .relayer import Relayer
 from .withdraw import admin_keyboard, approve, reject
 
 log = logging.getLogger(__name__)
+
+SLOT_TEXT = {"bar": "BAR", "grape": "🍇", "lemon": "🍋", "seven": "7️⃣"}
 
 RULES = (
     "Пополнить баланс Svag Gifts можно через Telegram Stars или чеком. "
@@ -68,6 +71,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             f"Слоты, краш, мины, кости, кейсы, PvP-рулетка и PvP-хоккей — в мини-приложении.\n"
             f"Вывод — подарками Telegram.\n"
             f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
+            f"/slot 10 — слоты прямо в чате (настоящий 🎰)\n"
             f"/deposit — пополнить звёздами\n/balance — баланс\n/help — правила",
             reply_markup=play_keyboard(cfg),
         )
@@ -96,6 +100,34 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             )
             return
         await message.answer_invoice(**deposit_invoice_kwargs(message.from_user.id, int(arg)))
+
+    @router.message(Command("slot", "spin"))
+    async def slot(message: Message, command: CommandObject) -> None:
+        """Слоты прямо в чате: бот кидает настоящий 🎰 Telegram, выпавшее значение решает исход."""
+        user = await register(message)
+        arg = (command.args or "").strip()
+        bet = int(arg) if arg.isdigit() else 10
+        if bet < cfg.min_bet or bet > cfg.max_bet:
+            await message.answer(f"Ставка — от {cfg.min_bet} до {cfg.max_bet} ⭐, например <code>/slot 10</code>")
+            return
+        if user["balance"] < bet:
+            await message.answer(f"Недостаточно звёзд: на балансе {user['balance']} ⭐. /deposit — пополнить")
+            return
+        dice_msg = await message.answer_dice(emoji="🎰")
+        try:
+            r = await casino.slots(user["id"], bet, value=dice_msg.dice.value)
+        except GameError as e:
+            await message.answer(f"⚠️ {html.escape(str(e))}")
+            return
+        await asyncio.sleep(2.2)   # ждём, пока докрутится анимация
+        combo = " ".join(SLOT_TEXT[s] for s in r["reels"])
+        if r["win"] > bet:
+            text = f"{combo}\n🎉 <b>×{r['multiplier']:g} — выигрыш {r['win']} ⭐</b>"
+        elif r["win"] == bet:
+            text = f"{combo}\nПара — ставка возвращена"
+        else:
+            text = f"{combo}\nМимо"
+        await dice_msg.reply(f"{text}\nБаланс: {r['balance']} ⭐\nЕщё раз: <code>/slot {bet}</code>")
 
     @router.message(Command("paysupport"))
     async def paysupport(message: Message) -> None:

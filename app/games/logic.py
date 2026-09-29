@@ -17,40 +17,43 @@ HOUSE_EDGE = 0.05  # комиссия казино в костях, минах �
 
 # ---------------- Слоты ----------------
 
-SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "⭐", "7️⃣", "💎"]
-SLOT_WEIGHTS = [22, 22, 19, 15, 11, 7, 4]
-# Три одинаковых символа -> множитель. 💎💎💎 — джекпот ×1000 (примерно 1 раз на 15 600 спинов)
-SLOT_TRIPLE = {"🍒": 5, "🍋": 10, "🍇": 20, "🔔": 30, "⭐": 60, "7️⃣": 250, "💎": 1000}
-SLOT_TWO_DIAMONDS = 10   # два 💎 в любом месте
-SLOT_TWO_CHERRIES = 2    # две 🍒 в любом месте
-# RTP ≈ 90%, выигрышных спинов ≈ 15%
+# Слоты как 🎰 в Telegram: 3 барабана по 4 символа, 64 равновероятных исхода (значения 1–64).
+# Значение v раскладывается так же, как у Telegram: v-1 = r1 + 4·r2 + 16·r3.
+SLOT_SYMBOLS = ["bar", "grape", "lemon", "seven"]
+SLOT_777 = 5          # 7️⃣7️⃣7️⃣
+SLOT_TRIPLE = 2       # BAR BAR BAR, 🍇🍇🍇, 🍋🍋🍋
+SLOT_TWO_SEVENS = 2   # ровно две семёрки
+SLOT_PAIR = 1         # любая другая пара — возврат ставки
+# RTP = (5 + 3·2 + 9·2 + 27·1) / 64 = 87.5%; в плюс уходят 13 из 64 исходов (20%)
+
+
+def slots_reels(value: int) -> list[str]:
+    if not 1 <= value <= 64:
+        raise ValueError("value")
+    v = value - 1
+    return [SLOT_SYMBOLS[v % 4], SLOT_SYMBOLS[(v // 4) % 4], SLOT_SYMBOLS[(v // 16) % 4]]
 
 
 def slots_multiplier(reels: Sequence[str]) -> float:
     if reels[0] == reels[1] == reels[2]:
-        return SLOT_TRIPLE[reels[0]]
-    if sum(1 for s in reels if s == "💎") == 2:
-        return SLOT_TWO_DIAMONDS
-    if sum(1 for s in reels if s == "🍒") == 2:
-        return SLOT_TWO_CHERRIES
-    return 0.0
+        return SLOT_777 if reels[0] == "seven" else SLOT_TRIPLE
+    counts = {s: reels.count(s) for s in set(reels)}
+    if counts.get("seven") == 2:
+        return SLOT_TWO_SEVENS
+    if 2 in counts.values():
+        return SLOT_PAIR
+    return 0
 
 
-def slots_spin(rng: random.Random = RNG) -> tuple[list[str], float]:
-    reels = rng.choices(SLOT_SYMBOLS, weights=SLOT_WEIGHTS, k=3)
-    return reels, slots_multiplier(reels)
+def slots_spin(rng: random.Random = RNG) -> tuple[int, list[str], float]:
+    value = rng.randrange(64) + 1
+    reels = slots_reels(value)
+    return value, reels, slots_multiplier(reels)
 
 
 def slots_rtp() -> float:
-    """Точный возврат игроку (RTP) полным перебором."""
-    total = sum(SLOT_WEIGHTS)
-    probs = {s: w / total for s, w in zip(SLOT_SYMBOLS, SLOT_WEIGHTS)}
-    rtp = 0.0
-    for a in SLOT_SYMBOLS:
-        for b in SLOT_SYMBOLS:
-            for c in SLOT_SYMBOLS:
-                rtp += probs[a] * probs[b] * probs[c] * slots_multiplier([a, b, c])
-    return rtp
+    """Точный возврат игроку полным перебором 64 исходов."""
+    return sum(slots_multiplier(slots_reels(v)) for v in range(1, 65)) / 64
 
 
 # ---------------- Кости (Dice) ----------------

@@ -148,8 +148,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "min_bet": cfg.min_bet,
                 "max_bet": cfg.max_bet,
                 "deposit_presets": DEPOSIT_PRESETS,
-                "slots": {"symbols": g.SLOT_SYMBOLS, "triple": g.SLOT_TRIPLE,
-                          "two_diamonds": g.SLOT_TWO_DIAMONDS, "two_cherries": g.SLOT_TWO_CHERRIES},
+                "slots": {"symbols": g.SLOT_SYMBOLS, "777": g.SLOT_777, "triple": g.SLOT_TRIPLE,
+                          "two_sevens": g.SLOT_TWO_SEVENS, "pair": g.SLOT_PAIR},
                 "dice": {"min": g.DICE_MIN_CHANCE, "max": g.DICE_MAX_CHANCE, "edge": g.HOUSE_EDGE},
                 "cases": [
                     {**{k: c[k] for k in ("id", "name", "emoji", "price")},

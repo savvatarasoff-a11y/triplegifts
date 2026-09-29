@@ -7,17 +7,26 @@ import pytest
 from app.games import logic as g
 
 
-def test_slots_rtp_below_one():
-    assert 0.89 < g.slots_rtp() < 0.91
+def test_slots_like_telegram():
+    # раскладка значения 1–64 как у 🎰 Telegram
+    assert g.slots_reels(1) == ["bar", "bar", "bar"]
+    assert g.slots_reels(22) == ["grape", "grape", "grape"]
+    assert g.slots_reels(43) == ["lemon", "lemon", "lemon"]
+    assert g.slots_reels(64) == ["seven", "seven", "seven"]
+    assert g.slots_rtp() == pytest.approx(56 / 64)
+    mults = [g.slots_multiplier(g.slots_reels(v)) for v in range(1, 65)]
+    assert set(mults) == {0, 1, 2, 5}
+    assert mults.count(5) == 1 and mults.count(2) == 12 and mults.count(1) == 27 and mults.count(0) == 24
+    with pytest.raises(ValueError):
+        g.slots_reels(65)
 
 
 def test_slots_multiplier_rules():
-    assert g.slots_multiplier(["💎", "💎", "💎"]) == 1000
-    assert g.slots_multiplier(["7️⃣", "7️⃣", "7️⃣"]) == 250
-    assert g.slots_multiplier(["💎", "🍋", "💎"]) == 10
-    assert g.slots_multiplier(["🍒", "🍒", "🍋"]) == 2
-    assert g.slots_multiplier(["7️⃣", "7️⃣", "🍋"]) == 0
-    assert g.slots_multiplier(["🍋", "🍒", "🍇"]) == 0
+    assert g.slots_multiplier(["seven", "seven", "seven"]) == 5
+    assert g.slots_multiplier(["bar", "bar", "bar"]) == 2
+    assert g.slots_multiplier(["seven", "lemon", "seven"]) == 2
+    assert g.slots_multiplier(["grape", "grape", "seven"]) == 1
+    assert g.slots_multiplier(["bar", "grape", "lemon"]) == 0
 
 
 def test_dice_expected_value():
@@ -110,6 +119,7 @@ def test_pvp_winner_proportional():
 def test_payout_floors():
     assert g.payout(10, 1.9) == 19
     assert g.payout(3, 2.5) == 7
+    assert g.payout(3, 5) == 15
     assert g.payout(5, 0.0) == 0
 
 

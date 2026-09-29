@@ -53,6 +53,14 @@ async def test_bet_validation(casino):
     assert await balance(casino, 1) == 50
 
 
+async def test_slots_with_telegram_value(casino):
+    await fund(casino, 1, 100)
+    r = await casino.slots(1, 10, value=64)
+    assert r["reels"] == ["seven", "seven", "seven"] and r["win"] == 50 and r["balance"] == 140
+    r = await casino.slots(1, 10, value=2)      # grape bar bar -> пара, возврат
+    assert r["multiplier"] == 1 and r["win"] == 10
+
+
 async def test_slots_balance_consistent(casino):
     await fund(casino, 1, 1000)
     total_win = 0
@@ -256,12 +264,10 @@ async def test_pvp_refund_lonely(casino, monkeypatch):
 
 async def test_big_wins_feed(casino, monkeypatch):
     await fund(casino, 1, 100)
-    monkeypatch.setattr(g, "slots_spin", lambda rng=None: (["💎", "💎", "💎"], 1000))
-    await casino.slots(1, 2)
-    monkeypatch.setattr(g, "slots_spin", lambda rng=None: (["🍋", "🍇", "🔔"], 0))
-    await casino.slots(1, 2)
+    await casino.slots(1, 2, value=64)          # 777 -> ×5
+    await casino.slots(1, 2, value=3)           # 🍋 BAR BAR — пара, ×1, в ленту не попадает
     feed = await casino.big_wins()
-    assert feed == [{"game": "slots", "bet": 2, "win": 2000, "x": 1000.0, "name": "User1"}]
+    assert feed == [{"game": "slots", "bet": 2, "win": 10, "x": 5.0, "name": "User1"}]
 
 
 async def test_stats(casino):

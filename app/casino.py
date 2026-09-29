@@ -215,14 +215,19 @@ class Casino:
 
     # ---------- слоты ----------
 
-    async def slots(self, user_id: int, bet: Any) -> dict:
+    async def slots(self, user_id: int, bet: Any, value: int | None = None) -> dict:
+        """value — исход 1–64 (например, от 🎰 Telegram в чате); без него выпадает случайно на сервере."""
         bet = self._check_bet(bet)
-        reels, mult = g.slots_spin()
+        if value is None:
+            value, reels, mult = g.slots_spin()
+        else:
+            reels = g.slots_reels(value)
+            mult = g.slots_multiplier(reels)
         win = g.payout(bet, mult)
         async with self.db.tx() as c:
             await self._take(c, user_id, bet, "slots")
-            balance = await self._settle(c, user_id, "slots", bet, win, {"reels": reels})
-        return {"reels": reels, "multiplier": mult, "win": win, "balance": balance}
+            balance = await self._settle(c, user_id, "slots", bet, win, {"value": value, "reels": reels})
+        return {"value": value, "reels": reels, "multiplier": mult, "win": win, "balance": balance}
 
     # ---------- кости ----------
 
