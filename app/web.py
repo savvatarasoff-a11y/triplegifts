@@ -198,7 +198,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "dice": {"min": g.DICE_MIN_CHANCE, "max": g.DICE_MAX_CHANCE, "edge": g.HOUSE_EDGE},
                 "cases": [
                     {**{k: c[k] for k in ("id", "name", "emoji", "price")},
-                     "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity")}
+                     "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity",
+                                                       "demo")}
                                 for p in c["prizes"]]}
                     for c in await cases.list()
                 ],
@@ -262,7 +263,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def slots(request: web.Request) -> web.Response:
         data = await body(request)
         result = await casino.slots(request[USER_ID], data.get("bet"), cur=data.get("cur"))
-        if result.get("nft"):
+        if result.get("nft") and result["nft"].get("win_id"):
             asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
         return web.json_response(result)
 
@@ -281,7 +282,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             raise GameError("Кейс сейчас недоступен")
         result = await casino.open_case(request[USER_ID], case, data.get("count", 1), data.get("cur"))
         for item in result["items"]:
-            if item["kind"] == "nft":
+            if item["kind"] == "nft" and item["nft"].get("win_id"):
                 asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, item["nft"]["win_id"]))
         return web.json_response(result)
 

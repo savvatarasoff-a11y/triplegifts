@@ -18,7 +18,7 @@ from .config import Config, ConfigError
 from .db import Database
 from .logging_setup import setup_logging
 from .gifts import notify_deposits, scan as gifts_scan
-from .nft import deliver_waiting, sync as sync_nfts
+from .nft import deliver_waiting, reprice_demo, sync as sync_nfts
 from .relayer import Relayer
 from . import ton as ton_mod
 from .web import build_app
@@ -47,6 +47,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("nfts", "NFT-модели и цены"),
     ("relayer", "Релейер NFT"),
     ("tonrate", "Курс TON → звёзды"),
+    ("dupe", "Демо-NFT (модели с MRKT)"),
     ("tonwallet", "Кошелёк для пополнений TON"),
 ]
 
@@ -88,6 +89,10 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer) -> N
             await sync_nfts(casino.db, relayer)
         except Exception:
             log.warning("Не удалось обновить NFT-модели")
+        try:
+            await reprice_demo(casino.db, relayer)
+        except Exception:
+            log.warning("Не удалось обновить цены демо-NFT")
         await asyncio.sleep(600)
 
 

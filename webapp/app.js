@@ -746,6 +746,7 @@ function giftCard(gift, opts) {
   sub.className = "s";
   const parts = [];
   if (gift.model) parts.push(`модель «${gift.model}»` + (gift.rarity ? ` · ${gift.rarity}%` : ""));
+  if (gift.demo) parts.push("демо");
   if (GIFT_STATUS[gift.status]) parts.push(GIFT_STATUS[gift.status]);
   else if (!gift.priced) parts.push("цена проверяется");
   sub.textContent = parts.join(" · ");
@@ -999,7 +1000,7 @@ function upgRenderTargets() {
     const ttl = document.createElement("b");
     ttl.textContent = t.title;
     const md = document.createElement("small");
-    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
+    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "") + (t.demo ? " · демо" : "");
     const pr = document.createElement("span");
     pr.className = "pr";
     pr.textContent = nftPrice(t.price);
@@ -1103,7 +1104,9 @@ async function upgradeGo() {
       res.className = "result reveal " + (r.won ? "win" : "lose");
       wheel.classList.add(r.won ? "won" : "lost");
       if (r.won) {
-        res.textContent = `Апгрейд! ${r.nft.title} «${r.nft.model}» — передаём вам в Telegram`;
+        res.textContent = r.nft.demo
+          ? `Апгрейд! Демо-NFT ${r.nft.title} «${r.nft.model}» — выплачено ${stars(r.nft.price)} по флору`
+          : `Апгрейд! ${r.nft.title} «${r.nft.model}» — передаём вам в Telegram`;
         haptic("win");
         fxBurstAt(wheel, { count: 80, speed: 7 });
         $("#bigwin-label").textContent = "UPGRADE";
@@ -1210,10 +1213,12 @@ async function slotsSpin() {
       if (r.nft) {
         machine.classList.add("won");
         res.className = "result win reveal";
-        res.textContent = `ДЖЕКПОТ! NFT ${r.nft.emoji} ${r.nft.title} · «${r.nft.model}» — передаём вам в Telegram`;
+        res.textContent = r.nft.demo
+          ? `ДЖЕКПОТ! Демо-NFT ${r.nft.title} · «${r.nft.model}» — выплачено ${money(r.win, r.cur)} по флору`
+          : `ДЖЕКПОТ! NFT ${r.nft.emoji} ${r.nft.title} · «${r.nft.model}» — передаём вам в Telegram`;
         haptic("win");
         fxBurstAt(machine, { count: 80, speed: 9 });
-        bigWin(r.nft.price / bet, r.nft.price);
+        bigWin(r.win / bet, r.win);
         $("#bigwin-label").textContent = "NFT JACKPOT";
         $("#bigwin-sum").textContent = `${r.nft.emoji} ${r.nft.title} ≈ ${nftPrice(r.nft.price)}`;
       } else if (r.win === bet) {
@@ -1819,7 +1824,8 @@ function openCaseScreen(c) {
       ttl.className = "ttl";
       ttl.textContent = p.title;
       const model = document.createElement("small");
-      model.textContent = `модель «${p.model || "—"}»` + (p.rarity != null ? ` · ${p.rarity}%` : "");
+      model.textContent = `модель «${p.model || "—"}»` + (p.rarity != null ? ` · ${p.rarity}%` : "")
+        + (p.demo ? " · демо: выплата звёздами" : "");
       d.append(e, ttl, model, document.createTextNode("флор " + nftPrice(p.amount)), sm);
     } else {
       d.append(e, document.createTextNode(casePriceText(p.amount)), sm);
@@ -1890,10 +1896,12 @@ async function openCase() {
       res.className = "result reveal " + (good ? "win" : "lose");
       if (n === 1) {
         res.textContent = nfts.length
-          ? `NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}»! Передаём вам в Telegram`
+          ? (nfts[0].nft.demo
+            ? `Демо-NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}» — выплачено ${money(r.prize, r.cur)} по флору`
+            : `NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}»! Передаём вам в Telegram`)
           : `${r.gift} ${money(r.prize, r.cur)}`;
       } else {
-        res.textContent = `Выпало на ${money(r.total, r.cur)} из ${money(r.cost, r.cur)}` + (nfts.length ? " · NFT передаём в Telegram!" : "");
+        res.textContent = `Выпало на ${money(r.total, r.cur)} из ${money(r.cost, r.cur)}` + (nfts.some((x) => !x.nft.demo) ? " · NFT передаём в Telegram!" : "");
         const drops = $("#case-drops");
         drops.innerHTML = "";
         r.items.forEach((it) => {

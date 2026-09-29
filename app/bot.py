@@ -145,7 +145,11 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             return
         await asyncio.sleep(2.2)   # ждём, пока докрутится анимация
         combo = " ".join(SLOT_TEXT[s] for s in r["reels"])
-        if r.get("nft"):
+        if r.get("nft") and r["nft"].get("demo"):
+            n = r["nft"]
+            text = (f"{combo}\n🎉 <b>ДЖЕКПОТ! Демо-NFT {n['emoji']} {html.escape(n['title'])} "
+                    f"«{html.escape(n['model'])}» — выплачено {r['win']} ⭐ по флору</b>")
+        elif r.get("nft"):
             n = r["nft"]
             asyncio.create_task(deliver_nft(message.bot, casino.db, cfg, relayer, n["win_id"]))
             text = (f"{combo}\n🎉 <b>ДЖЕКПОТ! NFT {n['emoji']} {html.escape(n['title'])} "
@@ -221,6 +225,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/nftoff, /nfton <code>номер</code> — убрать/вернуть модель в NFT-кейс\n"
             "/nftsend <code>номер выигрыша</code> — повторить передачу NFT\n"
             "/tonrate — курс TON → звёзды для цен MRKT\n"
+            "/dupe <code>N</code> — демо-NFT (настоящие модели с MRKT, видны всем), /dupe_clear — удалить\n"
             "/tonwallet <code>адрес</code> — кошелёк казино для пополнений TON\n"
             "/stars — звёзды релейера (из них отправляются подарки при выводе)\n"
             "/checks — активные чеки\n"
@@ -493,6 +498,38 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     @admin.message(Command("nfton"))
     async def nft_on(message: Message, command: CommandObject) -> None:
         await toggle_model(message, command, True)
+
+    @admin.message(Command("dupe"))
+    async def dupe(message: Message, command: CommandObject) -> None:
+        if relayer is None:
+            await message.answer("Релейер не настроен — модели берутся с MRKT через него (/relayer)")
+            return
+        arg = (command.args or "").strip()
+        count = min(30, max(3, int(arg))) if arg.isdigit() else 12
+        status = await message.answer(f"🔄 Беру {count} настоящих моделей и их флор с MRKT…")
+        try:
+            mine, models = await casino.demo_add(message.from_user.id, await relayer.market.sample_models(count))
+        except Exception as e:
+            log.warning("Демо-NFT не созданы", exc_info=True)
+            await status.edit_text(f"⚠️ Не получилось: {html.escape(str(e) or type(e).__name__)}")
+            return
+
+        def line(m: dict) -> str:
+            return f"{m['emoji']} {html.escape(m['title'])} «{html.escape(m['model'])}» — {m['price']} ⭐"
+
+        await status.edit_text(
+            f"🧩 <b>Демо-NFT: {len(models)} моделей</b> (цена — флор MRKT, обновляется раз в 10 минут)\n"
+            + "\n".join(line(m) for m in models)
+            + "\n\nИх видят все: в NFT-кейсах, на 777 и в апгрейде — с пометкой «демо». Подарков у релейера нет, "
+              "поэтому выигравший игрок сразу получает флор звёздами.\n"
+              f"Вам в «Мои подарки» — {len(mine)} дюпа (их нельзя вывести, можно продать казино и ставить).\n"
+              "Ещё модели: <code>/dupe 20</code>, удалить все: /dupe_clear",
+        )
+
+    @admin.message(Command("dupe_clear"))
+    async def dupe_clear(message: Message) -> None:
+        count = await casino.demo_clear()
+        await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
 
     @admin.message(Command("tonrate"))
     async def ton_rate(message: Message, command: CommandObject) -> None:

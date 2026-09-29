@@ -165,6 +165,8 @@ CASE_DEFS = [
         ("🎂", 5), ("💐", 5), ("🍾", 4), ("🚀", 4), ("🏆", 28), ("💍", 27), ("💎", 27),
     )),
 ]
+NFT_MAX_TOTAL_CHANCE = 0.9      # суммарный шанс NFT в кейсе не выше 90%
+NFT_CASE_MIN_PRICE_SHARE = 0.5   # NFT в кейсе — не дешевле 50% цены кейса
 CASE_MIN_RTP = 0.8       # кейс, который с текущими ценами отдаёт игрокам меньше 80%, не показываем
 NFT_CASE_ID = "nft"
 NFT_SHARE = 0.5          # доля цены NFT-кейса, которая в среднем уходит на NFT
@@ -180,9 +182,12 @@ class NftCaseDef:
 
 
 NFT_CASE_DEFS = [
+    NftCaseDef("nft_starter", "NFT Starter", "🍀", 50, 0.4),
     NftCaseDef("nft_mini", "NFT Mini", "🎲", 100, 0.5),
-    NftCaseDef(NFT_CASE_ID, "NFT-кейс", "💎", None, NFT_SHARE),
-    NftCaseDef("nft_premium", "NFT Premium", "👑", 1000, 0.8),
+    NftCaseDef(NFT_CASE_ID, "NFT-кейс", "💎", None, 0.7),
+    NftCaseDef("nft_gold", "NFT Gold", "🏆", 500, 0.8),
+    NftCaseDef("nft_premium", "NFT Premium", "👑", 1000, 0.85),
+    NftCaseDef("nft_legend", "NFT Legend", "🐉", 2500, 0.85),
 ]
 
 
@@ -211,9 +216,9 @@ def nft_case_weights(price: int, nft_prices: Sequence[int], gift_prices: Sequenc
     n = len(nft_prices)
     p_nft = [share * price / (n * pn) for pn in nft_prices]
     total_nft = sum(p_nft)
-    if total_nft > 0.5:                        # NFT слишком дешёвые относительно кейса
-        p_nft = [p * 0.5 / total_nft for p in p_nft]
-        total_nft = 0.5
+    if total_nft > NFT_MAX_TOTAL_CHANCE:       # NFT слишком дешёвые относительно кейса
+        p_nft = [p * NFT_MAX_TOTAL_CHANCE / total_nft for p in p_nft]
+        total_nft = NFT_MAX_TOTAL_CHANCE
     q = 1 - total_nft
     nft_ev = sum(p * pn for p, pn in zip(p_nft, nft_prices))
     need_mean = (target_rtp * price - nft_ev) / q

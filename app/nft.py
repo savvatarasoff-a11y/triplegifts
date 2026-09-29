@@ -60,7 +60,7 @@ async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
         rows.append((collection_id, first["collection_name"], model, first["rarity"], first["emoji"], len(items),
                      price, now if price else None))
     async with db.tx() as c:
-        await c.execute("UPDATE nft_models SET stock=0")
+        await c.execute("UPDATE nft_models SET stock=0 WHERE test=0")   # демо-модели не лежат у релейера
         await c.executemany(
             "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at) "
             "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(collection_id, model) DO UPDATE SET "
@@ -70,6 +70,22 @@ async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
             rows,
         )
     return len(groups), price_error
+
+
+async def reprice_demo(db: Database, relayer: Relayer) -> None:
+    """Демо-NFT: флор с MRKT раз в 10 минут. Если MRKT недоступен — остаётся последняя цена."""
+    now = time.time()
+    for m in await db.all("SELECT id, collection_name, model, price FROM nft_models WHERE test=1"):
+        price = None
+        try:
+            price = await relayer.floor_price(None, m["model"], m["collection_name"])
+        except Exception as e:
+            log.warning("Цена демо-модели %s недоступна: %s", m["model"], type(e).__name__)
+        price = price or m["price"]
+        async with db.tx() as c:
+            await c.execute("UPDATE nft_models SET price=?, price_at=? WHERE id=?", (price, now, m["id"]))
+            await c.execute("UPDATE user_gifts SET value=?, priced_at=? WHERE test=1 AND collection_name=? AND model=? "
+                            "AND status IN ('owned','staked')", (price, now, m["collection_name"], m["model"]))
 
 
 def describe(m: dict) -> str:

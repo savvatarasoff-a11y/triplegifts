@@ -61,13 +61,17 @@ class CaseCatalog:
             return None
         regular = sorted(prices.values(), key=lambda x: x["stars"])
         price = d.price or self.nft_case_price
+        # в дорогом кейсе — только NFT не дешевле половины его цены (иначе дешёвые NFT «съедают» шансы)
+        models = [m for m in models if m["price"] >= price * g.NFT_CASE_MIN_PRICE_SHARE]
+        if not models:
+            return None
         probs = g.nft_case_weights(price, [m["price"] for m in models], [x["stars"] for x in regular], share=d.share)
         if probs is None:
             return None
         p_nft, p_gift = probs
         prizes = [
             {"kind": "nft", "model_id": m["id"], "emoji": m["emoji"] or "💎", "title": m["collection_name"],
-             "model": m["model"], "rarity": m["rarity"], "amount": m["price"], "weight": p}
+             "model": m["model"], "rarity": m["rarity"], "amount": m["price"], "weight": p, "demo": bool(m["test"])}
             for m, p in zip(models, p_nft)
         ]
         prizes += [
