@@ -60,7 +60,7 @@ async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
         rows.append((collection_id, first["collection_name"], model, first["rarity"], first["emoji"], len(items),
                      price, now if price else None))
     async with db.tx() as c:
-        await c.execute("UPDATE nft_models SET stock=0 WHERE test=0")
+        await c.execute("UPDATE nft_models SET stock=0")
         await c.executemany(
             "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at) "
             "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(collection_id, model) DO UPDATE SET "

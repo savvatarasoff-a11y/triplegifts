@@ -220,7 +220,6 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/nfts — модели NFT у релейера и их цены с маркета\n"
             "/nftoff, /nfton <code>номер</code> — убрать/вернуть модель в NFT-кейс\n"
             "/nftsend <code>номер выигрыша</code> — повторить передачу NFT\n"
-            "/testnft — выдать себе тестовые NFT (настоящие модели с MRKT, для апгрейда), /testnft_clear — удалить\n"
             "/tonrate — курс TON → звёзды для цен MRKT\n"
             "/tonwallet <code>адрес</code> — кошелёк казино для пополнений TON\n"
             "/stars — звёзды релейера (из них отправляются подарки при выводе)\n"
@@ -463,7 +462,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             await status.edit_text(f"⚠️ Не удалось обновить: {html.escape(type(e).__name__)}: "
                                    f"{html.escape(str(e)[:300])}")
             return
-        rows = await casino.db.all("SELECT * FROM nft_models WHERE test=0 AND (stock > 0 OR reserved > 0) "
+        rows = await casino.db.all("SELECT * FROM nft_models WHERE (stock > 0 OR reserved > 0) "
                                    "ORDER BY price DESC")
         if not rows:
             text = f"⚠️ {html.escape(error)}" if error else "У релейера нет NFT-подарков, которые можно передать."
@@ -495,32 +494,6 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     async def nft_on(message: Message, command: CommandObject) -> None:
         await toggle_model(message, command, True)
 
-    @admin.message(Command("testnft"))
-    async def test_nft(message: Message) -> None:
-        if relayer is None:
-            await message.answer("Релейер не настроен — модели берутся с MRKT через него (/relayer)")
-            return
-        status = await message.answer("🔄 Беру настоящие модели и их флор с MRKT…")
-        try:
-            gifts, targets = await casino.test_nfts_add(message.from_user.id,
-                                                        await relayer.market.sample_models(6))
-        except Exception as e:
-            log.warning("Тестовые NFT не созданы", exc_info=True)
-            await status.edit_text(f"⚠️ Не получилось: {html.escape(str(e) or type(e).__name__)}")
-            return
-
-        def line(m: dict) -> str:
-            return f"{m['emoji']} {html.escape(m['title'])} «{html.escape(m['model'])}» — {m['price']} ⭐"
-
-        await status.edit_text(
-            "🧪 <b>Тестовые NFT</b> (настоящие модели, цена — флор MRKT)\n\n"
-            "Вам в «Мои подарки»:\n" + "\n".join(line(m) for m in gifts)
-            + "\n\nЦели апгрейда (видите только вы):\n" + "\n".join(line(m) for m in targets)
-            + "\n\nЭто заглушки: их нельзя продать, вывести или поставить в PvP, они не попадают в кейсы "
-              "и статистику. Выигрыш апгрейда — новая заглушка. Удалить все: /testnft_clear",
-        )
-        await message.answer("Открыть апгрейд:", reply_markup=play_keyboard(cfg))
-
     @admin.message(Command("tonrate"))
     async def ton_rate(message: Message, command: CommandObject) -> None:
         arg = (command.args or "").strip()
@@ -544,11 +517,6 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             + f", звезда = ${STAR_USD})\n"
             "Задать: <code>/tonrate 200</code>, вернуть авто: <code>/tonrate auto</code>" if rate else
             "Курс TON недоступен — задайте вручную: <code>/tonrate 200</code>")
-
-    @admin.message(Command("testnft_clear"))
-    async def test_nft_clear(message: Message) -> None:
-        count = await casino.test_nfts_clear()
-        await message.answer(f"🧹 Удалено тестовых NFT: {count}. Тестовые цели апгрейда тоже убраны.")
 
     @admin.message(Command("nftsend"))
     async def nft_send(message: Message, command: CommandObject, bot: Bot) -> None:

@@ -54,7 +54,7 @@ class CaseCatalog:
     async def _nft_case(self, prices: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
         """NFT-кейс из моделей, которые есть у релейера и чья цена проверена на маркете не позже часа назад."""
         models = await self.db.all(
-            "SELECT * FROM nft_models WHERE enabled=1 AND test=0 AND stock > reserved AND price > 0 AND price_at > ? "
+            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
             "ORDER BY price DESC",
             time.time() - PRICE_MAX_AGE,
         )

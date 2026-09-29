@@ -186,10 +186,7 @@ async def test_mrkt_floor_by_collection_and_model(env):
     assert len(requests) == n                                         # из кэша
     relayer.market = market
     assert await relayer.floor_price("100", "Frog", "Plush Pepe") == 1500
-    models = await market.sample_models(2)
-    assert sorted((m["title"], m["model"], m["price"]) for m in models) == [
-        ("Durov's Cap", "Black", 24000), ("Plush Pepe", "Frog", 1500)]
-    assert all(m["emoji"] in ("🐸", "🧢") and m["rarity"] == 1.5 for m in models)
+
 
 
 async def test_relayer_inventory_and_paid_transfer(env):

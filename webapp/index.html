@@ -112,30 +112,55 @@
 
     <!-- Апгрейд NFT -->
     <section class="screen" id="upgrade">
-      <div class="upg-wheel">
-        <svg viewBox="0 0 200 200" aria-hidden="true">
-          <circle class="upg-track" cx="100" cy="100" r="84"/>
-          <circle class="upg-arc" id="upg-arc" cx="100" cy="100" r="84"/>
-        </svg>
-        <div class="upg-needle" id="upg-needle"><i></i></div>
-        <div class="upg-center"><b id="upg-chance">0%</b><small>шанс</small></div>
+      <div class="upg-stage">
+        <div class="upg-wheel" id="upg-wheel">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <defs>
+              <linearGradient id="upg-grad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#C4B5FD"/><stop offset="1" stop-color="#7C3AED"/>
+              </linearGradient>
+            </defs>
+            <circle class="upg-track" cx="100" cy="100" r="84"/>
+            <circle class="upg-ticks" cx="100" cy="100" r="96"/>
+            <circle class="upg-arc" id="upg-arc" cx="100" cy="100" r="84"/>
+          </svg>
+          <div class="upg-needle" id="upg-needle"><i></i></div>
+          <div class="upg-center">
+            <b id="upg-chance">0%</b>
+            <small>шанс</small>
+            <span class="upg-x" id="upg-x">—</span>
+          </div>
+        </div>
+        <div class="upg-pair">
+          <div class="upg-side" id="upg-from"><small>Ставка</small><div class="upg-em" id="upg-from-em">🎁</div><b id="upg-stake">выберите NFT</b></div>
+          <div class="upg-arrow">➜</div>
+          <div class="upg-side to" id="upg-to"><small>Цель</small><div class="upg-em" id="upg-to-em">💎</div><b id="upg-target">выберите цель</b></div>
+        </div>
       </div>
-      <div class="upg-pair">
-        <div class="upg-side"><small>Ставка</small><div class="upg-em" id="upg-from-em">🎁</div><b id="upg-stake">—</b></div>
-        <div class="upg-arrow">›</div>
-        <div class="upg-side to"><small>Цель</small><div class="upg-em" id="upg-to-em">💎</div><b id="upg-target">—</b></div>
+
+      <div class="upg-mults" id="upg-mults">
+        <span class="upg-mults-l">Подобрать цель</span>
+        <button data-x="1.5">×1.5</button><button data-x="2">×2</button><button data-x="5">×5</button><button data-x="10">×10</button>
       </div>
+
       <div class="result" id="upg-result"></div>
       <button class="btn big" id="upg-btn">Апгрейд</button>
+
       <div class="panel">
-        <div class="panel-title">Мои NFT — ставка</div>
+        <div class="panel-head">
+          <div class="panel-title">Мои NFT</div>
+          <button class="link-btn" id="upg-all">Выбрать все</button>
+        </div>
         <div class="mygifts" id="upg-gifts"></div>
       </div>
       <div class="panel">
-        <div class="panel-title">Цель</div>
+        <div class="panel-head">
+          <div class="panel-title">Цель <span class="muted" id="upg-tcount"></span></div>
+        </div>
+        <input class="search" id="upg-search" placeholder="Поиск: коллекция или модель" autocomplete="off">
         <div class="upg-targets" id="upg-targets"></div>
       </div>
-      <p class="note">Ставка — только ваши NFT (Кошелёк → Подарки). Шанс = стоимость ставки / цену цели × 0.9, максимум 75%. Цены — флор MRKT. Выиграли — NFT цели придёт в Telegram; поставленные NFT забирает казино.</p>
+      <p class="note">Ставка — ваши NFT (Кошелёк → Подарки). Шанс = стоимость ставки / цена цели × 0.9, максимум 75%. Цены — флор MRKT. Выиграли — NFT цели придёт в Telegram, поставленные NFT забирает казино.</p>
     </section>
 
     <!-- Рефералы -->

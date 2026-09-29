@@ -46,7 +46,6 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("stars", "Баланс звёзд бота"),
     ("nfts", "NFT-модели и цены"),
     ("relayer", "Релейер NFT"),
-    ("testnft", "Тестовые NFT (модели с MRKT)"),
     ("tonrate", "Курс TON → звёзды"),
     ("tonwallet", "Кошелёк для пополнений TON"),
 ]

@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-import random
 import re
 import time
 from typing import Any
@@ -49,21 +48,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Chrome/141.0.0.0 Mobile Safari/537.36",
 }
-
-# У MRKT нет эмодзи моделей — показываем узнаваемый значок коллекции
-EMOJI = {"pepe": "🐸", "frog": "🐸", "cap": "🧢", "hat": "🎩", "cake": "🎂", "pop": "🍭", "candy": "🍬",
-         "heart": "❤️", "rose": "🌹", "ring": "💍", "diamond": "💎", "star": "⭐", "cat": "🐱", "dog": "🐶",
-         "bear": "🧸", "egg": "🥚", "rocket": "🚀", "clover": "🍀", "bell": "🔔", "cookie": "🍪",
-         "calendar": "📅", "lamp": "🪔", "skull": "💀", "ghost": "👻", "witch": "🧹", "pumpkin": "🎃",
-         "snake": "🐍", "helmet": "⛑️", "sword": "⚔️", "bunny": "🐰", "duck": "🦆", "monkey": "🐵",
-         "genie": "🧞", "berry": "🍓", "cigar": "🚬", "potion": "🧪", "crystal": "🔮", "ball": "🔮",
-         "box": "🎁", "bag": "👜", "boots": "👢", "gem": "💎", "flower": "🌸", "dragon": "🐉", "ice": "🧊"}
-
-
-def emoji_for(collection: str) -> str:
-    low = collection.lower()
-    return next((e for k, e in EMOJI.items() if k in low), "🎁")
-
 
 class MrktError(Exception):
     pass
@@ -214,34 +198,3 @@ class Mrkt:
             return None
         rate = await self.ton_rate()
         return int(ton * rate) if rate else None
-
-    # ---------- настоящие модели для тестовых NFT ----------
-
-    async def sample_models(self, count: int) -> list[dict[str, Any]]:
-        """Случайные настоящие модели с MRKT с их флором в звёздах (для тестовых NFT админа)."""
-        rate = await self.ton_rate()
-        if not rate:
-            raise MrktError("Нет курса TON → звёзды, задайте его: /tonrate 200")
-        colls = [c for c in await self.collections() if c.get("floorPriceNanoTons") and not c.get("isHidden")]
-        random.shuffle(colls)
-        picked: list[dict[str, Any]] = []
-        seen = set()
-        for coll in colls:
-            if len(picked) >= count:
-                break
-            name = coll.get("name") or coll.get("title")
-            lots = await self.saling(name, count=20)
-            random.shuffle(lots)
-            for lot in lots:
-                key = (lot.get("collectionName") or name, lot.get("modelName"))
-                if not key[1] or key in seen:
-                    continue
-                floor = await self.floor_ton(*key)
-                if not floor:
-                    continue
-                seen.add(key)
-                picked.append({"collection": key[0], "title": coll.get("title") or key[0], "model": key[1],
-                               "rarity": (lot.get("modelRarityPerMille") or 0) / 10 or None,
-                               "emoji": emoji_for(key[0]), "price": max(1, int(floor * rate))})
-                break
-        return picked

@@ -707,7 +707,7 @@ const nftSlug = (collection) => (collection || "").toLowerCase().replace(/[^a-z0
 
 function nftImgUrl(o) {
   if (!o || !o.collection) return null;
-  if (o.number && !o.test) return `https://nft.fragment.com/gift/${nftSlug(o.collection)}-${o.number}.webp`;
+  if (o.number) return `https://nft.fragment.com/gift/${nftSlug(o.collection)}-${o.number}.webp`;
   if (o.model) {
     return `https://cdn.changes.tg/gifts/models/${encodeURIComponent(o.collection)}/png/${encodeURIComponent(o.model)}.png`;
   }
@@ -773,12 +773,7 @@ async function loadMyGifts(quiet) {
     if (!data.gifts.length) box.textContent = "Пока пусто. Отправьте подарок — и он появится здесь.";
     data.gifts.forEach((gift) => {
       const card = giftCard(gift);
-      if (gift.status === "owned" && gift.test) {
-        const note = document.createElement("div");
-        note.className = "s acts-note";
-        note.textContent = "Тестовая заглушка — только для апгрейда";
-        card.append(note);
-      } else if (gift.status === "owned") {
+      if (gift.status === "owned") {
         const acts = document.createElement("div");
         acts.className = "acts";
         const sell = document.createElement("button");
@@ -845,7 +840,7 @@ async function pvpGiftSheet(game) {
   await guard(async () => {
     const data = await api("/api/gifts");
     myGifts.relayer = data.relayer;
-    const usable = data.gifts.filter((g) => g.status === "owned" && !g.test);   // заглушки — не для PvP
+    const usable = data.gifts.filter((g) => g.status === "owned");
     const list = $("#sheet-list");
     list.innerHTML = "";
     const chosen = new Set();
@@ -888,47 +883,114 @@ async function pvpGiftSheet(game) {
 
 // ---------- апгрейд NFT ----------
 
-const upg = { gifts: [], targets: [], chosen: new Set(), target: null, cfg: null, angle: 0, spinning: false };
+const upg = { gifts: [], targets: [], chosen: new Set(), target: null, cfg: null, angle: 0, spinning: false,
+  mult: null, query: "" };
 const UPG_R = 84;
 const UPG_C = 2 * Math.PI * UPG_R;
+const upgTargetNft = (t) => ({ collection: t.title, model: t.model, emoji: t.emoji });
 
 function upgStake() {
   return upg.gifts.filter((g) => upg.chosen.has(g.id)).reduce((a, g) => a + g.value, 0);
 }
 
-function upgChance() {
+function upgChanceFor(stake, price) {
+  if (!upg.cfg || !stake || !price || stake >= price) return 0;
+  return Math.min(upg.cfg.max_chance, (1 - upg.cfg.edge) * stake / price);
+}
+
+const upgChance = () => upgChanceFor(upgStake(), upg.target && upg.target.price);
+const pct = (c) => (c ? (c * 100).toFixed(c < 0.1 ? 2 : 1) : "0") + "%";
+
+// Автоподбор: цель с ценой ближе всего к ставке × X (дороже ставки, шанс не меньше минимального)
+function upgPick(mult) {
   const stake = upgStake();
-  if (!upg.cfg || !upg.target || !stake || stake >= upg.target.price) return 0;
-  return Math.min(upg.cfg.max_chance, (1 - upg.cfg.edge) * stake / upg.target.price);
+  if (!stake) return null;
+  const want = stake * mult;
+  const ok = upg.targets.filter((t) => t.price > stake && upgChanceFor(stake, t.price) >= upg.cfg.min_chance);
+  if (!ok.length) return null;
+  return ok.reduce((best, t) => (Math.abs(Math.log(t.price / want)) < Math.abs(Math.log(best.price / want)) ? t : best));
+}
+
+function upgApplyMult() {
+  if (!upg.mult) return;
+  const t = upgPick(upg.mult);
+  upg.target = t;
+  if (!t && upgStake()) toast("Под такой множитель целей нет", true);
 }
 
 function upgUpdate() {
   const stake = upgStake();
   const chance = upgChance();
   $("#upg-arc").style.strokeDashoffset = UPG_C * (1 - chance);
-  $("#upg-chance").textContent = (chance * 100).toFixed(chance < 0.1 ? 2 : 1) + "%";
+  $("#upg-chance").textContent = pct(chance);
+  $("#upg-x").textContent = stake && upg.target ? "×" + (upg.target.price / stake).toFixed(2) : "—";
   const picked = upg.gifts.filter((g) => upg.chosen.has(g.id));
   const from = $("#upg-from-em");
   from.innerHTML = "";
   if (!picked.length) from.textContent = "🎁";
   picked.slice(0, 3).forEach((g) => from.append(nftIcon(g, "nft-inline")));
+  if (picked.length > 3) from.append(Object.assign(document.createElement("span"), { className: "more", textContent: `+${picked.length - 3}` }));
   $("#upg-stake").textContent = stake ? nftPrice(stake) : "выберите NFT";
-  if (upg.target) setNftIcon($("#upg-to-em"), { collection: upg.target.title.replace(/^🧪 /, ""), model: upg.target.model,
-    emoji: upg.target.emoji });
+  if (upg.target) setNftIcon($("#upg-to-em"), upgTargetNft(upg.target));
   else $("#upg-to-em").textContent = "💎";
-  $("#upg-target").textContent = upg.target ? nftPrice(upg.target.price) : "выберите цель";
+  $("#upg-target").textContent = upg.target ? `${upg.target.title} «${upg.target.model}» · ${nftPrice(upg.target.price)}` : "выберите цель";
+  $("#upg-from").classList.toggle("filled", !!stake);
+  $("#upg-to").classList.toggle("filled", !!upg.target);
+  $$("#upg-mults button").forEach((b) => b.classList.toggle("sel", Number(b.dataset.x) === upg.mult));
   const btn = $("#upg-btn");
   let hint = "";
   if (!stake) hint = "Выберите свои NFT";
-  else if (!upg.target) hint = "Выберите цель";
+  else if (!upg.target) hint = "Выберите цель или множитель";
   else if (stake >= upg.target.price) hint = "Цель должна быть дороже ставки";
   else if (chance < upg.cfg.min_chance) hint = "Шанс меньше 1%";
   btn.disabled = !!hint || upg.spinning;
-  btn.textContent = hint || `Апгрейд · шанс ${(chance * 100).toFixed(1)}%`;
+  btn.textContent = upg.spinning ? "Крутим…" : hint || `Апгрейд · шанс ${pct(chance)}`;
+  $("#upg-all").textContent = upg.gifts.length && upg.gifts.filter((g) => g.priced).every((g) => upg.chosen.has(g.id))
+    ? "Снять все" : "Выбрать все";
   $$("#upg-targets .upt").forEach((el) => {
     const t = upg.targets[el.dataset.i];
     el.classList.toggle("sel", upg.target === t);
     el.classList.toggle("off", !!stake && t.price <= stake);
+    const x = el.querySelector(".x");
+    const c = upgChanceFor(stake, t.price);
+    x.textContent = stake && t.price > stake ? `×${(t.price / stake).toFixed(1)} · ${pct(c)}` : "";
+  });
+}
+
+function upgRenderTargets() {
+  const tbox = $("#upg-targets");
+  tbox.innerHTML = "";
+  const q = upg.query.trim().toLowerCase();
+  const list = upg.targets.map((t, i) => [t, i])
+    .filter(([t]) => !q || `${t.title} ${t.model}`.toLowerCase().includes(q));
+  $("#upg-tcount").textContent = upg.targets.length ? `· ${list.length}` : "";
+  if (!upg.targets.length) tbox.innerHTML = '<div class="note">Сейчас нет NFT для апгрейда — загляните позже.</div>';
+  else if (!list.length) tbox.innerHTML = '<div class="note">Ничего не найдено</div>';
+  list.forEach(([t, i]) => {
+    const b = document.createElement("button");
+    b.className = "upt";
+    b.dataset.i = i;
+    const em = document.createElement("span");
+    em.className = "em";
+    em.append(nftIcon(upgTargetNft(t), "nft-inline big"));
+    const ttl = document.createElement("b");
+    ttl.textContent = t.title;
+    const md = document.createElement("small");
+    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
+    const pr = document.createElement("span");
+    pr.className = "pr";
+    pr.textContent = nftPrice(t.price);
+    const x = document.createElement("span");
+    x.className = "x";
+    b.append(x, em, ttl, md, pr);
+    b.addEventListener("click", () => {
+      if (upg.spinning) return;
+      upg.target = upg.target === t ? null : t;
+      upg.mult = null;
+      haptic();
+      upgUpdate();
+    });
+    tbox.append(b);
   });
 }
 
@@ -942,7 +1004,6 @@ function upgRender() {
     const b = document.createElement("button");
     b.className = "btn";
     b.textContent = "Как отправить NFT";
-    b.dataset.wallet = "nft";
     b.addEventListener("click", () => { go("wallet"); walletTab("nft"); });
     gbox.append(p, b);
   }
@@ -956,42 +1017,30 @@ function upgRender() {
       if (upg.chosen.has(gift.id)) upg.chosen.delete(gift.id); else upg.chosen.add(gift.id);
       card.classList.toggle("sel", upg.chosen.has(gift.id));
       haptic();
+      upgApplyMult();
       upgUpdate();
     });
     gbox.append(card);
   });
-  const tbox = $("#upg-targets");
-  tbox.innerHTML = "";
-  if (!upg.targets.length) tbox.innerHTML = '<div class="note">Сейчас нет NFT для апгрейда — загляните позже.</div>';
-  upg.targets.forEach((t, i) => {
-    const b = document.createElement("button");
-    b.className = "upt";
-    b.dataset.i = i;
-    const em = document.createElement("span");
-    em.className = "em";
-    em.append(nftIcon({ collection: t.title, model: t.model, emoji: t.emoji }, "nft-inline big"));
-    const ttl = document.createElement("b");
-    ttl.textContent = t.title;
-    const md = document.createElement("small");
-    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
-    const pr = document.createElement("span");
-    pr.className = "pr";
-    pr.textContent = nftPrice(t.price);
-    b.append(em, ttl, md, pr);
-    b.addEventListener("click", () => {
-      if (upg.spinning) return;
-      upg.target = upg.target === t ? null : t;
-      haptic();
-      upgUpdate();
-    });
-    tbox.append(b);
-  });
+  upgRenderTargets();
+  upgUpdate();
+}
+
+function upgSelectAll() {
+  if (upg.spinning) return;
+  const priced = upg.gifts.filter((g) => g.priced);
+  const all = priced.length && priced.every((g) => upg.chosen.has(g.id));
+  upg.chosen = all ? new Set() : new Set(priced.map((g) => g.id));
+  $$("#upg-gifts .mg").forEach((el, k) => el.classList.toggle("sel", upg.chosen.has(upg.gifts[k].id)));
+  haptic();
+  upgApplyMult();
   upgUpdate();
 }
 
 async function upgradeEnter() {
   $("#upg-arc").style.strokeDasharray = UPG_C;
   $("#upg-result").textContent = "";
+  $("#upg-wheel").classList.remove("won", "lost");
   try {
     const data = await api("/api/upgrade");
     upg.cfg = data;
@@ -1007,33 +1056,39 @@ async function upgradeEnter() {
 async function upgradeGo() {
   if (!upg.target || !upg.chosen.size) return;
   const chance = upgChance();
-  const ok = await confirmAsk(`Поставить NFT на ${stars(upgStake())} ради ${upg.target.title} «${upg.target.model}» `
-    + `(${stars(upg.target.price)})? Шанс ${(chance * 100).toFixed(1)}%. При проигрыше NFT уйдут казино.`);
+  const target = upg.target;
+  const ok = await confirmAsk(`Поставить NFT на ${nftPrice(upgStake())} ради ${target.title} «${target.model}» `
+    + `(${nftPrice(target.price)})? Шанс ${pct(chance)}. При проигрыше NFT уйдут казино.`);
   if (!ok) return;
   await guard(async () => {
     upg.spinning = true;
     upgUpdate();
     const res = $("#upg-result");
+    const wheel = $("#upg-wheel");
+    wheel.classList.remove("won", "lost");
     try {
-      const r = await api("/api/upgrade", { gifts: [...upg.chosen], target: upg.target.id });
+      const r = await api("/api/upgrade", { gifts: [...upg.chosen], target: target.id });
       haptic();
       res.className = "result";
-      res.textContent = "Крутим…";
+      res.textContent = "";
       // стрелка останавливается на roll: зона выигрыша — дуга [0, шанс) от верха по часовой
       const needle = $("#upg-needle");
-      upg.angle += 360 * 5 + ((r.roll * 360 - upg.angle) % 360 + 360) % 360;
-      needle.style.transition = "transform 4.2s cubic-bezier(.12,.72,.1,1)";
+      upg.angle += 360 * 6 + ((r.roll * 360 - upg.angle) % 360 + 360) % 360;
+      needle.style.transition = "transform 4.6s cubic-bezier(.12,.72,.1,1)";
       needle.style.transform = `rotate(${upg.angle}deg)`;
-      await sleep(4300);
+      await sleep(4700);
       res.className = "result reveal " + (r.won ? "win" : "lose");
+      wheel.classList.add(r.won ? "won" : "lost");
       if (r.won) {
-        res.textContent = `Апгрейд! ${r.nft.emoji} ${r.nft.title} «${r.nft.model}» — `
-          + (r.nft.test ? "тестовый NFT в «Моих подарках»" : "передаём вам в Telegram");
+        res.textContent = `Апгрейд! ${r.nft.title} «${r.nft.model}» — передаём вам в Telegram`;
         haptic("win");
-        celebrate(r.stake, r.target, $("#upg-needle"));
-        fxBurstAt($(".upg-wheel"), { count: 60, speed: 6 });
+        fxBurstAt(wheel, { count: 80, speed: 7 });
+        $("#bigwin-label").textContent = "UPGRADE";
+        $("#bigwin-x").textContent = "×" + (r.target / r.stake).toFixed(2);
+        $("#bigwin-sum").textContent = `${r.nft.title} «${r.nft.model}»`;
+        $("#bigwin").classList.remove("hidden");
       } else {
-        res.textContent = "Не повезло — попробуйте ещё";
+        res.textContent = `Мимо: выпало ${(r.roll * 100).toFixed(1)}, нужно было меньше ${pct(r.chance)}`;
         haptic("lose");
       }
       upg.chosen.clear();
@@ -1041,9 +1096,10 @@ async function upgradeGo() {
     } finally {
       upg.spinning = false;
     }
-    const shown = [res.className, res.textContent];
+    const shown = [res.className, res.textContent, [...wheel.classList]];
     await upgradeEnter();
     [res.className, res.textContent] = shown;
+    wheel.className = shown[2].join(" ");
   });
 }
 
@@ -2199,6 +2255,17 @@ function bind() {
     walletTab(b.dataset.wallet);
   }));
   $("#upg-btn").addEventListener("click", upgradeGo);
+  $("#upg-all").addEventListener("click", upgSelectAll);
+  $("#upg-search").addEventListener("input", (e) => { upg.query = e.target.value; upgRenderTargets(); upgUpdate(); });
+  $$("#upg-mults button").forEach((b) => b.addEventListener("click", () => {
+    if (upg.spinning) return;
+    haptic();
+    const x = Number(b.dataset.x);
+    upg.mult = upg.mult === x ? null : x;
+    if (upg.mult && !upgStake()) { toast("Сначала выберите свои NFT", true); upg.mult = null; }
+    upgApplyMult();
+    upgUpdate();
+  }));
   $$("#cur-switch button").forEach((b) => b.addEventListener("click", () => {
     if (b.dataset.cur === state.cur || state.busy) return;
     haptic();
