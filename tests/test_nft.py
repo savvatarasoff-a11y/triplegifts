@@ -272,6 +272,7 @@ def test_parse_ton_usd():
     from app.mrkt import parse_usd
     assert parse_usd("💎 TON $5.43") == 5.43
     assert parse_usd("TON: 5,12$ 📈") == 5.12
+    assert parse_usd("1,45$") == 1.45                                   # формат @tonprices
     assert parse_usd("1 TON = 3.9 USD") == 3.9
     assert parse_usd("Toncoin 📉 -2%") is None
 
