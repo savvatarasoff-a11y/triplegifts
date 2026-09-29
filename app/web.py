@@ -268,13 +268,15 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
     @routes.post("/api/case")
     async def open_case(request: web.Request) -> web.Response:
-        case_id = (await body(request)).get("case")
+        data = await body(request)
+        case_id = data.get("case")
         case = await cases.get(case_id) if isinstance(case_id, str) else None
         if not case:
             raise GameError("Кейс сейчас недоступен")
-        result = await casino.open_case(request[USER_ID], case)
-        if result["kind"] == "nft":
-            asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
+        result = await casino.open_case(request[USER_ID], case, data.get("count", 1))
+        for item in result["items"]:
+            if item["kind"] == "nft":
+                asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, item["nft"]["win_id"]))
         return web.json_response(result)
 
     @routes.get("/api/mines")

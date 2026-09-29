@@ -229,6 +229,20 @@ async def test_cases_gift(casino):
     assert r["kind"] == "gift" and r["prize"] == 15 and r["gift"] == "🧸" and r["balance"] == 15
 
 
+async def test_cases_open_several(casino):
+    await fund(casino, 1, 100)
+    r = await casino.open_case(1, GIFT_CASE, 3)
+    assert (r["count"], r["cost"], r["total"], len(r["items"])) == (3, 75, 45, 3)
+    assert r["balance"] == 100 - 75 + 45
+    assert (await casino.db.one("SELECT COUNT(*) n FROM bets WHERE game='case'"))["n"] == 3
+    with pytest.raises(GameError, match="Недостаточно"):
+        await casino.open_case(1, GIFT_CASE, 5)                  # 125 > 70 — ничего не списалось
+    assert await balance(casino, 1) == 70
+    for bad in (0, 6, "2", True):
+        with pytest.raises(GameError):
+            await casino.open_case(1, GIFT_CASE, bad)
+
+
 async def test_cases_nft_model_reserved_not_credited(casino):
     import time as _t
     await casino.db.conn.execute(
@@ -249,6 +263,9 @@ async def test_cases_nft_model_reserved_not_credited(casino):
     with pytest.raises(GameError, match="закончились"):          # единственный подарок модели уже зарезервирован
         await casino.open_case(2, nft_case)
     assert await balance(casino, 2) == 500                       # списание откатилось
+    with pytest.raises(GameError, match="закончились"):          # и в пачке — вся пачка откатывается
+        await casino.open_case(2, nft_case, 2)
+    assert await balance(casino, 2) == 500
 
 
 async def test_pvp_round(casino, monkeypatch):

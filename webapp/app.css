@@ -415,3 +415,16 @@ body.has-tabbar { padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
 .best small { color: var(--muted); font-weight: 700; font-size: 12px; display: block; }
 .best b { font-family: var(--font-head); font-size: 18px; color: var(--accent-soft); }
 .ref-link + .row .btn.big { flex: 1; width: auto; min-width: 0; padding: 14px 10px; font-size: 15px; }
+
+/* ---------- несколько кейсов сразу ---------- */
+.seg.five { grid-template-columns: repeat(5, 1fr); margin-top: 12px; }
+.case-rollers { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.case-rollers .roller { margin-top: 0; }
+.case-rollers.multi .roller { height: 76px; }
+.case-rollers.multi .roller-track .it { height: 64px; flex-basis: 84px; }
+.case-rollers.multi .roller-track .it .em { font-size: 26px; }
+.case-rollers.multi .roller-track .it small { font-size: 11px; }
+.case-drops { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: -4px 0 4px; }
+.case-drops span { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px;
+  font-weight: 800; font-size: 13px; animation: pop .3s; }
+.case-drops span.good { border-color: var(--accent); color: var(--accent-soft); }

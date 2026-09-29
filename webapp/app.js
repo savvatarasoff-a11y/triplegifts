@@ -801,7 +801,7 @@ async function slotsSpin() {
 // ---------- ролик (кейсы, PvP-рулетка) ----------
 
 async function roll(rollerSel, items, targetIndex, duration) {
-  const roller = $(rollerSel);
+  const roller = typeof rollerSel === "string" ? $(rollerSel) : rollerSel;
   const track = roller.querySelector(".roller-track");
   track.innerHTML = "";
   items.forEach((it) => {
@@ -1372,43 +1372,90 @@ function openCaseScreen(c) {
     }
     box.append(d);
   });
-  const items = [];
-  for (let i = 0; i < 12; i++) items.push(prizeItem(pickPrize(c), c.price));
-  roll("#case-roller", items, 5, 0);
+  caseSetCount(caseCount);
+}
+
+let caseCount = 1;
+
+// Рулетки кейса: по одной на каждый открываемый кейс
+function caseRollers(n) {
+  const box = $("#case-rollers");
+  box.classList.toggle("multi", n > 1);
+  while (box.children.length > n) box.lastChild.remove();
+  while (box.children.length < n) {
+    const r = document.createElement("div");
+    r.className = "roller tall";
+    r.innerHTML = '<div class="roller-track"></div><div class="roller-pointer"></div>';
+    box.append(r);
+  }
+  return Array.from(box.children);
+}
+
+function caseSetCount(n) {
+  caseCount = n;
+  store("case:count", String(n));
+  $$("#case-count button").forEach((b) => b.classList.toggle("sel", parseInt(b.dataset.n, 10) === n));
+  if (!currentCase) return;
+  $("#case-btn").textContent = `Открыть ${n > 1 ? n + " шт. " : ""}за ${stars(currentCase.price * n)}`;
+  $("#case-drops").classList.add("hidden");
+  caseRollers(n).forEach((r) => {
+    const items = [];
+    for (let i = 0; i < 12; i++) items.push(prizeItem(pickPrize(currentCase), currentCase.price));
+    roll(r, items, 5, 0);
+  });
 }
 
 async function openCase() {
   if (!currentCase) return;
   await guard(async () => {
-    if (state.me && state.me.balance < currentCase.price) throw new Error("Недостаточно звёзд на балансе");
+    const n = caseCount;
+    const cost = currentCase.price * n;
+    if (state.me && state.me.balance < cost) throw new Error("Недостаточно звёзд на балансе");
     $("#case-btn").disabled = true;
+    $$("#case-count button").forEach((b) => { b.disabled = true; });
     try {
-      const r = await api("/api/case", { case: currentCase.id }, { deferBalance: true });
-      showBetTaken(currentCase.price);
+      const r = await api("/api/case", { case: currentCase.id, count: n }, { deferBalance: true });
+      showBetTaken(cost);
       haptic();
-      const won = r.kind === "nft"
-        ? { kind: "nft", emoji: r.gift, amount: r.prize }
-        : { kind: "gift", emoji: r.gift, amount: r.prize };
-      const items = [];
-      for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? won : pickPrize(currentCase), currentCase.price));
+      $("#case-drops").classList.add("hidden");
       $("#case-result").className = "result";
-      $("#case-result").textContent = "Открываем…";
-      await roll("#case-roller", items, 50, 5200);
+      $("#case-result").textContent = n > 1 ? `Открываем ${n} кейса…` : "Открываем…";
+      const rollers = caseRollers(r.items.length);
+      await Promise.all(r.items.map((it, k) => {
+        const items = [];
+        for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? { kind: it.kind, emoji: it.gift, amount: it.prize } : pickPrize(currentCase), currentCase.price));
+        return roll(rollers[k], items, 50, 4600 + k * 350);   // рулетки останавливаются по очереди
+      }));
       setBalance(r.balance);
       const res = $("#case-result");
-      const good = r.prize >= currentCase.price;
+      const good = r.total >= r.cost;
+      const nfts = r.items.filter((it) => it.kind === "nft");
       res.className = "result reveal " + (good ? "win" : "lose");
-      res.textContent = r.kind === "nft"
-        ? `NFT ${r.nft.title} · «${r.nft.model}»! Передаём вам в Telegram`
-        : `${r.gift} ${stars(r.prize)}`;
+      if (n === 1) {
+        res.textContent = nfts.length
+          ? `NFT ${nfts[0].nft.title} · «${nfts[0].nft.model}»! Передаём вам в Telegram`
+          : `${r.gift} ${stars(r.prize)}`;
+      } else {
+        res.textContent = `Выпало на ${stars(r.total)} из ${stars(r.cost)}` + (nfts.length ? " · NFT передаём в Telegram!" : "");
+        const drops = $("#case-drops");
+        drops.innerHTML = "";
+        r.items.forEach((it) => {
+          const s = document.createElement("span");
+          s.textContent = it.kind === "nft" ? `${it.gift} NFT «${it.nft.model}»` : `${it.gift} ${stars(it.prize)}`;
+          if (it.kind === "nft" || it.prize >= currentCase.price) s.className = "good";
+          drops.append(s);
+        });
+        drops.classList.remove("hidden");
+      }
       haptic(good ? "win" : "lose");
-      celebrate(currentCase.price, r.prize, $("#case-roller"));
-      if (r.kind === "nft") {
+      celebrate(r.cost, r.total, $("#case-rollers"));
+      if (nfts.length) {
         await loadMe().catch(() => {});
         renderCases();
       }
     } finally {
       $("#case-btn").disabled = false;
+      $$("#case-count button").forEach((b) => { b.disabled = false; });
     }
   });
 }
@@ -1756,6 +1803,11 @@ function bind() {
   $("#mines-btn").addEventListener("click", minesAction);
   $("#crash-btn").addEventListener("click", crashAction);
   $("#case-btn").addEventListener("click", openCase);
+  caseCount = Math.min(5, Math.max(1, parseInt(store("case:count"), 10) || 1));
+  $$("#case-count button").forEach((b) => b.addEventListener("click", () => {
+    haptic();
+    caseSetCount(parseInt(b.dataset.n, 10));
+  }));
   $("#pvp-btn").addEventListener("click", () => pvpBet("roulette"));
   $("#hockey-btn").addEventListener("click", () => pvpBet("hockey"));
   $("#pvp-gifts").addEventListener("click", () => pvpGiftSheet("roulette"));

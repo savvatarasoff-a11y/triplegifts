@@ -22,6 +22,7 @@ PVP_IDLE_REFUND = 600       # одиночную ставку возвращае
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
 MAX_GIFTS_PER_BET = 20
+CASE_MAX_COUNT = 5          # сколько кейсов можно открыть за раз
 
 
 class GameError(Exception):
@@ -328,37 +329,46 @@ class Casino:
 
     # ---------- кейсы ----------
 
-    async def open_case(self, user_id: int, case: dict) -> dict:
-        """case — готовый кейс из CaseCatalog (с живыми ценами). NFT не зачисляется звёздами, а передаётся игроку."""
-        prize = g.pick_weighted(case["prizes"], [p["weight"] for p in case["prizes"]])
-        detail = {"case": case["id"], "prize": prize["amount"], "gift": prize["emoji"], "kind": prize["kind"]}
+    async def open_case(self, user_id: int, case: dict, count: Any = 1) -> dict:
+        """Открывает кейс count раз (1–CASE_MAX_COUNT) одной транзакцией.
+
+        case — готовый кейс из CaseCatalog (с живыми ценами). NFT не зачисляется звёздами, а передаётся игроку.
+        """
+        if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= CASE_MAX_COUNT:
+            raise GameError(f"Открыть можно от 1 до {CASE_MAX_COUNT} кейсов")
+        weights = [p["weight"] for p in case["prizes"]]
+        prizes = [g.pick_weighted(case["prizes"], weights) for _ in range(count)]
+        items = []
         async with self.db.tx() as c:
-            await self._take(c, user_id, case["price"], "case")
-            if prize["kind"] == "nft":
-                # Резервируем подарок этой модели у релейера; конкретный NFT выберется при передаче
-                cur = await c.execute(
-                    "UPDATE nft_models SET reserved=reserved+1 WHERE id=? AND enabled=1 AND stock > reserved",
-                    (prize["model_id"],),
-                )
-                if cur.rowcount != 1:
-                    raise GameError("Подарки этой модели только что закончились — откройте кейс ещё раз")
-                win = await c.execute(
-                    "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
-                    (prize["model_id"], user_id, prize["amount"], time.time()),
-                )
-                detail["nft_win"] = win.lastrowid
-                detail["model"] = prize["model"]
+            await self._take(c, user_id, case["price"] * count, "case")
+            for prize in prizes:
+                detail = {"case": case["id"], "prize": prize["amount"], "gift": prize["emoji"], "kind": prize["kind"]}
+                item = {"kind": prize["kind"], "prize": prize["amount"], "gift": prize["emoji"]}
+                if prize["kind"] == "nft":
+                    # Резервируем подарок этой модели у релейера; конкретный NFT выберется при передаче
+                    cur = await c.execute(
+                        "UPDATE nft_models SET reserved=reserved+1 WHERE id=? AND enabled=1 AND stock > reserved",
+                        (prize["model_id"],),
+                    )
+                    if cur.rowcount != 1:
+                        raise GameError("Подарки этой модели только что закончились — откройте кейс ещё раз")
+                    win = await c.execute(
+                        "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
+                        (prize["model_id"], user_id, prize["amount"], time.time()),
+                    )
+                    detail["nft_win"] = win.lastrowid
+                    detail["model"] = prize["model"]
+                    item["nft"] = {"win_id": win.lastrowid, "title": prize["title"], "model": prize["model"]}
+                elif prize["amount"] > 0:
+                    await self.db.change_balance(c, user_id, prize["amount"], "win", "case")
                 await self.db.log_bet(c, user_id, "case", case["price"], prize["amount"],
                                       json.dumps(detail, ensure_ascii=False))
-                async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
-                    balance = (await q.fetchone())["balance"]
-            else:
-                balance = await self._settle(c, user_id, "case", case["price"], prize["amount"], detail)
-        result = {"case": case["id"], "kind": prize["kind"], "prize": prize["amount"], "gift": prize["emoji"],
-                  "balance": balance}
-        if prize["kind"] == "nft":
-            result["nft"] = {"win_id": detail["nft_win"], "title": prize["title"], "model": prize["model"]}
-        return result
+                items.append(item)
+            async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
+                balance = (await q.fetchone())["balance"]
+        # поля первого приза оставлены на верхнем уровне для совместимости со старым клиентом
+        return {"case": case["id"], **items[0], "items": items, "count": count, "cost": case["price"] * count,
+                "total": sum(i["prize"] for i in items), "balance": balance}
 
     # ---------- мины ----------
 
