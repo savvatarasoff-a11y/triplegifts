@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS user_gifts (
     value           INTEGER,                     -- цена в звёздах (NFT — пол маркета модели)
     priced_at       REAL,
     transfer_at     REAL NOT NULL DEFAULT 0,     -- раньше этого времени Telegram не даёт передать
-    status          TEXT NOT NULL,               -- owned | staked | withdrawing | withdrawn | sold | credited | stock (прислал админ)
+    status          TEXT NOT NULL,               -- owned | staked | withdrawing | withdrawn | sold | credited | stock (прислал админ) | lost (проиграл в апгрейде)
     round_id        INTEGER,
     from_user       INTEGER,
     created_at      REAL NOT NULL

@@ -8,10 +8,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const STAR = "★";
 const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null };
 const GAME_NAMES = { slots: "Слоты", dice: "Кости", mines: "Мины", crash: "Краш", case: "Кейс",
-  pvp: "PvP-рулетка", hockey: "PvP-хоккей" };
+  pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
 const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
 const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", dice: "Кости",
-  cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка", hockey: "PvP-хоккей" };
+  cases: "Кейсы", case: "Кейс", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного фиолетового и белый: [фон, цвет текста]
 const PVP_COLORS = [["#8B5CF6", "#FFFFFF"], ["#FFFFFF", "#0B0A10"], ["#6D28D9", "#FFFFFF"], ["#C4B5FD", "#0B0A10"],
   ["#4C1D95", "#FFFFFF"], ["#EDE9FE", "#0B0A10"], ["#7C3AED", "#FFFFFF"], ["#A78BFA", "#0B0A10"]];
@@ -222,7 +222,8 @@ function go(screen) {
   $$("#tabbar button").forEach((b) => b.classList.toggle("sel", b.dataset.tab === state.tab));
   window.scrollTo(0, 0);
   const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
-    pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter };
+    pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
+    upgrade: upgradeEnter };
   if (enter[screen]) enter[screen]();
 }
 
@@ -686,6 +687,161 @@ async function pvpGiftSheet(game) {
       await pvpBet(game, ids);
     };
     $("#sheet").classList.remove("hidden");
+  });
+}
+
+// ---------- апгрейд NFT ----------
+
+const upg = { gifts: [], targets: [], chosen: new Set(), target: null, cfg: null, angle: 0, spinning: false };
+const UPG_R = 84;
+const UPG_C = 2 * Math.PI * UPG_R;
+
+function upgStake() {
+  return upg.gifts.filter((g) => upg.chosen.has(g.id)).reduce((a, g) => a + g.value, 0);
+}
+
+function upgChance() {
+  const stake = upgStake();
+  if (!upg.cfg || !upg.target || !stake || stake >= upg.target.price) return 0;
+  return Math.min(upg.cfg.max_chance, (1 - upg.cfg.edge) * stake / upg.target.price);
+}
+
+function upgUpdate() {
+  const stake = upgStake();
+  const chance = upgChance();
+  $("#upg-arc").style.strokeDashoffset = UPG_C * (1 - chance);
+  $("#upg-chance").textContent = (chance * 100).toFixed(chance < 0.1 ? 2 : 1) + "%";
+  const picked = upg.gifts.filter((g) => upg.chosen.has(g.id));
+  $("#upg-from-em").textContent = picked.length ? picked.slice(0, 3).map((g) => g.emoji).join("") : "🎁";
+  $("#upg-stake").textContent = stake ? stars(stake) : "выберите NFT";
+  $("#upg-to-em").textContent = upg.target ? upg.target.emoji : "💎";
+  $("#upg-target").textContent = upg.target ? stars(upg.target.price) : "выберите цель";
+  const btn = $("#upg-btn");
+  let hint = "";
+  if (!stake) hint = "Выберите свои NFT";
+  else if (!upg.target) hint = "Выберите цель";
+  else if (stake >= upg.target.price) hint = "Цель должна быть дороже ставки";
+  else if (chance < upg.cfg.min_chance) hint = "Шанс меньше 1%";
+  btn.disabled = !!hint || upg.spinning;
+  btn.textContent = hint || `Апгрейд · шанс ${(chance * 100).toFixed(1)}%`;
+  $$("#upg-targets .upt").forEach((el) => {
+    const t = upg.targets[el.dataset.i];
+    el.classList.toggle("sel", upg.target === t);
+    el.classList.toggle("off", !!stake && t.price <= stake);
+  });
+}
+
+function upgRender() {
+  const gbox = $("#upg-gifts");
+  gbox.innerHTML = "";
+  if (!upg.gifts.length) {
+    const p = document.createElement("p");
+    p.className = "note";
+    p.textContent = "У вас нет NFT. Отправьте NFT аккаунту казино (Кошелёк → Подарки) — и апгрейдьте его здесь.";
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = "Как отправить NFT";
+    b.dataset.wallet = "nft";
+    b.addEventListener("click", () => { go("wallet"); walletTab("nft"); });
+    gbox.append(p, b);
+  }
+  upg.gifts.forEach((gift) => {
+    const card = giftCard(gift, { button: true });
+    if (!gift.priced) card.classList.add("off");
+    card.classList.toggle("sel", upg.chosen.has(gift.id));
+    card.addEventListener("click", () => {
+      if (upg.spinning) return;
+      if (!gift.priced) { toast("Цена подарка ещё проверяется", true); return; }
+      if (upg.chosen.has(gift.id)) upg.chosen.delete(gift.id); else upg.chosen.add(gift.id);
+      card.classList.toggle("sel", upg.chosen.has(gift.id));
+      haptic();
+      upgUpdate();
+    });
+    gbox.append(card);
+  });
+  const tbox = $("#upg-targets");
+  tbox.innerHTML = "";
+  if (!upg.targets.length) tbox.innerHTML = '<div class="note">Сейчас нет NFT для апгрейда — загляните позже.</div>';
+  upg.targets.forEach((t, i) => {
+    const b = document.createElement("button");
+    b.className = "upt";
+    b.dataset.i = i;
+    const em = document.createElement("span");
+    em.className = "em";
+    em.textContent = t.emoji;
+    const ttl = document.createElement("b");
+    ttl.textContent = t.title;
+    const md = document.createElement("small");
+    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
+    const pr = document.createElement("span");
+    pr.className = "pr";
+    pr.textContent = stars(t.price);
+    b.append(em, ttl, md, pr);
+    b.addEventListener("click", () => {
+      if (upg.spinning) return;
+      upg.target = upg.target === t ? null : t;
+      haptic();
+      upgUpdate();
+    });
+    tbox.append(b);
+  });
+  upgUpdate();
+}
+
+async function upgradeEnter() {
+  $("#upg-arc").style.strokeDasharray = UPG_C;
+  $("#upg-result").textContent = "";
+  try {
+    const data = await api("/api/upgrade");
+    upg.cfg = data;
+    upg.gifts = data.gifts;
+    upg.targets = data.targets;
+    const ids = new Set(upg.gifts.map((g) => g.id));
+    upg.chosen = new Set([...upg.chosen].filter((id) => ids.has(id)));
+    if (upg.target) upg.target = upg.targets.find((t) => t.id === upg.target.id) || null;
+    upgRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function upgradeGo() {
+  if (!upg.target || !upg.chosen.size) return;
+  const chance = upgChance();
+  const ok = await confirmAsk(`Поставить NFT на ${stars(upgStake())} ради ${upg.target.title} «${upg.target.model}» `
+    + `(${stars(upg.target.price)})? Шанс ${(chance * 100).toFixed(1)}%. При проигрыше NFT уйдут казино.`);
+  if (!ok) return;
+  await guard(async () => {
+    upg.spinning = true;
+    upgUpdate();
+    const res = $("#upg-result");
+    try {
+      const r = await api("/api/upgrade", { gifts: [...upg.chosen], target: upg.target.id });
+      haptic();
+      res.className = "result";
+      res.textContent = "Крутим…";
+      // стрелка останавливается на roll: зона выигрыша — дуга [0, шанс) от верха по часовой
+      const needle = $("#upg-needle");
+      upg.angle += 360 * 5 + ((r.roll * 360 - upg.angle) % 360 + 360) % 360;
+      needle.style.transition = "transform 4.2s cubic-bezier(.12,.72,.1,1)";
+      needle.style.transform = `rotate(${upg.angle}deg)`;
+      await sleep(4300);
+      res.className = "result reveal " + (r.won ? "win" : "lose");
+      if (r.won) {
+        res.textContent = `Апгрейд! ${r.nft.emoji} ${r.nft.title} «${r.nft.model}» — передаём вам в Telegram`;
+        haptic("win");
+        celebrate(r.stake, r.target, $("#upg-needle"));
+        fxBurstAt($(".upg-wheel"), { count: 60, speed: 6 });
+      } else {
+        res.textContent = "Не повезло — попробуйте ещё";
+        haptic("lose");
+      }
+      upg.chosen.clear();
+      upg.target = null;
+    } finally {
+      upg.spinning = false;
+    }
+    const shown = [res.className, res.textContent];
+    await upgradeEnter();
+    [res.className, res.textContent] = shown;
   });
 }
 
@@ -1821,6 +1977,7 @@ function bind() {
     go("wallet");
     walletTab(b.dataset.wallet);
   }));
+  $("#upg-btn").addEventListener("click", upgradeGo);
   $("#ref-copy").addEventListener("click", refCopy);
   $("#ref-share").addEventListener("click", refShare);
   $("#sheet-cancel").addEventListener("click", () => $("#sheet").classList.add("hidden"));

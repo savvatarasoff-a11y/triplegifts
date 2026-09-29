@@ -216,7 +216,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/nfts — модели NFT у релейера и их цены с маркета\n"
             "/nftoff, /nfton <code>номер</code> — убрать/вернуть модель в NFT-кейс\n"
             "/nftsend <code>номер выигрыша</code> — повторить передачу NFT\n"
-            "/stars — баланс звёзд бота (из него отправляются подарки)\n"
+            "/stars — звёзды релейера (из них отправляются подарки при выводе)\n"
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
             "/stats — статистика казино\n"
@@ -302,11 +302,20 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
 
     @admin.message(Command("stars"))
     async def bot_stars(message: Message, bot: Bot) -> None:
+        lines = []
+        try:
+            stars = await relayer.stars_balance() if relayer is not None else None
+            lines.append(f"⭐ Звёзды релейера: <b>{stars}</b> — из них отправляются подарки при выводе "
+                         "и оплачиваются платные передачи NFT." if stars is not None
+                         else "⚠️ Релейер не подключён — выводы не отправятся. Войдите: /relayer")
+        except Exception as e:
+            lines.append(f"Не удалось получить баланс релейера: {html.escape(str(e))}")
         try:
             balance = await bot.get_my_star_balance()
-            await message.answer(f"⭐ Баланс звёзд бота: <b>{balance.amount}</b>\nИз него отправляются подарки при выводе.")
+            lines.append(f"🤖 Звёзды бота (пополнения игроков): <b>{balance.amount}</b>")
         except Exception as e:
-            await message.answer(f"Не удалось получить баланс: {html.escape(str(e))}")
+            lines.append(f"Не удалось получить баланс бота: {html.escape(str(e))}")
+        await message.answer("\n".join(lines))
 
     @router.business_connection()
     async def business_connection(conn: BusinessConnection) -> None:
@@ -476,7 +485,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         _, action, raw_id = query.data.split(":", 2)
         wd_id = int(raw_id)
         if action == "ok":
-            ok, text = await approve(bot, casino, wd_id, query.from_user.id)
+            ok, text = await approve(bot, casino, wd_id, query.from_user.id, relayer)
         else:
             ok, text = await reject(bot, casino, wd_id, query.from_user.id)
         await query.answer(text[:190], show_alert=not ok)

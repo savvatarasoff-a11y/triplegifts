@@ -237,6 +237,24 @@ def payout(bet: int, multiplier: float) -> int:
     return int(math.floor(bet * multiplier + 1e-9))
 
 
+# ---------- апгрейд NFT ----------
+
+UPGRADE_EDGE = 0.10        # комиссия казино в апгрейде
+UPGRADE_MAX_CHANCE = 0.75  # выше шанс не бывает — иначе это обмен, а не игра
+UPGRADE_MIN_CHANCE = 0.01
+
+
+def upgrade_chance(stake: int, target: int) -> float:
+    """Шанс апгрейда: ставка / цена цели с комиссией, т.е. в среднем игрок получает 90% ставки."""
+    if stake <= 0 or target <= 0:
+        return 0.0
+    return min(UPGRADE_MAX_CHANCE, (1 - UPGRADE_EDGE) * stake / target)
+
+
+def upgrade_roll(rng: random.Random = RNG) -> float:
+    return rng.random()
+
+
 # ---------------- PvP-хоккей ----------------
 # Поле 100×160 делится на горизонтальные зоны игроков пропорционально ставкам.
 # Победитель выбирается так же, как в PvP-рулетке (шанс = доля ставки), затем строится

@@ -21,6 +21,7 @@ from .gifts import notify_deposits, scan as gifts_scan
 from .nft import deliver_waiting, sync as sync_nfts
 from .relayer import Relayer
 from .web import build_app
+from .withdraw import approve_waiting
 
 log = logging.getLogger("casino")
 
@@ -142,6 +143,10 @@ async def run() -> None:
     async def on_relayer_message(user_id: int) -> None:
         # игрок написал релейеру или прислал подарок: отдаём ждущие NFT и зачисляем подарки
         await deliver_waiting(bot, db, cfg, relayer, user_id)
+        try:
+            await approve_waiting(bot, casino, relayer, user_id)
+        except Exception:
+            log.warning("Не удалось отправить ждущий вывод игроку %s", user_id, exc_info=True)
         await scan_gifts(bot, cfg, casino, relayer)
 
     if await relayer.start():

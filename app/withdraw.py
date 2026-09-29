@@ -11,6 +11,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .casino import Casino, display_name
 from .config import Config
+from .relayer import Relayer, RelayerError
 
 log = logging.getLogger(__name__)
 
@@ -73,23 +74,39 @@ async def notify_admins(bot: Bot, cfg: Config, casino: Casino, wd: dict) -> None
             log.warning("Не удалось уведомить админа %s о заявке", admin_id)
 
 
-async def approve(bot: Bot, casino: Casino, wd_id: int, admin_id: int) -> tuple[bool, str]:
-    """Отправляет подарок. Возвращает (успех, текст для админа)."""
+NEED_CONTACT = "NEED_CONTACT"   # релейер не нашёл игрока: отправим, как только игрок ему напишет
+
+
+async def approve(bot: Bot, casino: Casino, wd_id: int, admin_id: int,
+                  relayer: Relayer | None = None) -> tuple[bool, str]:
+    """Отправляет подарок со звёзд аккаунта-релейера. Возвращает (успех, текст для админа)."""
+    if relayer is not None and not relayer.ready:
+        return False, "Релейер не подключён — выводы идут с его звёзд. Войдите: /relayer"
     wd = await casino.withdraw_claim(wd_id, admin_id)
     if wd is None:
         return False, "Заявка уже обработана"
+    text = "Вывод из Svag Gifts 🎁"
     try:
-        await bot.send_gift(
-            gift_id=wd["gift_id"], user_id=wd["user_id"], text="Вывод из Svag Gifts 🎁"
-        )
+        if relayer is not None:
+            user = await casino.db.get_user(wd["user_id"])
+            await relayer.send_gift(wd["gift_id"], wd["user_id"], (user or {}).get("username"), text)
+        else:
+            await bot.send_gift(gift_id=wd["gift_id"], user_id=wd["user_id"], text=text)
+    except RelayerError as e:
+        if str(e) != NEED_CONTACT:
+            return await _failed(casino, wd_id, str(e))
+        # Игрок без @username: подарок уйдёт автоматически, как только он напишет релейеру
+        await casino.withdraw_finish(wd_id, ok=False, error=NEED_CONTACT)
+        name = await relayer.username() if relayer else None
+        contact = f"@{name}" if name else "аккаунту казино"
+        try:
+            await bot.send_message(wd["user_id"], f"🎁 Вывод №{wd_id} одобрен! Чтобы получить подарок, напишите любое "
+                                                  f"сообщение {contact} — он придёт сразу.")
+        except Exception:
+            pass
+        return False, f"Игрок не найден релейером — попросили его написать {contact}, подарок уйдёт автоматически"
     except Exception as e:
-        reason = getattr(e, "message", None) or type(e).__name__
-        await casino.withdraw_finish(wd_id, ok=False, error=str(reason)[:200])
-        log.warning("Подарок по заявке %s не отправлен: %s", wd_id, reason)
-        return False, (
-            f"Не получилось отправить подарок: {reason}.\n"
-            "Проверьте баланс звёзд бота (/stars). Заявка снова ждёт решения."
-        )
+        return await _failed(casino, wd_id, str(getattr(e, "message", None) or type(e).__name__))
     await casino.withdraw_finish(wd_id, ok=True)
     try:
         await bot.send_message(
@@ -100,6 +117,22 @@ async def approve(bot: Bot, casino: Casino, wd_id: int, admin_id: int) -> tuple[
     except Exception:
         pass
     return True, f"✅ Подарок по заявке №{wd_id} отправлен"
+
+
+async def _failed(casino: Casino, wd_id: int, reason: str) -> tuple[bool, str]:
+    await casino.withdraw_finish(wd_id, ok=False, error=reason[:200])
+    log.warning("Подарок по заявке %s не отправлен: %s", wd_id, reason)
+    return False, (
+        f"Не получилось отправить подарок: {reason}.\n"
+        "Проверьте баланс звёзд релейера (/stars). Заявка снова ждёт решения."
+    )
+
+
+async def approve_waiting(bot: Bot, casino: Casino, relayer: Relayer, user_id: int) -> None:
+    """Игрок написал релейеру — отправляем одобренные выводы, которые ждали контакта."""
+    for wd in await casino.db.all("SELECT id, admin_id FROM withdrawals WHERE user_id=? AND status='pending' "
+                                  "AND error=?", user_id, NEED_CONTACT):
+        await approve(bot, casino, wd["id"], wd["admin_id"] or 0, relayer)
 
 
 async def reject(bot: Bot, casino: Casino, wd_id: int, admin_id: int) -> tuple[bool, str]:

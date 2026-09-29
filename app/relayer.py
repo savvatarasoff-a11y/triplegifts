@@ -241,6 +241,39 @@ class Relayer:
         # передача подарка с can_transfer_at в будущем пока заблокирована Telegram
         return [i for i in await self._saved() if i["kind"] == "nft" and i["transfer_at"] <= now]
 
+    async def _peer(self, user_id: int, username: str | None) -> Any:
+        """InputPeer игрока. RelayerError('NEED_CONTACT') — релейер не может его найти (нет @username и переписки)."""
+        for target in ([username] if username else []) + [user_id]:
+            try:
+                return await self.client.get_input_entity(target)
+            except (ValueError, TypeError):
+                continue
+            except Exception as e:
+                log.warning("Не удалось найти игрока %s: %s", user_id, type(e).__name__)
+        raise RelayerError("NEED_CONTACT")
+
+    async def send_gift(self, gift_id: str, user_id: int, username: str | None, text: str = "") -> None:
+        """Дарит игроку обычный подарок Telegram за звёзды с баланса релейера (вывод звёзд)."""
+        if not self.ready:
+            raise RelayerError("Релейер не подключён")
+        from telethon.tl.functions.payments import GetPaymentFormRequest, SendStarsFormRequest
+        from telethon.tl.types import InputInvoiceStarGift, TextWithEntities
+        peer = await self._peer(user_id, username)
+        invoice = InputInvoiceStarGift(peer=peer, gift_id=int(gift_id),
+                                       message=TextWithEntities(text=text, entities=[]) if text else None)
+        form = await self.client(GetPaymentFormRequest(invoice=invoice))
+        await self.client(SendStarsFormRequest(form_id=form.form_id, invoice=invoice))
+
+    async def stars_balance(self) -> int | None:
+        """Сколько звёзд на аккаунте релейера — из них оплачиваются выводы и платные передачи NFT."""
+        if not self.ready:
+            return None
+        from telethon.tl.functions.payments import GetStarsStatusRequest
+        from telethon.tl.types import InputPeerSelf
+        status = await self.client(GetStarsStatusRequest(peer=InputPeerSelf()))
+        balance = status.balance
+        return getattr(balance, "amount", balance)
+
     async def transfer(self, item: dict[str, Any], user_id: int, username: str | None) -> None:
         """Передаёт подарок игроку. RelayerError('NEED_CONTACT') — релейер не может найти игрока."""
         if not self.ready:
@@ -248,17 +281,7 @@ class Relayer:
         from telethon.tl.functions.payments import (GetPaymentFormRequest, SendStarsFormRequest,
                                                     TransferStarGiftRequest)
         from telethon.tl.types import InputInvoiceStarGiftTransfer, InputSavedStarGiftUser
-        peer = None
-        for target in ([username] if username else []) + [user_id]:
-            try:
-                peer = await self.client.get_input_entity(target)
-                break
-            except (ValueError, TypeError):
-                continue
-            except Exception as e:
-                log.warning("Не удалось найти игрока %s: %s", user_id, type(e).__name__)
-        if peer is None:
-            raise RelayerError("NEED_CONTACT")
+        peer = await self._peer(user_id, username)
         stargift = InputSavedStarGiftUser(msg_id=item["ref"])
         if item.get("transfer_stars"):
             # Платная передача: оплачиваем звёздами с баланса релейера

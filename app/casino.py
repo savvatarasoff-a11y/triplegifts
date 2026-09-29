@@ -630,7 +630,8 @@ class Casino:
             raise GameError("Некорректный список подарков")
         return sorted(set(gifts))
 
-    async def _take_gifts(self, c: aiosqlite.Connection, user_id: int, ids: list[int], round_id: int) -> list[dict]:
+    async def _take_gifts(self, c: aiosqlite.Connection, user_id: int, ids: list[int],
+                          round_id: int | None) -> list[dict]:
         now = time.time()
         taken = []
         for gift_id in ids:
@@ -681,6 +682,62 @@ class Casino:
         async with self.db.tx() as c:
             await c.execute("UPDATE user_gifts SET status=? WHERE id=? AND status='withdrawing'",
                             ("withdrawn" if ok else "owned", gift_id))
+
+    # ---------- апгрейд NFT ----------
+
+    async def upgrade_targets(self) -> list[dict]:
+        """NFT-модели казино, на которые можно апгрейдиться: есть свободный подарок и свежая цена."""
+        rows = await self.db.all(
+            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
+            "ORDER BY price", time.time() - NFT_PRICE_MAX_AGE)
+        return [{"id": r["id"], "title": r["collection_name"], "model": r["model"], "emoji": r["emoji"] or "💎",
+                 "rarity": r["rarity"], "price": r["price"]} for r in rows]
+
+    async def upgrade(self, user_id: int, gifts: Any, target_id: Any) -> dict:
+        """Ставка — только свои NFT, цель — модель казино подороже.
+
+        Выигрыш — NFT цели (передаёт релейер). Поставленные NFT в любом случае уходят казино.
+        """
+        gift_ids = self._gift_ids(gifts)
+        if not gift_ids:
+            raise GameError("Выберите свои NFT для апгрейда")
+        if not isinstance(target_id, int) or isinstance(target_id, bool):
+            raise GameError("Выберите цель апгрейда")
+        now = time.time()
+        async with self.db.tx() as c:
+            async with c.execute(
+                "SELECT * FROM nft_models WHERE id=? AND enabled=1 AND stock > reserved AND price > 0 AND price_at > ?",
+                (target_id, now - NFT_PRICE_MAX_AGE),
+            ) as q:
+                target = await q.fetchone()
+            if not target:
+                raise GameError("Этой цели сейчас нет — выберите другую")
+            staked = await self._take_gifts(c, user_id, gift_ids, None)
+            stake = sum(x["value"] for x in staked)
+            if stake >= target["price"]:
+                raise GameError("Цель должна стоить дороже ставки")
+            chance = g.upgrade_chance(stake, target["price"])
+            if chance < g.UPGRADE_MIN_CHANCE:
+                raise GameError("Шанс меньше 1% — добавьте NFT или выберите цель дешевле")
+            roll = g.upgrade_roll()
+            won = roll < chance
+            await c.execute(f"UPDATE user_gifts SET status='lost', round_id=NULL WHERE id IN "
+                            f"({','.join('?' * len(gift_ids))})", gift_ids)
+            detail: dict[str, Any] = {"target": target["id"], "model": target["model"], "chance": round(chance, 4),
+                                      "roll": round(roll, 4), "gifts": gift_ids}
+            nft = None
+            if won:
+                await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=?", (target["id"],))
+                win = await c.execute(
+                    "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
+                    (target["id"], user_id, target["price"], now),
+                )
+                detail["nft_win"] = win.lastrowid
+                nft = {"win_id": win.lastrowid, "title": target["collection_name"], "model": target["model"],
+                       "emoji": target["emoji"] or "💎", "price": target["price"]}
+            await self.db.log_bet(c, user_id, "upgrade", stake, target["price"] if won else 0,
+                                  json.dumps(detail, ensure_ascii=False))
+        return {"won": won, "chance": chance, "roll": roll, "stake": stake, "target": target["price"], "nft": nft}
 
     # ---------- PvP-рулетка ----------
 

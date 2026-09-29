@@ -26,6 +26,7 @@
     <symbol id="i-games" viewBox="0 0 48 48"><rect x="6" y="6" width="15" height="15" rx="4"/><rect x="27" y="6" width="15" height="15" rx="4"/><rect x="6" y="27" width="15" height="15" rx="4"/><rect x="27" y="27" width="15" height="15" rx="4"/></symbol>
     <symbol id="i-ref" viewBox="0 0 48 48"><circle cx="17" cy="16" r="7"/><path d="M4 40c1-8 6-12 13-12s12 4 13 12"/><path d="M36 14v14M29 21h14"/></symbol>
     <symbol id="i-user" viewBox="0 0 48 48"><circle cx="24" cy="16" r="9"/><path d="M8 42c1.5-9 8-14 16-14s14.5 5 16 14"/></symbol>
+    <symbol id="i-upgrade" viewBox="0 0 48 48"><path d="M24 40V12M13 23l11-11 11 11"/><path d="M10 8h28"/><circle cx="24" cy="40" r="3"/></symbol>
     <symbol id="i-out" viewBox="0 0 48 48"><path d="M24 30V8M15 17l9-9 9 9"/><path d="M8 28v8a4 4 0 004 4h24a4 4 0 004-4v-8"/></symbol>
   </svg>
 
@@ -94,12 +95,44 @@
         <button class="game" data-go="dice"><svg class="gi"><use href="#i-dice"/></svg><span class="gx">до ×9500</span><span class="gn">Кости</span></button>
         <button class="game wide" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">подарки и NFT</span><span class="gn">Кейсы</span></button>
       </div>
+      <div class="sec-head"><span>NFT</span></div>
+      <div class="games">
+        <button class="game wide accent" data-go="upgrade"><svg class="gi"><use href="#i-upgrade"/></svg><span class="gx">NFT → NFT дороже</span><span class="gn">Апгрейд</span></button>
+      </div>
       <div class="sec-head"><span>PvP — против игроков</span></div>
       <div class="games">
         <button class="game accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">ставки подарками</span><span class="gn">Рулетка</span></button>
         <button class="game accent" data-go="hockey"><svg class="gi"><use href="#i-hockey"/></svg><span class="gx">ставки подарками</span><span class="gn">Хоккей</span></button>
       </div>
       <p class="note">В PvP шанс пропорционален ставке, казино берёт лишь комиссию 5%. Слоты можно крутить и в чате: /slot 10.</p>
+    </section>
+
+    <!-- Апгрейд NFT -->
+    <section class="screen" id="upgrade">
+      <div class="upg-wheel">
+        <svg viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="upg-track" cx="100" cy="100" r="84"/>
+          <circle class="upg-arc" id="upg-arc" cx="100" cy="100" r="84"/>
+        </svg>
+        <div class="upg-needle" id="upg-needle"><i></i></div>
+        <div class="upg-center"><b id="upg-chance">0%</b><small>шанс</small></div>
+      </div>
+      <div class="upg-pair">
+        <div class="upg-side"><small>Ставка</small><div class="upg-em" id="upg-from-em">🎁</div><b id="upg-stake">—</b></div>
+        <div class="upg-arrow">›</div>
+        <div class="upg-side to"><small>Цель</small><div class="upg-em" id="upg-to-em">💎</div><b id="upg-target">—</b></div>
+      </div>
+      <div class="result" id="upg-result"></div>
+      <button class="btn big" id="upg-btn">Апгрейд</button>
+      <div class="panel">
+        <div class="panel-title">Мои NFT — ставка</div>
+        <div class="mygifts" id="upg-gifts"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Цель</div>
+        <div class="upg-targets" id="upg-targets"></div>
+      </div>
+      <p class="note">Ставка — только ваши NFT (Кошелёк → Подарки). Шанс = стоимость ставки / цену цели × 0.9, максимум 75%. Цены — пол маркета Telegram. Выиграли — NFT цели придёт в Telegram; поставленные NFT забирает казино.</p>
     </section>
 
     <!-- Рефералы -->

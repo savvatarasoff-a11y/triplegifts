@@ -332,6 +332,22 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         info["link"] = referral_link(await bot_username(bot), uid)
         return web.json_response(info)
 
+    @routes.get("/api/upgrade")
+    async def upgrade_info(request: web.Request) -> web.Response:
+        return web.json_response({
+            "targets": await casino.upgrade_targets(),
+            "gifts": [x for x in await casino.gifts(request[USER_ID]) if x["status"] == "owned"],
+            "edge": g.UPGRADE_EDGE, "max_chance": g.UPGRADE_MAX_CHANCE, "min_chance": g.UPGRADE_MIN_CHANCE,
+        })
+
+    @routes.post("/api/upgrade")
+    async def upgrade(request: web.Request) -> web.Response:
+        data = await body(request)
+        result = await casino.upgrade(request[USER_ID], data.get("gifts"), data.get("target"))
+        if result["nft"]:
+            asyncio.create_task(deliver_nft(bot, casino.db, cfg, relayer, result["nft"]["win_id"]))
+        return web.json_response(result)
+
     @routes.get("/api/gifts")
     async def my_gifts(request: web.Request) -> web.Response:
         name = None

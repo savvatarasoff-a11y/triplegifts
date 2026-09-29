@@ -35,7 +35,7 @@ async def casino_stock(db: Database, items: list[dict[str, Any]]) -> list[dict[s
     since_ts = float(since) if since is not None else float("inf")
     status = {r["ref"]: r["status"] for r in await db.all("SELECT ref, status FROM user_gifts")}
     return [i for i in items
-            if status.get(str(i["ref"])) in ("stock", "sold")
+            if status.get(str(i["ref"])) in ("stock", "sold", "lost")
             or (str(i["ref"]) not in status and (not i.get("from_user") or i.get("date", 0) < since_ts))]
 
 
