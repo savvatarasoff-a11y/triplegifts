@@ -149,3 +149,29 @@ def test_nft_cases_share_and_rtp():
         ev = sum(p * v for p, v in zip(p_nft, [3000, 8000, 20000])) + sum(p * v for p, v in zip(p_gift, gifts))
         assert sum(p_nft) + sum(p_gift) == pytest.approx(1)
         assert g.CASE_MIN_RTP <= ev / price <= g.CASE_MAX_RTP, d.id          # и Premium за 1000 ★ отдаёт ~87%
+
+
+def test_house_edge_everywhere_even_with_max_rakeback():
+    """Сводка математики: возврат игроку + максимальный рейкбек (1%) < 100% в каждой игре."""
+    rake = max(lv[3] for lv in g.LEVELS)
+    rtp = {
+        "slots": g.slots_rtp(),                                   # 777 оценён ровно ×40 — NFT не дороже
+        "plinko": max(g.plinko_rtp(r, k) for r, k in g.PLINKO_TABLES),
+        "mines": 1 - g.MINES_EDGE,                                # любая стратегия вывода
+        "crash": 0.95,                                            # P(x ≥ m) = 0.95 / m
+        "cases": g.CASE_MAX_RTP,                                  # выше — кейс выключается
+        "upgrade": 1 - g.UPGRADE_EDGE,
+        "pvp": 1 - g.PVP_COMMISSION,
+    }
+    for game, value in rtp.items():
+        assert value + rake < 1, game
+    # краш: вероятность дожить до ×m у формулы crash_point
+    import random
+    rng = random.Random(7)
+    points = [g.crash_point(rng) for _ in range(200_000)]
+    for m in (1.5, 2, 5):
+        assert sum(p >= m for p in points) / len(points) == pytest.approx(0.95 / m, rel=0.03)
+    # мины: EV = 0.9 для любого числа мин и открытых клеток
+    for mines in (3, 5, 10, 24):
+        for k in range(1, 25 - mines + 1):
+            assert math.comb(25 - mines, k) / math.comb(25, k) * g.mines_multiplier(mines, k) <= 1 - g.MINES_EDGE + 1e-3

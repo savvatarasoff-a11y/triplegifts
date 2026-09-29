@@ -68,16 +68,16 @@ async def test_slots_777_gives_nft_near_x40(casino):
     now = _t.time()
     await casino.db.conn.execute(
         "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at) VALUES "
-        "('1','Plush Pepe','Frog','🐸',1,4100,?), ('2','Durov''s Cap','Black','🧢',1,3000,?), "
-        "('3','Snoop Dogg','Old',NULL,1,9000,?)", (now, now, now))
+        "('1','Plush Pepe','Frog','🐸',1,3900,?), ('2','Durov''s Cap','Black','🧢',1,3000,?), "
+        "('3','Snoop Dogg','Old',NULL,1,4100,?)", (now, now, now))
     await fund(casino, 1, 1000)
-    r = await casino.slots(1, 100, value=64)    # цель 4000 ⭐ -> ближе всего 4100 (3000 тоже в допуске, но дальше)
-    assert r["nft"]["title"] == "Plush Pepe" and r["nft"]["price"] == 4100 and r["win"] == 4100
+    r = await casino.slots(1, 100, value=64)    # цель 4000 ⭐ -> 3900 (4100 ближе, но дороже ×40 — нельзя)
+    assert r["nft"]["title"] == "Plush Pepe" and r["nft"]["price"] == 3900 and r["win"] == 3900
     assert r["balance"] == 900                   # NFT не зачисляется звёздами
     assert (await casino.db.one("SELECT reserved FROM nft_models WHERE collection_id='1'"))["reserved"] == 1
-    r = await casino.slots(1, 100, value=64)    # 4100 уже зарезервирован -> следующий в допуске: 3000
+    r = await casino.slots(1, 100, value=64)    # 3900 уже зарезервирован -> следующий в допуске: 3000
     assert r["nft"]["price"] == 3000
-    r = await casino.slots(1, 100, value=64)    # в допуске ±25% больше ничего -> ×40 звёздами
+    r = await casino.slots(1, 100, value=64)    # в допуске (×30…×40) больше ничего -> ×40 звёздами
     assert "nft" not in r and r["win"] == 4000
 
 
@@ -455,9 +455,12 @@ async def test_daily_bonus(casino, monkeypatch):
     with pytest.raises(GameError, match="пополнения"):
         await casino.daily_bonus(1)                                # без пополнений — нельзя (против фарма)
     await fund(casino, 1, 10)
+    with pytest.raises(GameError, match="от 50"):
+        await casino.daily_bonus(1)                                # и не с копеечного пополнения
+    await fund(casino, 1, 40)
     monkeypatch.setattr(g, "daily_bonus_roll", lambda rng=None: 25)
     r = await casino.daily_bonus(1)
-    assert r["amount"] == 25 and r["balance"] == 35
+    assert r["amount"] == 25 and r["balance"] == 75
     with pytest.raises(GameError, match="уже получен"):
         await casino.daily_bonus(1)
     assert (await casino.wager_status(1))["left"] == 25            # бонус нужно отыграть

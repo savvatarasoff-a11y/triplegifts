@@ -471,7 +471,7 @@ function renderBonus() {
   card.classList.toggle("ready", b.allowed && b.ready);
   btn.disabled = !b.allowed || !b.ready;
   if (!b.allowed) {
-    $("#bonus-sub").textContent = "Откроется после первого пополнения";
+    $("#bonus-sub").textContent = "Откроется после пополнения от 50 ★ или 0.5 TON";
     btn.textContent = "🔒";
   } else if (b.ready) {
     $("#bonus-sub").textContent = "До 100 ★ — забирайте каждый день";
@@ -753,7 +753,7 @@ async function loadTonWithdraw() {
     $("#ton-min").textContent = tonNum(t.min_withdraw);
     const w = $("#ton-wager");
     w.classList.toggle("hidden", !t.wager.left);
-    w.textContent = t.wager.left ? `Бонусные TON нужно отыграть: осталось поставить ${money(t.wager.left, "ton")}.` : "";
+    w.textContent = t.wager.left ? `Перед выводом пополнения и бонусы нужно хотя бы раз поставить в играх: осталось ${money(t.wager.left, "ton")}.` : "";
     const hist = $("#ton-history");
     hist.innerHTML = "";
     t.history.forEach((x) => hist.append(historyRow(`№${x.id} · ${money(x.amount, "ton")}`,

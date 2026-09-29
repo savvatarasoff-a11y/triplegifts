@@ -127,6 +127,9 @@ async def test_ton_withdraw(casino):
         await casino.ton_withdraw_request(1, NANO, "not an address")
     with pytest.raises(GameError, match="от 0.1 TON"):
         await casino.ton_withdraw_request(1, NANO // 100, ADDR)
+    with pytest.raises(GameError, match="поставьте"):
+        await casino.ton_withdraw_request(1, 2 * NANO, ADDR)                    # оборот 1x: пополнил — сразу не вывести
+    await db.conn.execute("UPDATE users SET ton_wagered=? WHERE id=1", (3 * NANO,))
     wd = await casino.ton_withdraw_request(1, 2 * NANO, ADDR)
     assert wd["balance"] == NANO
     with pytest.raises(GameError, match="уже есть"):

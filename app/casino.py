@@ -172,7 +172,8 @@ class Casino:
             "levels": [{"name": n, "emoji": e, "at": a, "rakeback": r} for n, e, a, r in g.LEVELS],
             "rake": {"stars": (user.get("rake_milli") or 0) // 1000, "ton": user.get("rake_ton") or 0},
             "bonus": {"ready": now >= next_bonus, "in": max(0, next_bonus - now),
-                      "allowed": bool(user.get("deposited") or user.get("ton_deposited")),
+                      "allowed": (user.get("deposited") or 0) >= g.DAILY_BONUS_MIN_STARS
+                      or (user.get("ton_deposited") or 0) >= g.DAILY_BONUS_MIN_TON,
                       "table": [{"amount": a, "chance": round(w / sum(x for _, x in g.DAILY_BONUS) * 100, 2)}
                                 for a, w in g.DAILY_BONUS]},
         }
@@ -202,8 +203,9 @@ class Casino:
         async with self.db.tx() as c:
             async with c.execute("SELECT deposited, ton_deposited, bonus_at FROM users WHERE id=?", (user_id,)) as q:
                 row = await q.fetchone()
-            if not (row["deposited"] or row["ton_deposited"]):
-                raise GameError("Ежедневный бонус открывается после первого пополнения")
+            if row["deposited"] < g.DAILY_BONUS_MIN_STARS and row["ton_deposited"] < g.DAILY_BONUS_MIN_TON:
+                raise GameError(f"Ежедневный бонус открывается после пополнения от {g.DAILY_BONUS_MIN_STARS} ⭐ "
+                                "или 0.5 TON")
             res = await c.execute("UPDATE users SET bonus_at=? WHERE id=? AND bonus_at <= ?",
                                   (now, user_id, now - g.DAILY_BONUS_EVERY))
             if res.rowcount != 1:
@@ -295,6 +297,11 @@ class Casino:
         )
         user = await self.db.get_user(user_id)
         wagered = (user["wagered"] if cur == money.STARS else user["ton_wagered"]) if user else 0
+        if cur == money.TON and user:
+            # TON: пополнения тоже нужно поставить хотя бы раз (оборот 1x) — иначе пополнение и сразу вывод
+            # с второго аккаунта давали бы пригласившему бесплатные 10% реф-бонуса
+            total = free["s"] + user["ton_deposited"]
+            return {"required": total, "done": wagered, "left": max(0, total - wagered)}
         return {"required": free["s"], "done": wagered, "left": max(0, free["s"] - wagered)}
 
     async def withdraw_request(self, user_id: int, gift_id: str, price: int, emoji: str | None) -> dict:
@@ -381,7 +388,8 @@ class Casino:
         address = address.strip()
         wager = await self.wager_status(user_id, money.TON)
         if wager["left"] > 0:
-            raise GameError(f"Сначала отыграйте бонусные TON: осталось поставить {money.fmt(wager['left'], money.TON)}")
+            raise GameError(f"Сначала поставьте в играх пополнения и бонусы хотя бы раз: осталось "
+                            f"{money.fmt(wager['left'], money.TON)}")
         async with self.db.tx() as c:
             async with c.execute("SELECT 1 FROM ton_withdrawals WHERE user_id=? AND status='pending'", (user_id,)) as q:
                 if await q.fetchone():
@@ -470,8 +478,11 @@ class Casino:
         return result
 
     async def _reserve_nft_near(self, c: aiosqlite.Connection, user_id: int, target: int) -> dict | None:
-        """Резервирует у релейера модель с ценой ближе всего к target (±SLOT_NFT_TOLERANCE)."""
-        lo, hi = target * (1 - g.SLOT_NFT_TOLERANCE), target * (1 + g.SLOT_NFT_TOLERANCE)
+        """Резервирует модель с ценой ближе всего к target, но не дороже него (target·(1−допуск) … target).
+
+        Дороже нельзя: 777 даёт 40/64 всего возврата слотов, и NFT дороже ×40 вывели бы RTP выше 100%.
+        """
+        lo, hi = target * (1 - g.SLOT_NFT_TOLERANCE), target
         async with c.execute(
             "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price BETWEEN ? AND ? "
             "AND price_at > ? ORDER BY test, ABS(price - ?) LIMIT 1",          # настоящие NFT — в приоритете
