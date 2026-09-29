@@ -216,7 +216,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/nfts — модели NFT у релейера и их цены с маркета\n"
             "/nftoff, /nfton <code>номер</code> — убрать/вернуть модель в NFT-кейс\n"
             "/nftsend <code>номер выигрыша</code> — повторить передачу NFT\n"
-            "/testnft — выдать себе тестовые NFT-заглушки (для апгрейда), /testnft_clear — удалить\n"
+            "/testnft — выдать себе тестовые NFT (настоящие модели с MRKT, для апгрейда), /testnft_clear — удалить\n"
+            "/tonrate — курс TON → звёзды для цен MRKT\n"
             "/stars — звёзды релейера (из них отправляются подарки при выводе)\n"
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
@@ -475,14 +476,51 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
 
     @admin.message(Command("testnft"))
     async def test_nft(message: Message) -> None:
-        count = await casino.test_nfts_add(message.from_user.id)
-        await message.answer(
-            f"🧪 Выдано {count} тестовых NFT — они в мини-приложении: Кошелёк → Подарки.\n"
-            "В апгрейде появились тестовые цели (видите только вы). Выигрыш — новая заглушка в «Моих подарках».\n\n"
-            "Заглушки не дают звёзд и настоящих подарков: их нельзя продать, вывести или поставить в PvP, "
-            "они не попадают в кейсы и статистику. Удалить все: /testnft_clear",
-            reply_markup=play_keyboard(cfg),
+        if relayer is None:
+            await message.answer("Релейер не настроен — модели берутся с MRKT через него (/relayer)")
+            return
+        status = await message.answer("🔄 Беру настоящие модели и их флор с MRKT…")
+        try:
+            gifts, targets = await casino.test_nfts_add(message.from_user.id,
+                                                        await relayer.market.sample_models(6))
+        except Exception as e:
+            log.warning("Тестовые NFT не созданы", exc_info=True)
+            await status.edit_text(f"⚠️ Не получилось: {html.escape(str(e) or type(e).__name__)}")
+            return
+
+        def line(m: dict) -> str:
+            return f"{m['emoji']} {html.escape(m['title'])} «{html.escape(m['model'])}» — {m['price']} ⭐"
+
+        await status.edit_text(
+            "🧪 <b>Тестовые NFT</b> (настоящие модели, цена — флор MRKT)\n\n"
+            "Вам в «Мои подарки»:\n" + "\n".join(line(m) for m in gifts)
+            + "\n\nЦели апгрейда (видите только вы):\n" + "\n".join(line(m) for m in targets)
+            + "\n\nЭто заглушки: их нельзя продать, вывести или поставить в PvP, они не попадают в кейсы "
+              "и статистику. Выигрыш апгрейда — новая заглушка. Удалить все: /testnft_clear",
         )
+        await message.answer("Открыть апгрейд:", reply_markup=play_keyboard(cfg))
+
+    @admin.message(Command("tonrate"))
+    async def ton_rate(message: Message, command: CommandObject) -> None:
+        arg = (command.args or "").strip()
+        if arg in ("auto", "авто"):
+            await casino.db.kv_set("mrkt:ton_stars", None)
+        elif arg:
+            try:
+                value = float(arg.replace(",", "."))
+                if not 1 <= value <= 100000:
+                    raise ValueError
+            except ValueError:
+                await message.answer("Формат: <code>/tonrate 200</code> — сколько звёзд за 1 TON, или "
+                                     "<code>/tonrate auto</code>")
+                return
+            await casino.db.kv_set("mrkt:ton_stars", str(value))
+        rate = await relayer.market.ton_rate() if relayer is not None else None
+        manual = await casino.db.kv_get("mrkt:ton_stars")
+        await message.answer(
+            f"💱 Курс для цен MRKT: 1 TON = <b>{rate:.0f} ⭐</b> ({'задан вручную' if manual else 'авто по цене TON'})\n"
+            "Задать: <code>/tonrate 200</code>, вернуть авто: <code>/tonrate auto</code>" if rate else
+            "Курс TON недоступен — задайте вручную: <code>/tonrate 200</code>")
 
     @admin.message(Command("testnft_clear"))
     async def test_nft_clear(message: Message) -> None:

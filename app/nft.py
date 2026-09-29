@@ -53,7 +53,7 @@ async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
     for (collection_id, model), items in groups.items():
         first = items[0]
         try:
-            price = await relayer.floor_price(int(collection_id), model)
+            price = await relayer.floor_price(collection_id, model, first["collection_name"])
         except Exception as e:
             price, price_error = None, f"не удалось получить цены с маркета: {type(e).__name__}"
             log.warning("Цена модели %s/%s недоступна: %s", collection_id, model, e)
@@ -75,7 +75,7 @@ async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
 def describe(m: dict) -> str:
     rarity = f" · {m['rarity']:g}%" if m.get("rarity") is not None else ""
     fresh = m.get("price_at") and time.time() - m["price_at"] < PRICE_MAX_AGE
-    price = f"пол маркета {m['price']} ⭐" if m.get("price") and fresh else "цена не проверена"
+    price = f"флор MRKT {m['price']} ⭐" if m.get("price") and fresh else "цена не проверена"
     free = m["stock"] - m["reserved"]
     off = "" if m.get("enabled", 1) else " · выключена"
     return (f"{m.get('emoji') or '💎'} <b>{html.escape(m['collection_name'])}</b> · модель "

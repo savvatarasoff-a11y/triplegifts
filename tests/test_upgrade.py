@@ -83,15 +83,20 @@ async def test_admin_test_nfts_are_sandboxed(env, monkeypatch):
     db, casino = env
     admin = 7
     await db.touch_user(admin, "adm", "Admin")
+    models = [{"title": t, "model": m, "emoji": "🎁", "rarity": 1.0, "price": p} for t, m, p in (
+        ("Lol Pop", "Pink", 150), ("Desk Calendar", "Blue", 400), ("Homemade Cake", "Choco", 1200),
+        ("Plush Pepe", "Frog", 3000), ("Durov's Cap", "Black", 12000), ("Snoop Dogg", "Gold", 500))]
     with pytest.raises(GameError):
-        await casino.test_nfts_add(42)                                    # не админ
-    assert await casino.test_nfts_add(admin) == 3
+        await casino.test_nfts_add(42, models)                            # не админ
+    gifts_, targets_ = await casino.test_nfts_add(admin, models)
+    assert [m["price"] for m in gifts_] == [150, 400, 500] and [m["price"] for m in targets_] == [1200, 3000, 12000]
     mine = await casino.gifts(admin)
     assert len(mine) == 3 and all(x["test"] and x["priced"] and x["sell"] is None for x in mine)
     # тестовые цели видит только админ, в кейсы и 777 они не попадают
     assert not any(t["test"] for t in await casino.upgrade_targets(42))
     targets = [t for t in await casino.upgrade_targets(admin) if t["test"]]
-    assert [t["price"] for t in targets] == [500, 3000, 12000]
+    assert [t["price"] for t in targets] == [1200, 3000, 12000]
+    assert {x["title"].split(" #")[0] for x in mine} == {"Lol Pop", "Desk Calendar", "Snoop Dogg"}   # настоящие имена
     with pytest.raises(GameError, match="продать"):
         await casino.gift_sell(admin, mine[0]["id"])
     with pytest.raises(GameError, match="вывести"):
@@ -103,7 +108,7 @@ async def test_admin_test_nfts_are_sandboxed(env, monkeypatch):
         await casino.upgrade(admin, [mine[0]["id"]], real["id"])          # заглушкой — в настоящую цель нельзя
     # выигрыш тестового апгрейда — новая заглушка, без передачи релейером и без записи в статистику
     monkeypatch.setattr(g, "upgrade_roll", lambda rng=None: 0.0)
-    cheap = min(mine, key=lambda x: x["value"])                          # 150 → 3000
+    cheap = min(mine, key=lambda x: x["value"])                          # 150 → 3000 (Plush Pepe)
     r = await casino.upgrade(admin, [cheap["id"]], targets[1]["id"])
     assert r["won"] and r["nft"]["test"] and r["nft"]["win_id"] is None
     assert (await db.one("SELECT COUNT(*) n FROM nft_wins"))["n"] == 0

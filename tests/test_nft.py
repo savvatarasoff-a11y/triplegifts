@@ -26,8 +26,8 @@ class FakeRelayer:
     async def inventory(self):
         return list(self.items)
 
-    async def floor_price(self, collection_id, model):
-        return self.prices.get((collection_id, model))
+    async def floor_price(self, collection_id, model, collection_name=None):
+        return self.prices.get((int(collection_id), model))
 
     async def transfer(self, it, user_id, username):
         if user_id not in self.known and not username:
@@ -153,41 +153,43 @@ async def test_relayer_secrets_encrypted(env):
     assert await relayer.start() is False                         # сессии ещё нет
 
 
-async def test_relayer_floor_price_parses_market(env):
-    from telethon.tl import types as T
-    from telethon.tl.functions.payments import GetResaleStarGiftsRequest
-
-    def doc(i):
-        return T.Document(id=i, access_hash=0, file_reference=b"", date=None, mime_type="", size=0, dc_id=1, attributes=[])
-
-    def lot(num, amounts):
-        return T.StarGiftUnique(id=num, gift_id=100, title="Plush Pepe", slug=f"pp-{num}", num=num, attributes=[],
-                                availability_issued=1, availability_total=1, resell_amount=amounts)
-
-    rarity = T.StarGiftAttributeRarity(permille=15)
-    requests = []
-
-    class Client:
-        async def __call__(self, req):
-            assert isinstance(req, GetResaleStarGiftsRequest)
-            requests.append(req)
-            if not req.attributes:
-                return T.payments.ResaleStarGifts(count=0, gifts=[], chats=[], users=[], attributes=[
-                    T.StarGiftAttributeModel(name="Frog", document=doc(11), rarity=rarity),
-                    T.StarGiftAttributeModel(name="Toad", document=doc(22), rarity=rarity)])
-            return T.payments.ResaleStarGifts(count=2, gifts=[
-                lot(1, [T.StarsAmount(amount=9100, nanos=0), T.StarsTonAmount(amount=10)]),
-                lot(2, [T.StarsAmount(amount=8800, nanos=0)])], chats=[], users=[])
-
+async def test_mrkt_floor_by_collection_and_model(env):
+    from app.mrkt import Mrkt
     _, db = env
     relayer = Relayer(db, "1:x")
-    relayer.client = Client()
-    assert await relayer.floor_price(100, "Frog") == 8800           # минимум в звёздах, TON игнорируется
-    req = requests[-1]
-    assert req.sort_by_price and req.stars_only and req.attributes[0].document_id == 11
-    assert await relayer.floor_price(100, "Frog") == 8800           # из кэша
-    assert len(requests) == 2
-    assert await relayer.floor_price(100, "Unknown") is None
+    requests = []
+
+    async def fake_request(method, path, body=None):
+        requests.append((path, body))
+        if path == "/gifts/collections":
+            return [{"name": "Plush Pepe", "title": "Plush Pepe", "floorPriceNanoTons": 5 * 10**9},
+                    {"name": "Durov's Cap", "title": "Durov's Cap", "floorPriceNanoTons": 90 * 10**9}]
+        lots = {("Plush Pepe", "Frog"): [7_500_000_000, 8_000_000_000], ("Durov's Cap", "Black"): [120 * 10**9]}
+        coll = (body["collectionNames"] or [None])[0]
+        model = (body["modelNames"] or [None])[0]
+        items = [(c, m, p) for (c, m), ps in lots.items() for p in ps
+                 if (coll is None or c == coll) and (model is None or m == model)]
+        return {"gifts": [{"collectionName": c, "modelName": m, "salePrice": p, "modelRarityPerMille": 15}
+                          for c, m, p in sorted(items, key=lambda x: x[2])]}
+
+    market = Mrkt(relayer)
+    market._request = fake_request
+    await db.kv_set("mrkt:ton_stars", "200")                         # 1 TON = 200 ⭐
+    assert await market.floor_ton("Plush Pepe", "Frog") == 7.5        # флор именно модели
+    body = requests[-1][1]
+    assert body["collectionNames"] == ["Plush Pepe"] and body["modelNames"] == ["Frog"]
+    assert body["ordering"] == "Price" and body["lowToHigh"] is True
+    assert await market.floor_stars("Plush Pepe", "Frog") == 1500
+    assert await market.floor_stars("Plush Pepe", "Toad") is None     # лотов модели нет — цены нет
+    n = len(requests)
+    await market.floor_ton("Plush Pepe", "Frog")
+    assert len(requests) == n                                         # из кэша
+    relayer.market = market
+    assert await relayer.floor_price("100", "Frog", "Plush Pepe") == 1500
+    models = await market.sample_models(2)
+    assert sorted((m["title"], m["model"], m["price"]) for m in models) == [
+        ("Durov's Cap", "Black", 24000), ("Plush Pepe", "Frog", 1500)]
+    assert all(m["emoji"] in ("🐸", "🧢") and m["rarity"] == 1.5 for m in models)
 
 
 async def test_relayer_inventory_and_paid_transfer(env):

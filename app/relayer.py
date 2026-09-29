@@ -1,7 +1,7 @@
 """Релейер — аккаунт казино с NFT-подарками.
 
-Через MTProto (Telethon) под этим аккаунтом бот узнаёт реальную цену модели:
-пол маркета подарков Telegram в звёздах (payments.getResaleStarGifts с фильтром по модели).
+Через MTProto (Telethon) под этим аккаунтом бот передаёт NFT и дарит подарки,
+а цену модели берёт с маркетплейса MRKT (mrkt.py): вход в MRKT — тоже от имени релейера.
 Сессия аккаунта хранится в базе в зашифрованном виде (ключ — из токена бота).
 """
 from __future__ import annotations
@@ -18,7 +18,6 @@ from .db import Database
 
 log = logging.getLogger(__name__)
 
-PRICE_TTL = 15 * 60
 
 
 class RelayerError(Exception):
@@ -44,8 +43,8 @@ class Relayer:
         self._f = _fernet(bot_token)
         self.client: Any = None
         self._login: dict[str, Any] = {}
-        self._models: dict[int, dict[str, int]] = {}      # коллекция -> {модель: document_id}
-        self._prices: dict[tuple[int, str], tuple[float, int | None]] = {}
+        from .mrkt import Mrkt
+        self.market = Mrkt(self)
 
     # ---------- хранение ----------
 
@@ -90,6 +89,7 @@ class Relayer:
         return True
 
     async def stop(self) -> None:
+        await self.market.close()
         if self.client is not None:
             await self.client.disconnect()
             self.client = None
@@ -149,42 +149,13 @@ class Relayer:
         await self._set("session", None)
         await self.stop()
 
-    # ---------- цены ----------
+    # ---------- цены (MRKT) ----------
 
-    async def _model_ids(self, collection_id: int) -> dict[str, int]:
-        if collection_id not in self._models:
-            from telethon.tl.functions.payments import GetResaleStarGiftsRequest
-            from telethon.tl.types import StarGiftAttributeModel
-            res = await self.client(GetResaleStarGiftsRequest(gift_id=collection_id, offset="", limit=1))
-            self._models[collection_id] = {
-                a.name: a.document.id for a in (res.attributes or []) if isinstance(a, StarGiftAttributeModel)
-            }
-        return self._models[collection_id]
-
-    async def floor_price(self, collection_id: int, model: str) -> int | None:
-        """Самая низкая цена в звёздах, по которой модель сейчас продаётся на маркете Telegram."""
-        key = (collection_id, model)
-        cached = self._prices.get(key)
-        if cached and time.time() - cached[0] < PRICE_TTL:
-            return cached[1]
-        if not self.ready:
-            raise RelayerError("Релейер не подключён")
-        from telethon.tl.functions.payments import GetResaleStarGiftsRequest
-        from telethon.tl.types import StarGiftAttributeIdModel
-        doc_id = (await self._model_ids(collection_id)).get(model)
-        price = None
-        if doc_id is not None:
-            res = await self.client(GetResaleStarGiftsRequest(
-                gift_id=collection_id, offset="", limit=5, sort_by_price=True, stars_only=True,
-                attributes=[StarGiftAttributeIdModel(document_id=doc_id)],
-            ))
-            amounts = [
-                a.amount for gift in res.gifts for a in (getattr(gift, "resell_amount", None) or [])
-                if type(a).__name__ == "StarsAmount" and a.amount > 0
-            ]
-            price = min(amounts) if amounts else None
-        self._prices[key] = (time.time(), price)
-        return price
+    async def floor_price(self, collection_id: Any, model: str, collection_name: str | None = None) -> int | None:
+        """Флор модели в звёздах — самый дешёвый лот этой коллекции и модели на MRKT."""
+        if not collection_name:
+            return None
+        return await self.market.floor_stars(collection_name, model)
 
     # ---------- инвентарь и передача (MTProto) ----------
 

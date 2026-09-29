@@ -23,9 +23,7 @@ CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
 MAX_GIFTS_PER_BET = 20
 TEST_PRICE_UNTIL = 4_102_444_800   # 2100 год: цены тестовых NFT всегда «свежие»
-TEST_MODELS = [("Test Pepe", "Frog", "🐸", 2.5, 500), ("Test Cap", "Gold", "🧢", 1.0, 3000),
-               ("Test Star", "Diamond", "💎", 0.3, 12000)]
-TEST_GIFTS = [("Test Bear", "Brown", "🧸", 150), ("Test Rose", "Red", "🌹", 400), ("Test Ring", "Silver", "💍", 1200)]
+TEST_COLLECTION = "test"      # collection_id тестовых моделей: настоящие имена с MRKT, но это заглушки
 CASE_MAX_COUNT = 5          # сколько кейсов можно открыть за раз
 
 
@@ -615,7 +613,7 @@ class Casino:
     def _gift_view(cls, r: dict, now: float) -> dict:
         fresh = bool(r["value"]) and now - (r["priced_at"] or 0) < NFT_PRICE_MAX_AGE
         test = bool(r.get("test"))
-        return {"id": r["id"], "kind": r["kind"], "title": ("🧪 " if test else "") + cls.gift_title(r),
+        return {"id": r["id"], "kind": r["kind"], "title": cls.gift_title(r),
                 "model": r["model"], "emoji": r["emoji"] or "🎁", "rarity": r["rarity"], "value": r["value"],
                 "priced": fresh, "status": r["status"], "test": test,
                 "sell": int(r["value"] * GIFT_SELL_RATE) if fresh and not test else None,
@@ -705,32 +703,44 @@ class Casino:
         rows = await self.db.all(
             "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
             "AND (test=0 OR ?) ORDER BY test, price", time.time() - NFT_PRICE_MAX_AGE, int(user_id in self.cfg.admin_ids))
-        return [{"id": r["id"], "title": ("🧪 " if r["test"] else "") + r["collection_name"], "model": r["model"],
+        return [{"id": r["id"], "title": r["collection_name"], "model": r["model"],
                  "emoji": r["emoji"] or "💎", "rarity": r["rarity"], "price": r["price"], "test": bool(r["test"])}
                 for r in rows]
 
     # ---------- тестовые NFT (заглушки для админа) ----------
 
-    async def test_nfts_add(self, admin_id: int) -> int:
-        """Выдаёт админу тестовые NFT и создаёт тестовые цели апгрейда. Звёзд и реальных подарков они не дают."""
+    async def test_nfts_add(self, admin_id: int, models: list[dict]) -> tuple[list[dict], list[dict]]:
+        """Тестовые NFT админу: настоящие коллекции и модели с MRKT и их флор, но это заглушки.
+
+        Дешёвая половина моделей — NFT админу в «Мои подарки», дорогая — цели апгрейда (видит только админ).
+        Заглушки не дают звёзд и настоящих подарков.
+        """
         if admin_id not in self.cfg.admin_ids:
             raise GameError("Только для админа")
+        models = sorted(models, key=lambda m: m["price"])
+        if len(models) < 2:
+            raise GameError("Мало моделей с ценой на MRKT — попробуйте ещё раз")
+        half = max(1, len(models) // 2)
+        gifts, targets = models[:half], models[half:]
         now = time.time()
         async with self.db.tx() as c:
-            for name, model, emoji, rarity, price in TEST_MODELS:
+            for m in targets:
                 await c.execute(
                     "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at, "
-                    "test) VALUES ('test',?,?,?,?,999,?,?,1) ON CONFLICT(collection_id, model) DO UPDATE SET stock=999, "
-                    "price=excluded.price, price_at=excluded.price_at, enabled=1, test=1",
-                    (name, model, rarity, emoji, price, TEST_PRICE_UNTIL))
-            for name, model, emoji, price in TEST_GIFTS:
+                    "test) VALUES (?,?,?,?,?,999,?,?,1) ON CONFLICT(collection_id, model) DO UPDATE SET stock=999, "
+                    "collection_name=excluded.collection_name, price=excluded.price, price_at=excluded.price_at, "
+                    "emoji=excluded.emoji, enabled=1, test=1",
+                    (f"{TEST_COLLECTION}:{m['title']}", m["title"], m["model"], m.get("rarity"), m["emoji"], m["price"],
+                     TEST_PRICE_UNTIL))
+            for m in gifts:
                 await c.execute(
                     "INSERT INTO user_gifts(user_id, ref, kind, collection_id, collection_name, number, model, emoji, "
                     "rarity, value, priced_at, status, created_at, test) "
-                    "VALUES (?,?,'nft','test',?,?,?,?,1.0,?,?,'owned',?,1)",
-                    (admin_id, f"test:{secrets.token_hex(8)}", name, secrets.randbelow(9000) + 1000, model, emoji,
-                     price, TEST_PRICE_UNTIL, now))
-        return len(TEST_GIFTS)
+                    "VALUES (?,?,'nft',?,?,?,?,?,?,?,?,'owned',?,1)",
+                    (admin_id, f"test:{secrets.token_hex(8)}", TEST_COLLECTION, m["title"],
+                     secrets.randbelow(90000) + 1000, m["model"], m["emoji"], m.get("rarity"), m["price"],
+                     TEST_PRICE_UNTIL, now))
+        return gifts, targets
 
     async def test_nfts_clear(self) -> int:
         async with self.db.tx() as c:
@@ -779,9 +789,9 @@ class Casino:
                     "INSERT INTO user_gifts(user_id, ref, kind, collection_id, collection_name, number, model, emoji, "
                     "rarity, value, priced_at, status, created_at, test) "
                     "VALUES (?,?,'nft','test',?,?,?,?,?,?,?,'owned',?,1)",
-                    (user_id, f"test:{secrets.token_hex(8)}", target["collection_name"], secrets.randbelow(9000) + 1000,
+                    (user_id, f"test:{secrets.token_hex(8)}", target["collection_name"], secrets.randbelow(90000) + 1000,
                      target["model"], target["emoji"], target["rarity"], target["price"], TEST_PRICE_UNTIL, now))
-                nft = {"win_id": None, "test": True, "title": "🧪 " + target["collection_name"], "model": target["model"],
+                nft = {"win_id": None, "test": True, "title": target["collection_name"], "model": target["model"],
                        "emoji": target["emoji"] or "💎", "price": target["price"]}
             elif won:
                 await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=?", (target["id"],))

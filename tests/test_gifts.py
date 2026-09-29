@@ -33,7 +33,7 @@ class FakeRelayer:
     async def inventory(self):
         return [g for g in self.gifts if g["kind"] == "nft"]
 
-    async def floor_price(self, collection_id, model):
+    async def floor_price(self, collection_id, model, collection_name=None):
         return self.prices.get(model)
 
     async def transfer(self, item, user_id, username):

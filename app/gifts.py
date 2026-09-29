@@ -54,7 +54,7 @@ async def scan(db: Database, cfg: Config, relayer: Relayer) -> list[dict[str, An
         value = None
         if item["kind"] == "nft":
             try:
-                value = await relayer.floor_price(int(item["collection_id"]), item["model"])
+                value = await relayer.floor_price(item["collection_id"], item["model"], item["collection_name"])
             except Exception as e:
                 log.warning("Цена подаренной модели %s недоступна: %s", item["model"], e)
         else:
@@ -84,12 +84,12 @@ async def reprice(db: Database, relayer: Relayer) -> None:
     """Обновляет цены NFT игроков (ставить можно только подарок с проверенной за час ценой)."""
     now = time.time()
     rows = await db.all(
-        "SELECT id, collection_id, model FROM user_gifts WHERE kind='nft' AND status='owned' "
+        "SELECT id, collection_id, collection_name, model FROM user_gifts WHERE kind='nft' AND status='owned' "
         "AND (priced_at IS NULL OR priced_at < ?)", now - PRICE_MAX_AGE / 2,
     )
     for r in rows:
         try:
-            price = await relayer.floor_price(int(r["collection_id"]), r["model"])
+            price = await relayer.floor_price(r["collection_id"], r["model"], r["collection_name"])
         except Exception:
             continue
         if price:
