@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS nft_models (
     emoji           TEXT,
     stock           INTEGER NOT NULL DEFAULT 0,  -- сколько подарков этой модели у релейера
     reserved        INTEGER NOT NULL DEFAULT 0,  -- выиграно, но ещё не передано
-    price           INTEGER,                -- пол маркета Telegram в звёздах
+    price           INTEGER,                -- флор MRKT в звёздах
     price_at        REAL,                   -- когда цена проверена
     enabled         INTEGER NOT NULL DEFAULT 1,
     UNIQUE (collection_id, model)

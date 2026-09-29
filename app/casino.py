@@ -730,8 +730,9 @@ class Casino:
     def _gift_view(cls, r: dict, now: float) -> dict:
         fresh = bool(r["value"]) and now - (r["priced_at"] or 0) < NFT_PRICE_MAX_AGE
         test = bool(r.get("test"))
-        return {"id": r["id"], "kind": r["kind"], "title": cls.gift_title(r),
-                "model": r["model"], "emoji": r["emoji"] or "🎁", "rarity": r["rarity"], "value": r["value"],
+        return {"id": r["id"], "kind": r["kind"], "title": cls.gift_title(r), "collection": r["collection_name"],
+                "number": r["number"], "model": r["model"], "emoji": r["emoji"] or "🎁", "rarity": r["rarity"],
+                "value": r["value"],
                 "priced": fresh, "status": r["status"], "test": test,
                 "sell": int(r["value"] * GIFT_SELL_RATE) if fresh and not test else None,
                 "locked_until": r["transfer_at"] if r["transfer_at"] > now else None}
@@ -969,7 +970,9 @@ class Casino:
             if gift_ids:
                 for gift in await self._take_gifts(c, user_id, gift_ids, rnd["id"]):
                     stake += gift["value"]
-                    staked.append({"emoji": gift["emoji"], "title": gift["title"], "value": gift["value"]})
+                    staked.append({"emoji": gift["emoji"], "title": gift["title"], "value": gift["value"],
+                                   "collection": gift["collection_name"], "model": gift["model"],
+                                   "number": None if gift["test"] else gift["number"]})
             if amount:
                 await self._take(c, user_id, amount, game, cur)
             async with c.execute("SELECT gifts FROM pvp_bets WHERE round_id=? AND user_id=?",

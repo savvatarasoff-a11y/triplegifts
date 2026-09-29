@@ -470,3 +470,15 @@ body:not(.cur-ton) .only-ton { display: none !important; }
 .kv small { display: block; color: var(--muted); font-weight: 700; font-size: 12px; margin-bottom: 4px; }
 .kv .btn.small { margin-top: 6px; width: 100%; }
 #tab-out input#ton-address { width: 100%; margin: 6px 0; }
+
+/* ---------- картинки NFT ---------- */
+.nft-ic { display: inline-grid; place-items: center; }
+.nft-ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.mg .em.nft-ic { width: 46px; height: 46px; }
+.mg .em.nft-ic.has-img img { border-radius: 12px; }
+.nft-inline { width: 30px; height: 30px; vertical-align: middle; font-size: 26px; }
+.nft-inline.big { width: 56px; height: 56px; font-size: 40px; }
+.upg-em .nft-inline { width: 40px; height: 40px; }
+.roller-track .it .em.nft-ic { width: 54px; height: 54px; }
+.pl .gl .nft-inline { width: 18px; height: 18px; font-size: 14px; }
+.upt .em { display: block; height: 58px; }

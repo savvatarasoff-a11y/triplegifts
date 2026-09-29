@@ -701,12 +701,43 @@ async function withdraw(gift) {
 const myGifts = { relayer: null, list: [], timer: 0 };
 const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится" };
 
+// ---------- картинки NFT: настоящий подарок (Fragment) или модель (changes.tg) ----------
+
+const nftSlug = (collection) => (collection || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function nftImgUrl(o) {
+  if (!o || !o.collection) return null;
+  if (o.number && !o.test) return `https://nft.fragment.com/gift/${nftSlug(o.collection)}-${o.number}.webp`;
+  if (o.model) {
+    return `https://cdn.changes.tg/gifts/models/${encodeURIComponent(o.collection)}/png/${encodeURIComponent(o.model)}.png`;
+  }
+  return null;
+}
+
+// Эмодзи сразу, картинка — как только загрузится (если не загрузится, остаётся эмодзи)
+function nftIcon(o, cls) {
+  const el = document.createElement("span");
+  el.className = (cls || "em") + " nft-ic";
+  el.textContent = o.emoji || "🎁";
+  const url = nftImgUrl(o);
+  if (url) {
+    const img = new Image();
+    img.alt = "";
+    img.onload = () => { el.textContent = ""; el.append(img); el.classList.add("has-img"); };
+    img.src = url;
+  }
+  return el;
+}
+
+function setNftIcon(target, o) {
+  target.innerHTML = "";
+  target.append(nftIcon(o, "nft-inline"));
+}
+
 function giftCard(gift, opts) {
   const el = document.createElement(opts && opts.button ? "button" : "div");
   el.className = "mg";
-  const em = document.createElement("span");
-  em.className = "em";
-  em.textContent = gift.emoji || "🎁";
+  const em = nftIcon(gift, "em");
   const info = document.createElement("div");
   const t = document.createElement("div");
   t.className = "t";
@@ -877,9 +908,14 @@ function upgUpdate() {
   $("#upg-arc").style.strokeDashoffset = UPG_C * (1 - chance);
   $("#upg-chance").textContent = (chance * 100).toFixed(chance < 0.1 ? 2 : 1) + "%";
   const picked = upg.gifts.filter((g) => upg.chosen.has(g.id));
-  $("#upg-from-em").textContent = picked.length ? picked.slice(0, 3).map((g) => g.emoji).join("") : "🎁";
+  const from = $("#upg-from-em");
+  from.innerHTML = "";
+  if (!picked.length) from.textContent = "🎁";
+  picked.slice(0, 3).forEach((g) => from.append(nftIcon(g, "nft-inline")));
   $("#upg-stake").textContent = stake ? nftPrice(stake) : "выберите NFT";
-  $("#upg-to-em").textContent = upg.target ? upg.target.emoji : "💎";
+  if (upg.target) setNftIcon($("#upg-to-em"), { collection: upg.target.title.replace(/^🧪 /, ""), model: upg.target.model,
+    emoji: upg.target.emoji });
+  else $("#upg-to-em").textContent = "💎";
   $("#upg-target").textContent = upg.target ? nftPrice(upg.target.price) : "выберите цель";
   const btn = $("#upg-btn");
   let hint = "";
@@ -933,7 +969,7 @@ function upgRender() {
     b.dataset.i = i;
     const em = document.createElement("span");
     em.className = "em";
-    em.textContent = t.emoji;
+    em.append(nftIcon({ collection: t.title, model: t.model, emoji: t.emoji }, "nft-inline big"));
     const ttl = document.createElement("b");
     ttl.textContent = t.title;
     const md = document.createElement("small");
@@ -1132,7 +1168,9 @@ async function roll(rollerSel, items, targetIndex, duration) {
     if (it.bg) d.style.background = it.bg;
     if (it.fg) d.style.color = it.fg;
     if (it.player) d.append(avatarEl(it.player, "av-big", it.colors));
-    if (it.em) {
+    if (it.nft) {
+      d.append(nftIcon(it.nft, "em"));
+    } else if (it.em) {
       const e = document.createElement("span");
       e.className = "em";
       e.textContent = it.em;
@@ -1663,7 +1701,8 @@ function prizeItem(p, price) {
     : ratio >= 1.5 ? ["#8B5CF6", "#FFFFFF"]
     : ratio >= 1 ? ["#6D28D9", "#FFFFFF"]
     : ["#242033", "#FFFFFF"];
-  return { em: p.emoji, sub: p.label || (p.kind === "nft" ? "NFT" : casePriceText(p.amount)), bg, fg };
+  return { em: p.emoji, sub: p.label || (p.kind === "nft" ? "NFT" : casePriceText(p.amount)), bg, fg,
+    nft: p.kind === "nft" && p.title ? { collection: p.title, model: p.model, emoji: p.emoji } : null };
 }
 
 function pickPrize(c) {
@@ -1685,7 +1724,8 @@ function openCaseScreen(c) {
     const d = document.createElement("div");
     const e = document.createElement("span");
     e.className = "em";
-    e.textContent = p.emoji;
+    if (p.kind === "nft") e.append(nftIcon({ collection: p.title, model: p.model, emoji: p.emoji }, "nft-inline big"));
+    else e.textContent = p.emoji;
     const sm = document.createElement("small");
     sm.textContent = (p.chance < 0.1 ? p.chance.toFixed(3) : p.chance.toFixed(2)) + "%";
     if (p.kind === "nft") {
@@ -1754,6 +1794,7 @@ async function openCase() {
       await Promise.all(r.items.map((it, k) => {
         const items = [];
         for (let i = 0; i < 60; i++) items.push(prizeItem(i === 50 ? { kind: it.kind, emoji: it.gift, label: it.kind === "nft" ? "NFT" : money(it.prize, r.cur),
+          title: it.nft && it.nft.title, model: it.nft && it.nft.model,
           amount: r.cur === "ton" ? Math.round(it.prize / NANO * (tonRate() || 0)) : it.prize } : pickPrize(currentCase), currentCase.price));
         return roll(rollers[k], items, 50, 4600 + k * 350);   // рулетки останавливаются по очереди
       }));
@@ -1834,7 +1875,8 @@ function pvpRenderPlayers(game, round) {
     if (p.gifts && p.gifts.length) {
       const gl = document.createElement("span");
       gl.className = "gl";
-      gl.textContent = p.gifts.slice(0, 5).map((g) => g.emoji || "🎁").join("") + (p.gifts.length > 5 ? "…" : "");
+      p.gifts.slice(0, 5).forEach((g) => gl.append(nftIcon(g, "nft-inline")));
+      if (p.gifts.length > 5) gl.append("…");
       gl.title = p.gifts.map((g) => g.title).join(", ");
       nm.append(gl);
     }
