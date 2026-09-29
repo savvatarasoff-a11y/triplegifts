@@ -66,7 +66,7 @@ class Relayer:
     def _make_client(self, api_id: int, api_hash: str, session: str | None) -> Any:
         from telethon import TelegramClient
         from telethon.sessions import StringSession
-        return TelegramClient(StringSession(session or ""), api_id, api_hash, device_model="Svag Gifts relayer")
+        return TelegramClient(StringSession(session or ""), api_id, api_hash, device_model="Triple Gifts relayer")
 
     async def start(self) -> bool:
         """Подключается сохранённой сессией. False — если релейер ещё не настроен."""
@@ -353,6 +353,44 @@ class Relayer:
 
         self.client.add_event_handler(handler, events.NewMessage(incoming=True))
         self.client.add_event_handler(gift_handler, events.Raw(UpdateNewMessage))
+
+    RELAYER_USERNAMES = ("triple_gifts_relayer", "triplegifts_relayer", "triple_gifts_bank", "triplegifts_bank",
+                         "triple_gifts_casino")
+
+    async def rebrand(self, name: str, about: str, avatar: bytes | None, username: str | None = None) -> list[str]:
+        """Переоформляет аккаунт релейера: имя, «о себе», аватарка и юзернейм (первый свободный из вариантов)."""
+        if not self.ready:
+            raise RelayerError("Релейер не подключён")
+        from telethon.tl.functions.account import CheckUsernameRequest, UpdateProfileRequest, UpdateUsernameRequest
+        from telethon.tl.functions.photos import UploadProfilePhotoRequest
+        report = []
+        try:
+            await self.client(UpdateProfileRequest(first_name=name, last_name="", about=about[:70]))
+            report.append(f"✅ имя «{name}» и описание")
+        except Exception as e:
+            report.append(f"⚠️ имя: {type(e).__name__}")
+        if avatar:
+            try:
+                await self.client(UploadProfilePhotoRequest(file=await self.client.upload_file(avatar, file_name="avatar.png")))
+                report.append("✅ аватарка")
+            except Exception as e:
+                report.append(f"⚠️ аватарка: {type(e).__name__}")
+        me = await self.client.get_me()
+        for candidate in ([username] if username else list(self.RELAYER_USERNAMES)):
+            candidate = candidate.lstrip("@")
+            if me.username and me.username.lower() == candidate.lower():
+                report.append(f"✅ юзернейм уже @{candidate}")
+                break
+            try:
+                if not await self.client(CheckUsernameRequest(candidate)):
+                    report.append(f"— @{candidate} занят")
+                    continue
+                await self.client(UpdateUsernameRequest(candidate))
+                report.append(f"✅ юзернейм @{candidate}")
+                break
+            except Exception as e:
+                report.append(f"⚠️ @{candidate}: {type(e).__name__}")
+        return report
 
     async def username(self) -> str | None:
         if not self.ready:

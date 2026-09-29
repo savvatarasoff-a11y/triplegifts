@@ -88,7 +88,7 @@ class FakeBot:
         self.messages.append((chat_id, text))
 
     async def get_me(self):
-        return type("Me", (), {"username": "svag_gifts_bot"})()
+        return type("Me", (), {"username": "triple_gifts_bot"})()
 
     async def get_user_profile_photos(self, user_id, limit=1):
         size = type("P", (), {"file_id": "f1", "width": 160})()
@@ -297,7 +297,7 @@ async def test_referral_via_start_param_and_pages(client):
     await casino.db.credit_payment("x", 501, 100)
     r = await client.get("/api/referrals", headers={"Authorization": "tma " + init_data(500)})
     data = await r.json()
-    assert data["link"] == "https://t.me/svag_gifts_bot?start=r_500"
+    assert data["link"] == "https://t.me/triple_gifts_bot?start=r_500"
     assert (data["count"], data["earned"]) == (1, 10)
     r = await client.get("/api/profile", headers={"Authorization": "tma " + init_data(501)})
     assert (await r.json())["deposited"] == 100

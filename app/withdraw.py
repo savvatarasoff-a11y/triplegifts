@@ -88,7 +88,7 @@ async def approve(bot: Bot, casino: Casino, wd_id: int, admin_id: int,
     wd = await casino.withdraw_claim(wd_id, admin_id)
     if wd is None:
         return False, "Заявка уже обработана"
-    text = "Вывод из Svag Gifts 🎁"
+    text = "Вывод из Triple Gifts 🎁"
     try:
         if relayer is not None:
             user = await casino.db.get_user(wd["user_id"])
@@ -167,7 +167,7 @@ async def notify_admins_ton(bot: Bot, cfg: Config, casino: Casino, wd: dict) -> 
     stats = (f"пополнил {money.fmt(user['ton_deposited'], money.TON)}, поставил "
              f"{money.fmt(user['ton_wagered'], money.TON)}, выиграл {money.fmt(user['ton_won'], money.TON)}"
              if user else "нет данных")
-    comment = quote(f"Svag Gifts вывод {wd['id']}")
+    comment = quote(f"Triple Gifts вывод {wd['id']}")
     link = f"ton://transfer/{wd['address']}?amount={wd['amount']}&text={comment}"
     text = (
         f"💎 <b>Вывод TON №{wd['id']}</b>\n"

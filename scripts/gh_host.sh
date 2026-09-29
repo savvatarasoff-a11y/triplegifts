@@ -29,7 +29,7 @@ backup() {
   cp "$DATA_DIR/snapshot.db" "$tmp/bot.db"
   (
     cd "$tmp" && git init -q && git checkout -q -b data && git add bot.db &&
-    git -c user.name="svag-bot" -c user.email="svag-bot@users.noreply.github.com" commit -qm "Снимок базы $(date -u +%FT%TZ)" &&
+    git -c user.name="triple-bot" -c user.email="triple-bot@users.noreply.github.com" commit -qm "Снимок базы $(date -u +%FT%TZ)" &&
     git push -qf "$REMOTE" data
   ) && echo "Снимок базы сохранён $(date -u +%T)"
   rm -rf "$tmp"

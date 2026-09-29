@@ -327,7 +327,7 @@ async function refCopy() {
 
 function refShare() {
   if (!state.refLink) return;
-  const text = "Залетай в Svag Gifts — слоты, краш, PvP и NFT-подарки 🎁";
+  const text = "Залетай в Triple Gifts — слоты, краш, PvP и NFT-подарки 🎁";
   const url = `https://t.me/share/url?url=${encodeURIComponent(state.refLink)}&text=${encodeURIComponent(text)}`;
   if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
   else window.open(url, "_blank");
@@ -653,7 +653,7 @@ async function activateCheck(inputSel) {
 // ---------- чеки игрока ----------
 
 function checkShare(c) {
-  const url = `https://t.me/share/url?url=${encodeURIComponent(c.link)}&text=${encodeURIComponent(`Чек на ${c.amount} ⭐ в Svag Gifts 🎁`)}`;
+  const url = `https://t.me/share/url?url=${encodeURIComponent(c.link)}&text=${encodeURIComponent(`Чек на ${c.amount} ⭐ в Triple Gifts 🎁`)}`;
   if (tg && tg.openTelegramLink) tg.openTelegramLink(url);
   else window.open(url, "_blank");
 }
@@ -2887,7 +2887,7 @@ async function init() {
   minesRender(null);
   slotsIdle();
   if (!tg || !tg.initData) {
-    toast("Откройте Svag Gifts через кнопку в Telegram-боте", true);
+    toast("Откройте Triple Gifts через кнопку в Telegram-боте", true);
     return;
   }
   document.body.classList.add("has-tabbar");

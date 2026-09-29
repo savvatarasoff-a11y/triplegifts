@@ -1,4 +1,4 @@
-/* Svag Gifts — два цвета: почти чёрный и фиолетовый.
+/* Triple Gifts — два цвета: почти чёрный и фиолетовый.
    Всё остальное — оттенки этих двух цветов и белый текст. */
 :root {
   --bg: #0A0A0D;
@@ -635,3 +635,5 @@ button { -webkit-user-select: none; user-select: none; }
 .bg-glow { background: radial-gradient(closest-side at 50% 40%, rgba(245, 185, 60, .16), transparent 70%); }
 .topbar { border-bottom: 1px solid rgba(245, 185, 60, .10); }
 .btn { box-shadow: 0 10px 26px -12px var(--accent-glow); }
+.wordmark { font-size: 13px; letter-spacing: .3px; flex-direction: column; gap: 0; line-height: 1.05; }
+.wordmark i { color: #fff; font-size: 11px; letter-spacing: 2.6px; }

@@ -14,7 +14,7 @@ class ChanBot:
         self.calls, self.fail = [], set(fail)
 
     async def get_me(self):
-        return type("Me", (), {"username": "svag_bot"})()
+        return type("Me", (), {"username": "triple_bot"})()
 
     def __getattr__(self, name):
         async def call(*args, **kwargs):
@@ -37,7 +37,7 @@ def test_banner_and_text():
     png = channel.banner()
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 20_000
     text = channel.welcome_text()
-    assert "Svag Gifts" in text and "18+" in text
+    assert "Triple Gifts" in text and "18+" in text
 
 
 async def test_setup_posts_and_pins():
@@ -47,7 +47,7 @@ async def test_setup_posts_and_pins():
     assert names == ["set_chat_title", "set_chat_description", "set_chat_photo", "send_photo", "pin_chat_message"]
     assert all(r.startswith("✅") for r in report)
     kb = bot.calls[3][2]["reply_markup"]
-    assert kb.inline_keyboard[0][0].url == "https://t.me/svag_bot?start=channel"
+    assert kb.inline_keyboard[0][0].url == "https://t.me/triple_bot?start=channel"
     # нет прав на изменение профиля — пост всё равно публикуется, в отчёте видно, что не вышло
     bot = ChanBot(fail={"set_chat_title", "set_chat_photo"})
     report = await channel.setup(bot)

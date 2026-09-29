@@ -77,7 +77,7 @@ def referral_link(username: str | None, user_id: int) -> str | None:
 def deposit_invoice_kwargs(user_id: int, amount: int) -> dict[str, Any]:
     return {
         "title": f"Пополнение на {amount} ⭐",
-        "description": "Пополнение баланса Svag Gifts. Вывод — подарками Telegram.",
+        "description": "Пополнение баланса Triple Gifts. Вывод — подарками Telegram.",
         "payload": f"dep:{user_id}:{amount}",
         "currency": "XTR",
         "prices": [LabeledPrice(label=f"{amount} ⭐", amount=amount)],

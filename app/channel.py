@@ -21,7 +21,7 @@ from .db import Database
 log = logging.getLogger(__name__)
 
 CHANNEL = os.getenv("CHANNEL", "").strip() or "@A_giftss"
-TITLE = "Svag Gifts — казино на подарках"
+TITLE = "Triple Gifts — казино на подарках"
 DESCRIPTION = ("🎁 Казино на подарках Telegram: слоты, краш, мины, кейсы с NFT, апгрейд и PvP.\n"
                "Пополнение — ⭐ Stars и 💎 TON, вывод — подарками и NFT.\n"
                "Новости, чеки и крупные выигрыши — здесь. 18+")
@@ -37,7 +37,7 @@ GAME_NAMES = {"slots": "🎰 Слоты", "crash": "🚀 Краш", "mines": "�
 
 def welcome_text() -> str:
     return (
-        "🎁 <b>Svag Gifts — казино на подарках Telegram</b>\n\n"
+        "🎁 <b>Triple Gifts — казино на подарках Telegram</b>\n\n"
         "Добро пожаловать! Играем на звёзды ⭐, TON 💎 и NFT-подарки — всё прямо в Telegram.\n\n"
         "🎰 <b>Слоты</b> — 777 даёт NFT-джекпот\n"
         "🚀 <b>Краш</b> — ставь звёзды или свои NFT\n"
@@ -98,7 +98,7 @@ def play_keyboard(bot_username: str | None) -> InlineKeyboardMarkup | None:
     if not bot_username:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Играть в Svag Gifts", url=f"https://t.me/{bot_username}?start=channel")],
+        [InlineKeyboardButton(text="🎮 Играть в Triple Gifts", url=f"https://t.me/{bot_username}?start=channel")],
     ])
 
 
@@ -120,7 +120,7 @@ async def setup(bot: Bot) -> list[str]:
     await step("описание", bot.set_chat_description(CHANNEL, DESCRIPTION))
     await step("аватарка", bot.set_chat_photo(CHANNEL, BufferedInputFile(AVATAR.read_bytes(), "avatar.png")))
     msg = await step("приветственный пост", bot.send_photo(
-        CHANNEL, BufferedInputFile(banner(), "svag_gifts.png"), caption=welcome_text(),
+        CHANNEL, BufferedInputFile(banner(), "triple_gifts.png"), caption=welcome_text(),
         reply_markup=play_keyboard(me.username)))
     if msg is not None:
         await step("закреп", bot.pin_chat_message(CHANNEL, msg.message_id, disable_notification=True))

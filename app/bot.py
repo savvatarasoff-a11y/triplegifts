@@ -37,7 +37,7 @@ SLOT_TEXT = {"bar": "BAR", "grape": "🍇", "lemon": "🍋", "seven": "7️⃣"}
 
 RULES = (
     "Играть можно на звёзды или на TON (переключатель ★/💎 в мини-приложении). "
-    "Пополнить баланс Svag Gifts можно через Telegram Stars, TON-переводом, чеком или подарком: отправьте его аккаунту казино "
+    "Пополнить баланс Triple Gifts можно через Telegram Stars, TON-переводом, чеком или подарком: отправьте его аккаунту казино "
     "(мини-приложение → Кошелёк → Подарки), NFT можно ставить в PvP. "
     "<b>Вывод — подарками Telegram</b>: выберите подарок в мини-приложении (раздел «Вывод»), "
     "после проверки администратором он придёт вам в Telegram, его можно оставить или обменять на звёзды. "
@@ -49,7 +49,7 @@ def play_keyboard(cfg: Config) -> InlineKeyboardMarkup | None:
     if not cfg.webapp_url:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎁 Играть в Svag Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
+        InlineKeyboardButton(text="🎁 Играть в Triple Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
     ]])
 
 
@@ -77,7 +77,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                 await message.answer(f"⚠️ {html.escape(str(e))}")
             user = await casino.db.get_user(user["id"])
         await message.answer(
-            f"🎁 <b>Добро пожаловать в Svag Gifts!</b>\n\n"
+            f"🎁 <b>Добро пожаловать в Triple Gifts!</b>\n\n"
             f"Слоты, краш, мины, Plinko, кейсы с NFT, апгрейд NFT, PvP-рулетка и PvP-хоккей — в мини-приложении.\n"
             f"Вывод — подарками Telegram.\n"
             f"Баланс: <b>{user['balance']} ⭐</b>\n\n"
@@ -291,6 +291,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/checks — активные чеки\n"
             "/revoke <code>код</code> — отозвать чек\n"
             "/stats — статистика казино\n"
+            "/rebrand <code>[юзернейм]</code> — имя бота и оформление релейера (Triple Gifts)\n"
             "/channel_setup — оформить канал и опубликовать приветственный пост\n"
             "/channel_post — ещё раз опубликовать приветственный пост\n"
             "/channel_wins <code>on|off</code> — выигрыши в канал\n"
@@ -558,6 +559,29 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         count = await casino.demo_clear()
         await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
 
+    @admin.message(Command("rebrand"))
+    async def rebrand(message: Message, command: CommandObject, bot: Bot) -> None:
+        """Переименование в Triple Gifts: бот (имя) и аккаунт-релейер (имя, описание, аватарка, юзернейм)."""
+        from pathlib import Path
+        from .channel import CHANNEL
+        lines = ["🎰 <b>Triple Gifts</b>"]
+        try:
+            await bot.set_my_name("Triple Gifts")
+            lines.append("✅ имя бота")
+        except Exception as e:
+            lines.append(f"⚠️ имя бота: {html.escape(str(getattr(e, 'message', e)))[:100]}")
+        if relayer is None or not relayer.ready:
+            lines.append("⚠️ релейер не подключён — войдите: /relayer")
+        else:
+            avatar = (Path(__file__).resolve().parent.parent / "webapp" / "avatar.png").read_bytes()
+            try:
+                lines += await relayer.rebrand("Triple Gifts", f"Касса казино Triple Gifts · {CHANNEL}", avatar,
+                                               (command.args or "").strip() or None)
+            except Exception as e:
+                lines.append(f"⚠️ релейер: {html.escape(str(e))}")
+        lines.append("\nАватарку и юзернейм самого бота меняют в @BotFather (/setuserpic, /setname).")
+        await message.answer("\n".join(lines))
+
     @admin.message(Command("channel_setup"))
     async def channel_setup(message: Message, bot: Bot) -> None:
         from . import channel
@@ -573,7 +597,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         from . import channel
         me = await bot.get_me()
         try:
-            await bot.send_photo(channel.CHANNEL, BufferedInputFile(channel.banner(), "svag_gifts.png"),
+            await bot.send_photo(channel.CHANNEL, BufferedInputFile(channel.banner(), "triple_gifts.png"),
                                  caption=channel.welcome_text(), reply_markup=channel.play_keyboard(me.username))
             await message.answer("✅ Приветственный пост опубликован")
         except Exception as e:

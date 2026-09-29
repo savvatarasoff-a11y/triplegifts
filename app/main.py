@@ -29,7 +29,7 @@ from .withdraw import approve_waiting
 log = logging.getLogger("casino")
 
 PLAYER_COMMANDS = [
-    ("start", "Открыть Svag Gifts"),
+    ("start", "Открыть Triple Gifts"),
     ("slot", "Слоты 🎰 в чате"),
     ("deposit", "Пополнить звёздами"),
     ("balance", "Баланс"),
@@ -52,6 +52,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("tonrate", "Курс TON → звёзды"),
     ("nftimg", "Проверка картинок NFT"),
     ("channel_setup", "Оформить канал"),
+    ("rebrand", "Оформление Triple Gifts"),
     ("channel_wins", "Выигрыши в канал"),
     ("dupe", "Демо-NFT (модели с MRKT)"),
     ("tonwallet", "Кошелёк для пополнений TON"),
@@ -192,10 +193,14 @@ async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
             except Exception:
                 log.warning("Меню админа %s не установлено: он ещё не нажал /start", admin_id)
         try:
+            await bot.set_my_name("Triple Gifts")
+        except Exception:
+            log.warning("Имя бота не обновлено")
+        try:
             await bot.set_my_short_description("🎁 Казино на подарках Telegram: слоты, краш, кейсы с NFT, "
                                                "апгрейд и PvP. Новости — @A_giftss")
             await bot.set_my_description(
-                "🎁 Svag Gifts — казино на подарках Telegram.\n\n"
+                "🎁 Triple Gifts — казино на подарках Telegram.\n\n"
                 "🎰 Слоты · 🚀 Краш · 💣 Мины · 🟣 Plinko · 📦 Кейсы с NFT · ⬆️ Апгрейд · ⚔️ PvP\n"
                 "💸 Пополнение — Stars и TON, вывод — подарками и NFT.\n\n"
                 "Нажмите «Старт» и откройте мини-приложение. Канал: @A_giftss. 18+")
@@ -203,7 +208,7 @@ async def setup_bot_ui(bot: Bot, cfg: Config) -> None:
             log.warning("Описание бота не обновлено")
         if cfg.webapp_url:
             await bot.set_chat_menu_button(
-                menu_button=MenuButtonWebApp(text="Svag Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
+                menu_button=MenuButtonWebApp(text="Triple Gifts", web_app=WebAppInfo(url=cfg.webapp_url))
             )
     except Exception:
         log.exception("Не удалось настроить меню бота")
