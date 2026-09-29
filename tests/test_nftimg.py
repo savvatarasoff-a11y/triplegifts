@@ -59,6 +59,54 @@ async def test_cache_dedupe_disk_and_failures(tmp_path):
     assert await imgs.prewarm(["u2", "u2", "bad"]) == 1
 
 
+class ModelRelayer:
+    """Релейер, у которого стикеры моделей берутся из Telegram."""
+    ready = True
+
+    def __init__(self, ok=True):
+        self.ok, self.calls = ok, []
+
+    async def model_image(self, collection, model):
+        self.calls.append((collection, model))
+        return png(300) if self.ok else None
+
+
+async def test_model_from_telegram_first_then_web(tmp_path):
+    fetched = []
+
+    async def fetch(url):
+        fetched.append(url)
+        return png()
+
+    rel = ModelRelayer()
+    imgs = NftImages(None, fetch, relayer=rel)
+    assert (await imgs.nft("Plush Pepe", "Frog"))[1] == "image/webp"
+    assert rel.calls == [("Plush Pepe", "Frog")] and fetched == [] and imgs.stats["telegram"] == 1
+    # номерной NFT — сначала Fragment
+    await imgs.nft("Plush Pepe", "Frog", 77)
+    assert fetched == ["https://nft.fragment.com/gift/plushpepe-77.webp"]
+    # Telegram не отдал — берём с changes.tg
+    rel2 = ModelRelayer(ok=False)
+    imgs2 = NftImages(None, fetch, relayer=rel2)
+    assert await imgs2.nft("Plush Pepe", "Toad")
+    assert fetched[-1].startswith("https://cdn.changes.tg/") and imgs2.stats["web"] == 1
+
+
+def test_norm_and_tgs_render():
+    assert nftimg.norm("Durov's Cap") == nftimg.norm("DurovsCap") == "durovscap"
+    pytest.importorskip("rlottie_python")
+    import gzip
+    import json
+    lottie = {"v": "5.5.2", "fr": 30, "ip": 0, "op": 30, "w": 512, "h": 512, "layers": [{
+        "ty": 4, "ip": 0, "op": 30, "st": 0, "ks": {"o": {"a": 0, "k": 100}, "r": {"a": 0, "k": 0},
+                                                     "p": {"a": 0, "k": [256, 256]}, "a": {"a": 0, "k": [0, 0]},
+                                                     "s": {"a": 0, "k": [100, 100]}},
+        "shapes": [{"ty": "el", "p": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [300, 300]}},
+                   {"ty": "fl", "c": {"a": 0, "k": [1, 0, 0, 1]}, "o": {"a": 0, "k": 100}}]}]}
+    out = nftimg.render_tgs(gzip.compress(json.dumps(lottie).encode()))
+    assert out and out[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 @pytest.fixture
 async def web_env(tmp_path):
     cfg = Config(bot_token=TOKEN, admin_ids=frozenset({7}), webapp_url="", db_path=str(tmp_path / "i.db"),

@@ -175,7 +175,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             raise web.HTTPNotFound()
         return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 
-    images = images or NftImages(Path(cfg.db_path).parent / "nftimg")
+    images = images or NftImages(Path(cfg.db_path).parent / "nftimg", relayer=relayer)
 
     @routes.get("/nftimg")
     async def nft_image(request: web.Request) -> web.Response:
@@ -191,10 +191,9 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         known = await casino.db.one(
             "SELECT 1 FROM nft_models WHERE collection_name=? UNION ALL "
             "SELECT 1 FROM user_gifts WHERE collection_name=? LIMIT 1", collection, collection)
-        url = nft_source_url(collection, model, number)
-        if not known or not url:
+        if not known or not nft_source_url(collection, model, number):
             raise web.HTTPNotFound()
-        img = await images.get(url)
+        img = await images.nft(collection, model, number)
         if not img:
             raise web.HTTPNotFound(headers={"Cache-Control": "public, max-age=300"})
         return web.Response(body=img[0], content_type=img[1],

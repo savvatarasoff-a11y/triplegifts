@@ -1,11 +1,13 @@
-"""Картинки NFT через наш сервер: скачиваем один раз, ужимаем до маленького WebP и кэшируем.
+"""Картинки NFT через наш сервер: берём один раз, ужимаем до маленького WebP и кэшируем.
 
-Оригиналы с changes.tg — PNG по 150–400 КБ, в рулетке кейса их десятки, и в Telegram они грузятся
-долго. Мы отдаём превью ~5–10 КБ с долгим Cache-Control, а популярные модели прогреваем заранее.
+Источники по очереди: стикер модели из самого Telegram (через релейер, отрисовываем TGS в картинку),
+затем changes.tg / Fragment. Игроку отдаём превью ~5–10 КБ с долгим Cache-Control, а модели из кейсов
+и апгрейда прогреваем заранее — поэтому в рулетке они появляются сразу.
 """
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import io
 import logging
@@ -13,6 +15,7 @@ import re
 import time
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any, Awaitable, Callable
 from urllib.parse import quote
 
 import aiohttp
@@ -22,22 +25,74 @@ log = logging.getLogger(__name__)
 SIZE = 160                 # px — хватает для карточек на ретине
 QUALITY = 80
 MEM_MAX = 600              # превью в памяти
-FAIL_TTL = 600             # не долбим источник, если картинки нет
+FAIL_TTL = 600             # не долбим источники, если картинки нет
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=15)
 MAX_SOURCE = 5 * 1024 * 1024
+
+Source = Callable[[], Awaitable[bytes | None]]
 
 
 def slug(collection: str) -> str:
     return re.sub(r"[^a-z0-9]", "", collection.lower())
 
 
+def norm(name: str) -> str:
+    """Имя коллекции/модели для сравнения: «Durov's Cap» и «DurovsCap» совпадают."""
+    return slug(name or "")
+
+
+def model_url(collection: str, model: str) -> str:
+    return f"https://cdn.changes.tg/gifts/models/{quote(collection)}/png/{quote(model)}.png"
+
+
+def gift_url(collection: str, number: int) -> str:
+    return f"https://nft.fragment.com/gift/{slug(collection)}-{number}.webp"
+
+
 def source_url(collection: str, model: str | None = None, number: int | None = None) -> str | None:
     if not collection:
         return None
     if number:
-        return f"https://nft.fragment.com/gift/{slug(collection)}-{number}.webp"
+        return gift_url(collection, number)
     if model:
-        return f"https://cdn.changes.tg/gifts/models/{quote(collection)}/png/{quote(model)}.png"
+        return model_url(collection, model)
+    return None
+
+
+def render_tgs(data: bytes) -> bytes | None:
+    """Первый кадр анимированного стикера (TGS = gzip Lottie) в PNG. Нужен rlottie-python."""
+    try:
+        from rlottie_python import LottieAnimation
+    except ImportError:
+        log.warning("rlottie-python не установлен — модели из Telegram не отрисовать")
+        return None
+    try:
+        raw = gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
+        anim = LottieAnimation.from_data(raw.decode("utf-8"))
+        img = anim.render_pillow_frame(frame_num=0, width=SIZE * 2, height=SIZE * 2)
+        out = io.BytesIO()
+        img.save(out, "PNG")
+        return out.getvalue()
+    except Exception:
+        log.debug("Не удалось отрисовать TGS", exc_info=True)
+        return None
+
+
+async def render_sticker(client: Any, doc: Any) -> bytes | None:
+    """Стикер-документ Telegram → картинка: TGS отрисовываем, WebP/PNG отдаём как есть, иначе — миниатюра."""
+    mime = getattr(doc, "mime_type", "") or ""
+    data = await client.download_media(doc, file=bytes)
+    if data and ("tgsticker" in mime or data[:2] == b"\x1f\x8b"):
+        png = await asyncio.to_thread(render_tgs, data)
+        if png:
+            return png
+    elif data and mime.startswith("image/"):
+        return data
+    if getattr(doc, "thumbs", None):
+        try:
+            return await client.download_media(doc, file=bytes, thumb=-1) or None
+        except Exception:
+            log.debug("Нет миниатюры стикера", exc_info=True)
     return None
 
 
@@ -70,15 +125,17 @@ def _guess_type(data: bytes) -> str:
 
 
 class NftImages:
-    def __init__(self, cache_dir: str | Path | None = None, fetch=None):
+    def __init__(self, cache_dir: str | Path | None = None, fetch=None, relayer: Any = None):
         self.dir = Path(cache_dir) if cache_dir else None
         if self.dir:
             self.dir.mkdir(parents=True, exist_ok=True)
+        self.relayer = relayer
         self.mem: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
         self.failed: dict[str, float] = {}
         self.pending: dict[str, asyncio.Future] = {}
         self._fetch = fetch or self._http_fetch
         self._session: aiohttp.ClientSession | None = None
+        self.stats = {"telegram": 0, "web": 0, "failed": 0}
 
     async def close(self) -> None:
         if self._session:
@@ -102,48 +159,73 @@ class NftImages:
         while len(self.mem) > MEM_MAX:
             self.mem.popitem(last=False)
 
-    async def get(self, url: str) -> tuple[bytes, str] | None:
-        """Превью картинки по адресу источника: (байты, content-type) или None."""
-        hit = self.mem.get(url)
+    def _sources(self, collection: str, model: str | None, number: int | None) -> list[tuple[str, Source]]:
+        sources: list[tuple[str, Source]] = []
+        if number:
+            sources.append(("web", lambda: self._fetch(gift_url(collection, number))))
+        if model and self.relayer is not None and getattr(self.relayer, "ready", False):
+            sources.append(("telegram", lambda: self.relayer.model_image(collection, model)))
+        if model:
+            sources.append(("web", lambda: self._fetch(model_url(collection, model))))
+        return sources
+
+    async def nft(self, collection: str, model: str | None = None, number: int | None = None) -> tuple[bytes, str] | None:
+        """Превью NFT: конкретный номер (Fragment) или модель (Telegram, затем changes.tg)."""
+        key = f"n|{collection}|{number}" if number else f"m|{collection}|{model}"
+        return await self.get(key, self._sources(collection, model, number))
+
+    async def get(self, key: str, sources: list[tuple[str, Source]] | None = None) -> tuple[bytes, str] | None:
+        """Превью по ключу: (байты, content-type) или None. Без sources ключ — это адрес картинки."""
+        hit = self.mem.get(key)
         if hit:
-            self.mem.move_to_end(url)
+            self.mem.move_to_end(key)
             return hit
-        path = self._path(url)
+        path = self._path(key)
         if path and path.exists():
             data = path.read_bytes()
             value = (data, _guess_type(data))
-            self._remember(url, value)
+            self._remember(key, value)
             return value
-        if time.time() - self.failed.get(url, 0) < FAIL_TTL:
+        if time.time() - self.failed.get(key, 0) < FAIL_TTL:
             return None
-        if url in self.pending:                       # тот же файл уже качается — ждём его
-            return await asyncio.shield(self.pending[url])
+        if key in self.pending:                       # то же уже качается — ждём его
+            return await asyncio.shield(self.pending[key])
+        if sources is None:
+            sources = [("web", lambda: self._fetch(key))]
         fut = asyncio.get_running_loop().create_future()
-        self.pending[url] = fut
+        self.pending[key] = fut
         value = None
         try:
-            raw = await self._fetch(url)
-            if raw:
-                value = await asyncio.to_thread(shrink, raw)
-                self._remember(url, value)
+            for name, source in sources:
+                try:
+                    raw = await source()
+                except Exception as e:
+                    log.debug("Картинка %s: источник %s недоступен (%s)", key, name, type(e).__name__)
+                    continue
+                if raw:
+                    value = await asyncio.to_thread(shrink, raw)
+                    self.stats[name] = self.stats.get(name, 0) + 1
+                    break
+            if value:
+                self._remember(key, value)
                 if path:
                     path.write_bytes(value[0])
             else:
-                self.failed[url] = time.time()
-        except Exception:
-            log.debug("Картинка NFT недоступна: %s", url, exc_info=True)
-            self.failed[url] = time.time()
+                self.stats["failed"] += 1
+                self.failed[key] = time.time()
         finally:
-            self.pending.pop(url, None)
+            self.pending.pop(key, None)
             fut.set_result(value)
         return value
 
-    async def prewarm(self, urls: list[str], parallel: int = 6) -> int:
-        """Заранее качает картинки (например, всех моделей из кейсов). Возвращает, сколько готово."""
+    async def prewarm(self, items: list[Any], parallel: int = 4) -> int:
+        """Заранее готовит картинки. items — ключи-адреса или кортежи (коллекция, модель). Возвращает, сколько готово."""
         sem = asyncio.Semaphore(parallel)
 
-        async def one(u: str) -> bool:
+        async def one(it: Any) -> bool:
             async with sem:
-                return await self.get(u) is not None
+                if isinstance(it, tuple):
+                    return await self.nft(it[0], it[1]) is not None
+                return await self.get(it) is not None
 
-        return sum(await asyncio.gather(*(one(u) for u in dict.fromkeys(urls))))
+        return sum(await asyncio.gather(*(one(it) for it in dict.fromkeys(items))))

@@ -19,7 +19,7 @@ from .config import Config, ConfigError
 from .db import Database
 from .logging_setup import setup_logging
 from .gifts import notify_deposits, scan as gifts_scan
-from .nftimg import NftImages, source_url as nft_source_url
+from .nftimg import NftImages
 from .nft import deliver_waiting, reprice_demo, sync as sync_nfts
 from .relayer import Relayer
 from . import ton as ton_mod
@@ -49,6 +49,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("nfts", "NFT-модели и цены"),
     ("relayer", "Релейер NFT"),
     ("tonrate", "Курс TON → звёзды"),
+    ("nftimg", "Проверка картинок NFT"),
     ("dupe", "Демо-NFT (модели с MRKT)"),
     ("tonwallet", "Кошелёк для пополнений TON"),
 ]
@@ -88,9 +89,9 @@ async def prewarm_images(casino: Casino, images: NftImages) -> None:
     """Качает и ужимает картинки моделей из кейсов и апгрейда, чтобы у игроков они открывались мгновенно."""
     rows = await casino.db.all(
         "SELECT collection_name, model FROM nft_models WHERE enabled=1 AND price > 0 ORDER BY price DESC LIMIT 400")
-    urls = [u for r in rows if (u := nft_source_url(r["collection_name"], r["model"]))]
-    ready = await images.prewarm(urls)
-    log.info("Картинки NFT: готово %s из %s", ready, len(urls))
+    items = [(r["collection_name"], r["model"]) for r in rows if r["collection_name"] and r["model"]]
+    ready = await images.prewarm(items)
+    log.info("Картинки NFT: готово %s из %s (источники: %s)", ready, len(items), images.stats)
 
 
 async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, images: NftImages | None = None) -> None:
@@ -170,10 +171,10 @@ async def run() -> None:
     db = Database(cfg.db_path)
     await db.connect()
     casino = Casino(db, cfg)
-    images = NftImages(Path(cfg.db_path).parent / "nftimg")
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
     relayer = Relayer(db, cfg.bot_token)
+    images = NftImages(Path(cfg.db_path).parent / "nftimg", relayer=relayer)
     casino.ton_rate = relayer.market.ton_rate          # курс TON → звёзды (ручной /tonrate или авто)
 
     async def on_relayer_message(user_id: int) -> None:

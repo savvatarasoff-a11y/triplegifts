@@ -837,7 +837,9 @@ const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится" }
 
 function nftImgUrl(o) {
   if (!o || !o.collection) return null;
-  if (o.number) return `/nftimg?c=${encodeURIComponent(o.collection)}&n=${o.number}`;
+  if (o.number) {
+    return `/nftimg?c=${encodeURIComponent(o.collection)}&n=${o.number}` + (o.model ? `&m=${encodeURIComponent(o.model)}` : "");
+  }
   if (o.model) return `/nftimg?c=${encodeURIComponent(o.collection)}&m=${encodeURIComponent(o.model)}`;
   return null;
 }

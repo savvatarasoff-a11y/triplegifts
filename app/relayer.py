@@ -157,6 +157,51 @@ class Relayer:
             return None
         return await self.market.floor_stars(collection_name, model)
 
+    # ---------- картинки моделей (из самого Telegram) ----------
+
+    async def _gift_ids(self) -> dict[str, int]:
+        """Коллекции подарков Telegram: нормализованное название → id подарка (кэш на 6 часов)."""
+        cached = getattr(self, "_gift_ids_cache", None)
+        if cached and time.time() - cached[0] < 6 * 3600:
+            return cached[1]
+        from telethon.tl.functions.payments import GetStarGiftsRequest
+        from .nftimg import norm
+        res = await self.client(GetStarGiftsRequest(hash=0))
+        ids = {norm(g.title): g.id for g in getattr(res, "gifts", []) or [] if getattr(g, "title", None)}
+        self._gift_ids_cache = (time.time(), ids)
+        return ids
+
+    async def model_documents(self, collection: str) -> dict[str, Any]:
+        """Все модели коллекции с их стикерами: нормализованное имя модели → Document (кэш на час)."""
+        from .nftimg import norm
+        cache = self.__dict__.setdefault("_models_cache", {})
+        key = norm(collection)
+        hit = cache.get(key)
+        if hit and time.time() - hit[0] < 3600:
+            return hit[1]
+        if not self.ready:
+            return {}
+        from telethon.tl.functions.payments import GetResaleStarGiftsRequest
+        from telethon.tl.types import StarGiftAttributeModel
+        gift_id = (await self._gift_ids()).get(key)
+        docs: dict[str, Any] = {}
+        if gift_id:
+            res = await self.client(GetResaleStarGiftsRequest(gift_id=gift_id, offset="", limit=1, attributes_hash=0))
+            docs = {norm(a.name): a.document for a in getattr(res, "attributes", None) or []
+                    if isinstance(a, StarGiftAttributeModel)}
+        else:
+            log.info("Коллекция %r не найдена среди подарков Telegram", collection)
+        cache[key] = (time.time(), docs)
+        return docs
+
+    async def model_image(self, collection: str, model: str) -> bytes | None:
+        """Картинка модели: стикер модели из Telegram, отрисованный в PNG."""
+        if not self.ready or not collection or not model:
+            return None
+        from .nftimg import norm, render_sticker
+        doc = (await self.model_documents(collection)).get(norm(model))
+        return await render_sticker(self.client, doc) if doc is not None else None
+
     # ---------- инвентарь и передача (MTProto) ----------
 
     async def _saved(self) -> list[dict[str, Any]]:

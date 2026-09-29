@@ -531,6 +531,38 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         count = await casino.demo_clear()
         await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
 
+    @admin.message(Command("nftimg"))
+    async def nft_images_check(message: Message) -> None:
+        """Проверка источников картинок NFT на нескольких моделях из кейсов."""
+        import aiohttp
+        from .nftimg import FETCH_TIMEOUT, model_url, norm
+        rows = await casino.db.all("SELECT DISTINCT collection_name, model FROM nft_models WHERE enabled=1 LIMIT 3")
+        if not rows:
+            await message.answer("Моделей нет — добавьте NFT релейеру или /dupe 5")
+            return
+        lines = ["🖼 <b>Картинки NFT</b>"]
+        async with aiohttp.ClientSession(timeout=FETCH_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"}) as s:
+            for r in rows:
+                c, m = r["collection_name"], r["model"]
+                lines.append(f"\n<b>{html.escape(c)} · {html.escape(m)}</b>")
+                if relayer is None or not relayer.ready:
+                    lines.append("Telegram: релейер не подключён")
+                else:
+                    try:
+                        docs = await relayer.model_documents(c)
+                        data = await relayer.model_image(c, m)
+                        lines.append(f"Telegram: моделей в коллекции {len(docs)}, модель "
+                                     f"{'найдена' if norm(m) in docs else 'не найдена'}, картинка "
+                                     f"{f'{len(data) // 1024} КБ' if data else 'нет'}")
+                    except Exception as e:
+                        lines.append(f"Telegram: ошибка {type(e).__name__}: {html.escape(str(e))[:120]}")
+                try:
+                    async with s.get(model_url(c, m)) as resp:
+                        lines.append(f"changes.tg: HTTP {resp.status}")
+                except Exception as e:
+                    lines.append(f"changes.tg: {type(e).__name__}")
+        await message.answer("\n".join(lines))
+
     @admin.message(Command("tonrate"))
     async def ton_rate(message: Message, command: CommandObject) -> None:
         arg = (command.args or "").strip()
