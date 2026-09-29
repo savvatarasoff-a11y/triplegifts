@@ -529,3 +529,16 @@ async def test_free_case_nft_prize_goes_to_profile(casino, monkeypatch):
     monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[-1])
     r = await casino.open_free_case(1)
     assert r["nft"]["demo"] and [x["model"] for x in await casino.gifts(1)] == ["Pink"]
+
+
+async def test_leaders_reset(casino):
+    db = casino.db
+    await db.touch_user(1, "u1", "U1")
+    await db.conn.execute("UPDATE users SET balance=100 WHERE id=1")
+    await casino.plinko(1, 10)
+    assert (await casino.leaders(1))["top"]
+    await casino.leaders_reset()
+    assert (await casino.leaders(1))["top"] == []                   # история ставок цела, таблица пустая
+    assert (await db.one("SELECT COUNT(*) n FROM bets"))["n"] == 1
+    await casino.plinko(1, 10)
+    assert [p["points"] for p in (await casino.leaders(1))["top"]] == [10]

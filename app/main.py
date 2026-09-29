@@ -47,6 +47,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("nftimg", "Проверка картинок NFT"),
     ("channel_setup", "Оформить канал"),
     ("rebrand", "Оформление Triple Gifts"),
+    ("leaders_reset", "Очистить таблицу лидеров"),
     ("channel_wins", "Выигрыши в канал"),
     ("dupe", "Демо-NFT (модели с MRKT)"),
     ("tonwallet", "Кошелёк для пополнений TON"),
@@ -223,6 +224,9 @@ async def run() -> None:
     db = Database(cfg.db_path)
     await db.connect()
     casino = Casino(db, cfg)
+    if not await db.kv_get("leaders:reset_v1"):          # разовый сброс таблицы лидеров при переезде на Triple Gifts
+        await casino.leaders_reset()
+        await db.kv_set("leaders:reset_v1", "1")
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
     relayer = Relayer(db, cfg.bot_token)

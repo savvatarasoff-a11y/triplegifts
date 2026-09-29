@@ -486,6 +486,11 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         count = await casino.demo_clear()
         await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
 
+    @admin.message(Command("leaders_reset"))
+    async def leaders_reset(message: Message) -> None:
+        await casino.leaders_reset()
+        await message.answer("🏆 Таблица лидеров очищена — считаем ставки с этого момента.")
+
     @admin.message(Command("rekey"))
     async def rekey(message: Message, command: CommandObject) -> None:
         """Подготовка к переезду на нового бота: релейер перешифровывается под новый токен (без повторного входа)."""

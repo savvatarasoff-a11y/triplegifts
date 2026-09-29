@@ -23,6 +23,7 @@ PVP_IDLE_REFUND = 600       # одиночную ставку возвращае
 CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 # адрес TON: «дружелюбный» (48 символов base64url) или сырой 0:hex
 TON_ADDRESS_RE = re.compile(r"^(?:[A-Za-z0-9_-]{48}|-?[0-9]:[0-9a-fA-F]{64})$")
+LEADERS_SINCE_KEY = "leaders:since"   # сброс таблицы лидеров: ставки раньше этого момента не считаются
 USER_CHECK_MIN = 1
 USER_CHECK_MAX_ACTIVATIONS = 100
 GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
@@ -280,9 +281,15 @@ class Casino:
             balance = await self._balance(c, user_id)
         return {**item, "balance": balance, "next_at": now + g.FREE_CASE_EVERY}
 
+    async def leaders_reset(self) -> None:
+        await self.db.kv_set(LEADERS_SINCE_KEY, str(time.time()))
+
     async def leaders(self, user_id: int | None = None, days: int = 7) -> dict:
-        """Лидеры по сумме ставок за неделю (TON — по LEVEL_TON_STARS звёзд за 1 TON)."""
-        since = time.time() - days * 86400
+        """Лидеры по сумме ставок за неделю (TON — по LEVEL_TON_STARS звёзд за 1 TON).
+
+        Считаются ставки после последнего сброса таблицы (/leaders_reset), но не старше недели.
+        """
+        since = max(time.time() - days * 86400, float(await self.db.kv_get(LEADERS_SINCE_KEY) or 0))
         rows = await self.db.all(
             "SELECT b.user_id, u.first_name, u.username, "
             "SUM(CASE WHEN b.cur='ton' THEN b.bet * ? / 1000000000 ELSE b.bet END) pts, "
