@@ -924,11 +924,15 @@ function nftImgLoad(url) {
       const img = new Image();
       img.decoding = "async";
       img.onload = () => { nftImgCache.set(url, img); resolve(img); };
-      img.onerror = () => { nftImgCache.set(url, false); resolve(false); };
+      img.onerror = () => {
+        nftImgCache.set(url, false);
+        setTimeout(() => nftImgCache.delete(url), 30000);   // сервер мог ещё готовить картинку — повторим позже
+        resolve(false);
+      };
       img.src = url;
     }));
   }
-  return nftImgCache.get(url);
+  return Promise.resolve(nftImgCache.get(url));     // в кэше может лежать уже картинка или false
 }
 
 // Прогрев: картинки призов кейсов/целей апгрейда качаются заранее, по несколько за раз
@@ -959,6 +963,25 @@ function nftIcon(o, cls) {
   }
   el.textContent = o.emoji || "🎁";
   if (url && hit !== false) nftImgLoad(url).then((img) => { if (img) nftImgPut(el, img); });
+  return el;
+}
+
+// Иконка из первой загрузившейся картинки списка (пока грузится — эмодзи)
+function picIcon(list, cls, emoji) {
+  const el = document.createElement("span");
+  el.className = (cls || "em") + " nft-ic";
+  el.textContent = emoji || list[0].emoji || "🎁";
+  const urls = list.map(nftImgUrl).filter(Boolean);
+  const hit = urls.map((u) => nftImgCache.get(u)).find((v) => v instanceof HTMLImageElement);
+  if (hit) {
+    nftImgPut(el, hit);
+    return el;
+  }
+  const next = (i) => {
+    if (i >= urls.length) return;
+    nftImgLoad(urls[i]).then((img) => (img ? nftImgPut(el, img) : next(i + 1)));
+  };
+  next(0);
   return el;
 }
 
@@ -2106,8 +2129,9 @@ const caseNftChance = (c) => c.prizes.filter((p) => p.kind === "nft").reduce((a,
 
 // Иконка кейса: картинка самого дорогого NFT внутри, иначе эмодзи кейса
 function caseIcon(c, cls) {
-  const pic = prizePic(caseTop(c));
-  if (pic) return nftIcon(pic, cls);
+  // самые дорогие призы с картинкой: если первая не загрузилась — берём следующую
+  const pics = c.prizes.slice().sort((a, b) => b.amount - a.amount).map(prizePic).filter(Boolean).slice(0, 6);
+  if (pics.length) return picIcon(pics, cls, c.emoji);
   const e = document.createElement("span");
   e.className = cls;
   e.textContent = c.emoji;
@@ -2130,7 +2154,7 @@ function renderCases() {
     b.innerHTML = '<div class="e"></div><div class="n"></div><div class="j"></div><div class="p"></div>';
     b.querySelector(".e").append(caseIcon(c, "case-ic"));
     b.querySelector(".n").textContent = c.name;
-    b.querySelector(".j").textContent = top.kind === "nft" ? `NFT до ${nftPrice(top.amount)}`
+    b.querySelector(".j").textContent = top.kind === "nft" ? `NFT до ${casePriceText(top.amount)}`
       : `до ${top.emoji} ${casePriceText(top.amount)}`;
     b.querySelector(".p").textContent = casePriceText(c.price, true);
     if (nft) {

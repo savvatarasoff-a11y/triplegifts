@@ -54,6 +54,7 @@ class CaseCatalog:
         """NFT-кейс из моделей, которые есть у релейера и чья цена проверена на маркете не позже часа назад."""
         models = await self.db.all(
             "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
+            "AND model GLOB '*[^0-9]*' "            # неулучшенные подарки (число вместо модели) не показываем
             "ORDER BY price DESC",
             time.time() - PRICE_MAX_AGE,
         )

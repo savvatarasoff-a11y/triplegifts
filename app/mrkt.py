@@ -237,7 +237,7 @@ class Mrkt:
                 if taken >= per_collection or len(picked) >= count:
                     break
                 key = (lot.get("collectionName") or name, lot.get("modelName"))
-                if not key[1] or key in seen:
+                if not key[1] or key in seen or str(key[1]).isdigit():   # число вместо модели — не улучшен
                     continue
                 floor = await self.floor_ton(*key)
                 if not floor:

@@ -203,7 +203,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             raise web.HTTPNotFound()
         img = await images.nft(collection, model, number)
         if not img:
-            raise web.HTTPNotFound(headers={"Cache-Control": "public, max-age=300"})
+            raise web.HTTPNotFound(headers={"Cache-Control": "no-store"})
         return web.Response(body=img[0], content_type=img[1],
                             headers={"Cache-Control": "public, max-age=2592000, immutable"})
 
@@ -223,7 +223,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
         img = await images.get(f"g|{gift['id']}", [("telegram", from_bot)])
         if not img:
-            raise web.HTTPNotFound(headers={"Cache-Control": "public, max-age=300"})
+            raise web.HTTPNotFound(headers={"Cache-Control": "no-store"})
         return web.Response(body=img[0], content_type=img[1],
                             headers={"Cache-Control": "public, max-age=2592000, immutable"})
 

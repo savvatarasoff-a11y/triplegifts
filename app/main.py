@@ -100,6 +100,9 @@ DEMO_TARGET = 100  # сколько разных NFT-моделей держат
 
 async def top_up_demo(casino: Casino, relayer: Relayer) -> None:
     """Убирает демо-модели без улучшений (модели нет в Telegram) и добирает новые с MRKT до DEMO_TARGET."""
+    # неулучшенный подарок на MRKT: вместо имени модели — число (id подарка)
+    async with casino.db.tx() as c:
+        await c.execute("UPDATE nft_models SET enabled=0 WHERE test=1 AND enabled=1 AND model NOT GLOB '*[^0-9]*'")
     if not relayer.ready:
         return
     for m in await casino.db.all("SELECT id, collection_name, model FROM nft_models WHERE test=1 AND enabled=1"):

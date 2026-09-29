@@ -148,3 +148,21 @@ async def test_top_up_demo_skips_models_without_upgrades(env):
     rows = await db.all("SELECT collection_name, model, enabled FROM nft_models WHERE test=1 ORDER BY id")
     assert [(r["collection_name"], r["model"], r["enabled"]) for r in rows] == [
         ("Old Gift", "X", 0), ("Lol Pop", "Pink", 1), ("Lol Pop", "Blue", 1)]
+
+
+async def test_unupgraded_gifts_never_shown(env):
+    """Неулучшенный подарок на MRKT: вместо модели — число. Такой не попадает ни в кейсы, ни в апгрейд."""
+    from app import main
+    db, casino = env
+    now = time.time()
+    await db.conn.execute(
+        "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at, test) "
+        "VALUES ('demo:Airplane','Airplane','5818708013426410448','✈️',999,549500,?,1)", (now,))
+    assert await casino.demo_fill([{"title": "Airplane", "model": "123456", "emoji": "✈️", "price": 5}]) == 0
+    assert all(t["model"] != "5818708013426410448" for t in await casino.upgrade_targets(42))
+
+    class Rel:
+        ready = False
+
+    await main.top_up_demo(casino, Rel())
+    assert (await db.one("SELECT enabled FROM nft_models WHERE collection_name='Airplane'"))["enabled"] == 0

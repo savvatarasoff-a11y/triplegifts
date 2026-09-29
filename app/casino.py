@@ -544,6 +544,7 @@ class Casino:
         lo, hi = target * (1 - g.SLOT_NFT_TOLERANCE), target
         async with c.execute(
             "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price BETWEEN ? AND ? "
+            "AND model GLOB '*[^0-9]*' "
             "AND price_at > ? ORDER BY test, ABS(price - ?) LIMIT 1",          # настоящие NFT — в приоритете
             (lo, hi, time.time() - NFT_PRICE_MAX_AGE, target),
         ) as q:
@@ -997,7 +998,8 @@ class Casino:
     async def upgrade_targets(self, user_id: int | None = None) -> list[dict]:
         """NFT-модели казино, на которые можно апгрейдиться: есть свободный подарок и свежая цена."""
         rows = await self.db.all(
-            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? ORDER BY price",
+            "SELECT * FROM nft_models WHERE enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
+            "AND model GLOB '*[^0-9]*' ORDER BY price",
             time.time() - NFT_PRICE_MAX_AGE)
         return [{"id": r["id"], "title": r["collection_name"], "model": r["model"], "emoji": r["emoji"] or "💎",
                  "rarity": r["rarity"], "price": r["price"], "stock": r["stock"] - r["reserved"], "demo": bool(r["test"])}
@@ -1007,6 +1009,7 @@ class Casino:
 
     async def demo_fill(self, models: list[dict]) -> int:
         """Автопополнение демо-моделей (без дюпов админу) — чтобы NFT в кейсах было больше."""
+        models = [m for m in models if not str(m["model"]).isdigit()]      # неулучшенные подарки не берём
         now = time.time()
         async with self.db.tx() as c:
             for m in models:
@@ -1027,7 +1030,7 @@ class Casino:
             raise GameError("Только для админа")
         if not models:
             raise GameError("MRKT не вернул модели с ценой — попробуйте ещё раз")
-        models = sorted(models, key=lambda m: m["price"])
+        models = sorted((m for m in models if not str(m["model"]).isdigit()), key=lambda m: m["price"])
         now = time.time()
         async with self.db.tx() as c:
             for m in models:
