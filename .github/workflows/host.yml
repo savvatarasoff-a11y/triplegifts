@@ -30,6 +30,7 @@ jobs:
       - name: Бот
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          DB_KEY: ${{ secrets.DB_KEY }}
           GH_TOKEN: ${{ github.token }}
           CHAIN_WORKFLOW: host.yml
         run: exec bash scripts/gh_host.sh   # exec — чтобы сигнал отмены дошёл до скрипта и он успел сохранить базу

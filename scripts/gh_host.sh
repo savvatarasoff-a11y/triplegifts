@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Временный хостинг на GitHub Actions: бот + мини-приложение через туннель Cloudflare.
-# База сохраняется в ветку `data` каждую минуту и восстанавливается при следующем запуске.
+# База (зашифрованная) сохраняется в ветку `data-enc` каждые 30 секунд и восстанавливается при следующем запуске.
 set -uo pipefail
 
 RUN_SECONDS="${RUN_SECONDS:-20400}"      # 5 ч 40 мин, лимит задачи Actions — 6 ч
@@ -14,9 +14,28 @@ if [ -z "${BOT_TOKEN:-}" ]; then
   exit 1
 fi
 
-# 1. Восстановить базу
-if git fetch -q origin data 2>/dev/null && git show origin/data:bot.db > "$DATA_DIR/bot.db" 2>/dev/null; then
-  echo "База восстановлена ($(stat -c %s "$DATA_DIR/bot.db") байт)"
+# 1. Восстановить базу. Репозиторий публичный, поэтому база в ветке `data-enc` зашифрована
+#    (AES-256, ключ — секрет DB_KEY, а если его нет — BOT_TOKEN). Старая ветка `data` — незашифрованная,
+#    читается один раз для переезда и удаляется после первого зашифрованного снимка.
+ENC_BRANCH="data-enc"
+DB_PASS="${DB_KEY:-$BOT_TOKEN}"
+export DB_PASS
+[ -z "${DB_KEY:-}" ] && echo "::warning::Секрета DB_KEY нет — база шифруется токеном бота. Добавьте DB_KEY, чтобы смена токена не мешала расшифровке."
+decrypt() {  # $1 — зашифрованный файл, $2 — пароль
+  DEC_PASS="$2" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:DEC_PASS -in "$1" -out "$DATA_DIR/bot.db" 2>/dev/null
+}
+LEGACY=""
+if git fetch -q origin "$ENC_BRANCH" 2>/dev/null && git show "origin/$ENC_BRANCH:bot.db.enc" > "$DATA_DIR/bot.db.enc" 2>/dev/null; then
+  if decrypt "$DATA_DIR/bot.db.enc" "$DB_PASS" || { [ -n "${DB_KEY:-}" ] && decrypt "$DATA_DIR/bot.db.enc" "$BOT_TOKEN"; }; then
+    echo "База восстановлена и расшифрована ($(stat -c %s "$DATA_DIR/bot.db") байт)"
+  else
+    echo "::error::Не удалось расшифровать базу (сменился DB_KEY/BOT_TOKEN?). Бот не запускаю, чтобы не затереть базу пустой."
+    exit 1
+  fi
+  rm -f "$DATA_DIR/bot.db.enc"
+elif git fetch -q origin data 2>/dev/null && git show origin/data:bot.db > "$DATA_DIR/bot.db" 2>/dev/null; then
+  LEGACY=1
+  echo "База восстановлена из старой ветки data ($(stat -c %s "$DATA_DIR/bot.db") байт) — перевожу на шифрование"
 else
   rm -f "$DATA_DIR/bot.db"
   echo "Сохранённой базы нет — начинаем с пустой"
@@ -26,14 +45,23 @@ backup() {
   python scripts/backup_db.py "$DATA_DIR/bot.db" "$DATA_DIR/snapshot.db" || return 1
   local tmp
   tmp=$(mktemp -d)
-  cp "$DATA_DIR/snapshot.db" "$tmp/bot.db"
+  openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:DB_PASS \
+    -in "$DATA_DIR/snapshot.db" -out "$tmp/bot.db.enc" || { rm -rf "$tmp"; return 1; }
   (
-    cd "$tmp" && git init -q && git checkout -q -b data && git add bot.db &&
-    git -c user.name="triple-bot" -c user.email="triple-bot@users.noreply.github.com" commit -qm "Снимок базы $(date -u +%FT%TZ)" &&
-    git push -qf "$REMOTE" data
-  ) && echo "Снимок базы сохранён $(date -u +%T)"
+    cd "$tmp" && git init -q && git checkout -q -b "$ENC_BRANCH" && git add bot.db.enc &&
+    git -c user.name="triple-bot" -c user.email="triple-bot@users.noreply.github.com" commit -qm "Снимок базы (зашифрован) $(date -u +%FT%TZ)" &&
+    git push -qf "$REMOTE" "$ENC_BRANCH"
+  ) && echo "Снимок базы сохранён $(date -u +%T)" || { rm -rf "$tmp"; return 1; }
   rm -rf "$tmp"
+  # переезд завершён — незашифрованную ветку удаляем
+  if [ -n "$LEGACY" ]; then
+    git push -q "$REMOTE" --delete data 2>/dev/null && echo "Старая незашифрованная ветка data удалена"
+    LEGACY=""
+  fi
 }
+
+# сразу после запуска — первый зашифрованный снимок (и удаление старой ветки)
+[ -f "$DATA_DIR/bot.db" ] && [ -n "$LEGACY" ] && backup
 
 # 2. Туннель для мини-приложения
 curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
