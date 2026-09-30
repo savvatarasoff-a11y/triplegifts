@@ -338,3 +338,15 @@ async def test_play_requires_channel_subscription(client):
     assert (await (await client.get("/api/sub", headers=auth(31))).json())["subscribed"] is True
     r = await client.post("/api/free_case", headers=auth(31))
     assert r.status == 200 and (await r.json())["prize"] >= 1
+
+
+async def test_cors_for_pages_origin(client):
+    pages = {"Origin": "https://savvat133-dev.github.io"}
+    r = await client.options("/api/me", headers={**pages, "Access-Control-Request-Method": "GET"})
+    assert r.status == 204 and r.headers["Access-Control-Allow-Origin"] == pages["Origin"]
+    assert "Authorization" in r.headers["Access-Control-Allow-Headers"]
+    r = await client.get("/api/me", headers={**auth(), **pages})
+    assert r.status == 200 and r.headers["Access-Control-Allow-Origin"] == pages["Origin"]
+    r = await client.get("/api/me", headers={**auth(), "Origin": "https://evil.example"})
+    assert "Access-Control-Allow-Origin" not in r.headers
+    assert (await client.options("/api/me", headers={"Origin": "https://evil.example"})).status == 403

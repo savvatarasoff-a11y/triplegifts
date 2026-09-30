@@ -77,10 +77,44 @@ done
 if [ -z "$URL" ]; then
   echo "::warning::Туннель не поднялся, бот запустится без мини-приложения"
 fi
-echo "Мини-приложение: ${URL:-нет}"
+echo "Туннель: ${URL:-нет}"
+
+# 2б. Постоянный адрес мини-приложения — GitHub Pages (ветка gh-pages): страница та же, а текущий
+#     адрес сервера (туннель меняется при каждом запуске) лежит рядом в api.json.
+OWNER="${GITHUB_REPOSITORY%%/*}"
+REPO="${GITHUB_REPOSITORY#*/}"
+PAGES_URL="https://${OWNER,,}.github.io/${REPO}/"
+publish_pages() {
+  local tmp
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/static"
+  cp webapp/* "$tmp/static/" 2>/dev/null
+  sed "s|static/app.js\"|static/app.js?v=${GITHUB_RUN_ID:-0}\"|; s|static/app.css\"|static/app.css?v=${GITHUB_RUN_ID:-0}\"|" \
+    webapp/index.html > "$tmp/index.html"
+  printf '{"api": "%s", "updated": "%s"}\n' "$URL" "$(date -u +%FT%TZ)" > "$tmp/api.json"
+  touch "$tmp/.nojekyll"
+  (
+    cd "$tmp" && git init -q && git checkout -q -b gh-pages && git add -A &&
+    git -c user.name="triple-bot" -c user.email="triple-bot@users.noreply.github.com" commit -qm "Мини-приложение, сервер: $URL" &&
+    git push -qf "$REMOTE" gh-pages
+  ) && echo "Страница опубликована в gh-pages"
+  rm -rf "$tmp"
+  # пуш от GITHUB_TOKEN может не запустить сборку Pages — запрашиваем её явно
+  gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds" >/dev/null 2>&1 || true
+}
+WEBAPP="$URL"
+if [ -n "$URL" ]; then
+  publish_pages
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' "$PAGES_URL")" = "200" ]; then
+    WEBAPP="$PAGES_URL"
+    echo "Мини-приложение: $PAGES_URL (постоянный адрес, сервер — $URL)"
+  else
+    echo "::warning::GitHub Pages не включены (Settings → Pages → Deploy from a branch → gh-pages). Пока адрес мини-приложения временный: $URL"
+  fi
+fi
 
 # 3. Бот
-export WEBAPP_URL="$URL" DB_PATH="$DATA_DIR/bot.db" PORT=8080
+export WEBAPP_URL="$WEBAPP" DB_PATH="$DATA_DIR/bot.db" PORT=8080
 python -m app.main &
 BOT_PID=$!
 

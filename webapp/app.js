@@ -90,6 +90,17 @@ function nftPrice(starsAmount) {
 const curBalance = () => state.bal[state.cur] || 0;
 
 // deferBalance: баланс из ответа покажем сами — после анимации
+// Мини-приложение открыто с постоянного адреса (GitHub Pages) — сервер бота живёт за временным туннелем,
+// его текущий адрес лежит рядом в api.json (обновляется при каждом запуске хостинга)
+let API_BASE = "";
+const apiReady = (async () => {
+  if (!location.hostname.endsWith("github.io")) return;
+  try {
+    const r = await fetch(`api.json?t=${Date.now()}`, { cache: "no-store" });
+    API_BASE = String((await r.json()).api || "").replace(/\/$/, "");
+  } catch (e) { /* без адреса запросы покажут «Нет связи с сервером» */ }
+})();
+
 async function api(path, body, opts) {
   const req = { method: body === undefined ? "GET" : "POST",
     headers: { Authorization: "tma " + (tg ? tg.initData : "") } };
@@ -98,8 +109,9 @@ async function api(path, body, opts) {
     req.body = JSON.stringify(body);
   }
   let res;
+  await apiReady;
   try {
-    res = await fetch(path, req);
+    res = await fetch(API_BASE + path, req);
   } catch (e) {
     throw new Error("Нет связи с сервером");
   }
@@ -178,7 +190,7 @@ function avatarEl(p, cls, colors) {
   const img = new Image();
   img.alt = "";
   img.onload = () => el.append(img);
-  img.src = `/avatar/${p.id}`;
+  img.src = `${API_BASE}/avatar/${p.id}`;
   return el;
 }
 
@@ -188,7 +200,7 @@ function avatarImage(id) {
     const img = new Image();
     img.ok = false;
     img.onload = () => { img.ok = true; };
-    img.src = `/avatar/${id}`;
+    img.src = `${API_BASE}/avatar/${id}`;
     avatarImages[id] = img;
   }
   return avatarImages[id];
@@ -1041,12 +1053,12 @@ const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится" }
 // ---------- картинки NFT: превью с нашего сервера (ужатые и закэшированные) ----------
 
 function nftImgUrl(o) {
-  if (o && o.gift_id) return `/giftimg?id=${encodeURIComponent(o.gift_id)}`;   // обычный подарок Telegram
+  if (o && o.gift_id) return `${API_BASE}/giftimg?id=${encodeURIComponent(o.gift_id)}`;   // обычный подарок Telegram
   if (!o || !o.collection) return null;
   if (o.number) {
-    return `/nftimg?c=${encodeURIComponent(o.collection)}&n=${o.number}` + (o.model ? `&m=${encodeURIComponent(o.model)}` : "");
+    return `${API_BASE}/nftimg?c=${encodeURIComponent(o.collection)}&n=${o.number}` + (o.model ? `&m=${encodeURIComponent(o.model)}` : "");
   }
-  return `/nftimg?c=${encodeURIComponent(o.collection)}` + (o.model ? `&m=${encodeURIComponent(o.model)}` : "");
+  return `${API_BASE}/nftimg?c=${encodeURIComponent(o.collection)}` + (o.model ? `&m=${encodeURIComponent(o.model)}` : "");
 }
 
 // url → загруженная картинка (или false, если её нет): второй раз иконка появляется мгновенно
@@ -1054,8 +1066,9 @@ const nftImgCache = new Map();
 
 // Если наш сервер не отдал картинку — берём её напрямую: номерной NFT с Fragment, модель с changes.tg
 function nftImgFallbacks(url) {
-  if (!url.startsWith("/nftimg?")) return [];
-  const q = new URLSearchParams(url.slice(8));
+  const at = url.indexOf("/nftimg?");
+  if (at < 0) return [];
+  const q = new URLSearchParams(url.slice(at + 8));
   const c = q.get("c") || "", m = q.get("m"), n = q.get("n");
   const out = [];
   if (n) out.push(`https://nft.fragment.com/gift/${c.toLowerCase().replace(/[^a-z0-9]/g, "")}-${n}.webp`);

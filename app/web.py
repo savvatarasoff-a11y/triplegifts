@@ -5,6 +5,7 @@ import asyncio
 import html
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -89,6 +90,34 @@ def parse_deposit_payload(payload: str) -> tuple[int, int] | None:
     if len(parts) != 3 or parts[0] != "dep" or not parts[1].isdigit() or not parts[2].isdigit():
         return None
     return int(parts[1]), int(parts[2])
+
+
+# Мини-приложение с постоянного адреса (GitHub Pages) ходит к серверу с другого домена
+PAGES_ORIGINS = frozenset(o.strip().rstrip("/") for o in
+                          (os.getenv("PAGES_ORIGIN", "") or "https://savvat133-dev.github.io").split(",") if o.strip())
+CORS_HEADERS = {"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type", "Access-Control-Max-Age": "86400"}
+
+
+@web.middleware
+async def cors(request: web.Request, handler: Handler) -> web.StreamResponse:
+    origin = request.headers.get("Origin", "").rstrip("/")
+    allowed = origin in PAGES_ORIGINS
+    if request.method == "OPTIONS":
+        if not allowed:
+            raise web.HTTPForbidden()
+        return web.Response(status=204, headers={"Access-Control-Allow-Origin": origin, "Vary": "Origin", **CORS_HEADERS})
+    try:
+        response = await handler(request)
+    except web.HTTPException as e:
+        if allowed:
+            e.headers["Access-Control-Allow-Origin"] = origin
+            e.headers["Vary"] = "Origin"
+        raise
+    if allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    return response
 
 
 # Игровые действия — только для подписчиков канала (вывод, пополнение и продажа подарков доступны всем)
@@ -264,7 +293,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         page = (WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
         for name in ("app.js", "app.css"):
             ver = int((WEBAPP_DIR / name).stat().st_mtime)
-            page = page.replace(f"/static/{name}\"", f"/static/{name}?v={ver}\"")
+            page = page.replace(f"static/{name}\"", f"static/{name}?v={ver}\"")
         return web.Response(text=page, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
     @routes.get("/api/me")
@@ -554,7 +583,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             raise GameError("Вывод подарков временно недоступен")
         return web.json_response(await withdraw_gift(casino, relayer, request[USER_ID], (await body(request)).get("id")))
 
-    app = web.Application(middlewares=[errors, auth], client_max_size=64 * 1024)
+    app = web.Application(middlewares=[cors, errors, auth], client_max_size=64 * 1024)
     app.add_routes(routes)
     app.router.add_static("/static/", WEBAPP_DIR, show_index=False)
 
