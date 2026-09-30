@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Установка Triple Gifts на чистый Ubuntu 22.04/24.04 VPS.
+# Установка Triple Gifts на чистый Ubuntu VPS (22.04 и новее).
 #   bash vps_setup.sh [путь к triple-gifts.bundle]   (по умолчанию ищет бандл рядом со скриптом или в /root)
 # Спросит токен бота (не сохраняется в истории), поставит Python + Caddy (HTTPS через sslip.io),
 # запустит бота как systemd-сервис и включит резервные копии базы каждые 6 часов.
@@ -24,7 +24,7 @@ echo "Адрес мини-приложения: https://$DOMAIN"
 echo "== Пакеты"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q python3 python3-venv python3-pip sqlite3 git curl gpg >/dev/null
+apt-get install -y -q sqlite3 git curl gpg ca-certificates >/dev/null
 if ! apt-get install -y -q caddy >/dev/null 2>&1; then   # в 22.04 caddy нет в стандартных репозиториях
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/caddy.gpg
   echo "deb [signed-by=/usr/share/keyrings/caddy.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" > /etc/apt/sources.list.d/caddy.list
@@ -47,9 +47,12 @@ fi
 echo "== Код"
 mkdir -p "$APP" "$DATA/backups"
 cp -r "$SRC/app" "$SRC/webapp" "$SRC/requirements.txt" "$APP/"
-python3 -m venv "$APP/venv"
-"$APP/venv/bin/pip" install -q --upgrade pip
-"$APP/venv/bin/pip" install -q -r "$APP/requirements.txt"
+# Python 3.12 через uv — не зависим от версии Python в системе (в новых Ubuntu он может быть слишком свежим для библиотек)
+command -v uv >/dev/null || [ -x /root/.local/bin/uv ] || curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
+UV="$(command -v uv || echo /root/.local/bin/uv)"
+rm -rf "$APP/venv"
+"$UV" venv -q --python 3.12 "$APP/venv"
+"$UV" pip install -q --python "$APP/venv/bin/python" -r "$APP/requirements.txt"
 
 if [ ! -f "$DATA/bot.db" ] && [ -f "$SRC/bot.db" ]; then
   echo "== Восстанавливаю базу из архива"
