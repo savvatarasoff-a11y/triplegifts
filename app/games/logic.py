@@ -120,22 +120,26 @@ PICKAXE_TNT_BLAST = 4         # сколько соседних блоков с�
 PICKAXE_REPAIR = 30           # сколько прочности возвращает стрелка
 
 # тип: (прочность, которую отнимает блок; сырая выплата в ставках — ниже масштабируется до PICKAXE_RTP)
-_PICK_BLOCKS = {"dirt": (3, 0.0), "stone": (5, 0.0), "gold": (6, 1.0), "redstone": (6, 1.0),
-                "diamond": (8, 1.0), "emerald": (8, 1.0), "tnt": (0, 0.0), "repair": (-PICKAXE_REPAIR, 0.0)}
+_PICK_BLOCKS = {"dirt": (3, 0.0), "stone": (5, 0.0), "coal": (5, 1.0), "copper": (6, 1.0), "iron": (6, 1.0),
+                "gold": (6, 1.0), "redstone": (6, 1.0), "lapis": (6, 1.0), "diamond": (8, 1.0), "emerald": (8, 1.0),
+                "tnt": (0, 0.0), "repair": (-PICKAXE_REPAIR, 0.0)}
 # по кирке: веса блоков и относительная ценность руд (дороже кирка — реже, но крупнее руды)
 _PICK_LEVELS = {
-    "iron":    {"w": {"dirt": 30, "stone": 40, "gold": 14, "redstone": 6, "diamond": 1.2, "emerald": 0.25,
-                      "tnt": 2.2, "repair": 1.6},
-                "v": {"gold": 1, "redstone": 3, "diamond": 15, "emerald": 60}},
-    "gold":    {"w": {"dirt": 30, "stone": 42, "gold": 10, "redstone": 4, "diamond": 0.7, "emerald": 0.06,
-                      "tnt": 2.2, "repair": 1.6},
-                "v": {"gold": 1, "redstone": 5, "diamond": 40, "emerald": 1000}},
-    "diamond": {"w": {"dirt": 30, "stone": 45, "gold": 7, "redstone": 2.5, "diamond": 0.3, "emerald": 0.012,
-                      "tnt": 2.2, "repair": 1.6},
-                "v": {"gold": 1, "redstone": 8, "diamond": 100, "emerald": 8000}},
+    "iron":    {"w": {"dirt": 26, "stone": 34, "coal": 10, "copper": 7, "iron": 6, "gold": 5, "redstone": 4, "lapis": 3,
+                      "diamond": 1.0, "emerald": 0.25, "tnt": 2.2, "repair": 1.6},
+                "v": {"coal": 0.5, "copper": 0.8, "iron": 1, "gold": 2, "redstone": 3, "lapis": 4, "diamond": 15,
+                      "emerald": 60}},
+    "gold":    {"w": {"dirt": 28, "stone": 38, "coal": 8, "copper": 5, "iron": 4, "gold": 4, "redstone": 3, "lapis": 2,
+                      "diamond": 0.6, "emerald": 0.06, "tnt": 2.2, "repair": 1.6},
+                "v": {"coal": 0.5, "copper": 0.8, "iron": 1, "gold": 3, "redstone": 5, "lapis": 6, "diamond": 40,
+                      "emerald": 1000}},
+    "diamond": {"w": {"dirt": 30, "stone": 42, "coal": 6, "copper": 4, "iron": 3, "gold": 3, "redstone": 2, "lapis": 1.5,
+                      "diamond": 0.3, "emerald": 0.012, "tnt": 2.2, "repair": 1.6},
+                "v": {"coal": 0.5, "copper": 0.8, "iron": 1, "gold": 3, "redstone": 8, "lapis": 10, "diamond": 100,
+                      "emerald": 8000}},
 }
 PICKAXES = tuple(_PICK_LEVELS)
-ORES = ("gold", "redstone", "diamond", "emerald")
+ORES = ("coal", "copper", "iron", "gold", "redstone", "lapis", "diamond", "emerald")
 
 
 def _pick_value(weights: dict, pays: dict) -> float:

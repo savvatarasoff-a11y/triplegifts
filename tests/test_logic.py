@@ -44,8 +44,10 @@ def test_pickaxe_rtp_and_dig():
         assert 0.92 < g.pickaxe_rtp(lv) <= g.PICKAXE_RTP                       # точный расчёт, не выше 93%
         rng = random.Random(3)
         n = 30_000
-        mean = sum(g.pickaxe_dig(lv, rng)[1] for _ in range(n)) / n
-        assert abs(mean - g.pickaxe_rtp(lv)) < 0.08, lv                        # симуляция сходится с расчётом
+        xs = [g.pickaxe_dig(lv, rng)[1] for _ in range(n)]
+        mean = sum(xs) / n
+        se = (sum((x - mean) ** 2 for x in xs) / n / n) ** 0.5             # у алмазной кирки огромный разброс
+        assert abs(mean - g.pickaxe_rtp(lv)) < 4 * se + 0.01, lv               # симуляция сходится с расчётом
     # дороже кирка — крупнее самая ценная руда
     tops = [g.PICKAXE_TABLES[lv]["emerald"] for lv in g.PICKAXES]
     assert tops == sorted(tops)

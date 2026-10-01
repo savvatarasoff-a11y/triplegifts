@@ -1893,9 +1893,11 @@ async function plinkoDrop() {
 
 const PK_COLS = 7;
 const PK_N = 16;                        // размер текстуры блока в пикселях
-const PK_ORE = { gold: ["#FFE45C", "#E8A317", "#FFF8C9", "#7A5205"], redstone: ["#FF3B2F", "#B0140C", "#FFB3AA", "#5E0704"],
+const PK_ORE = { coal: ["#B8B8B8", "#2A2A2A", "#DADADA", "#111111"], copper: ["#E8875A", "#3FA88C", "#F5B898", "#5E3420"],
+  iron: ["#E2BBA0", "#AF8E77", "#F5DCCB", "#5E4535"], lapis: ["#4C7DF0", "#173A9C", "#9AB8FF", "#0D1F57"], gold: ["#FFE45C", "#E8A317", "#FFF8C9", "#7A5205"], redstone: ["#FF3B2F", "#B0140C", "#FFB3AA", "#5E0704"],
   diamond: ["#7DF9FF", "#1CB8C9", "#E8FFFF", "#0A5E66"], emerald: ["#4CFF84", "#14A84A", "#D2FFE0", "#085A25"] };
-const PK_ORE_NAMES = { gold: "Золото", redstone: "Редстоун", diamond: "Алмаз", emerald: "Изумруд" };
+const PK_ORE_NAMES = { coal: "Уголь", copper: "Медь", iron: "Железо", gold: "Золото", redstone: "Редстоун",
+  lapis: "Лазурит", diamond: "Алмаз", emerald: "Изумруд" };
 // цвета головки по уровням кирки (контур, основной, светлый, блик-серый, яркий блик)
 const PK_PICK = {
   iron: { O: "#3F4243", M: "#A9B0B3", L: "#C4CBCE", Q: "#B8BFC2", H: "#F2FBFC" },
@@ -2067,11 +2069,9 @@ function pkDeco(x, y) {     // блоки вокруг шахты — прост
   if (y === 0) return "grass";
   const v = pkHash(x, y);
   if (y < 3) return v < 0.72 ? "dirt" : "stone";
-  if (v < 0.045) return "coal";
-  if (v < 0.07) return "iron";
-  if (v < 0.085) return "copper";
-  if (v < 0.1) return "gold";
-  if (v < 0.115) return "redstone";
+  if (v < 0.03) return "coal";
+  if (v < 0.045) return "iron";
+  if (v < 0.055) return "copper";
   return v < 0.16 && y < 6 ? "dirt" : "stone";
 }
 
@@ -2291,9 +2291,9 @@ function pkDraw() {
         continue;
       }
       const t = (world && world.cells.get(pkKey(x, y))) || pkDeco(x, y);
-      const v = ["stone", "dirt", "gold", "redstone", "diamond", "emerald"].includes(t) ? Math.floor(pkHash(x, y, 9) * 3) : 0;
+      const v = ["stone", "dirt", ...Object.keys(PK_ORE)].includes(t) ? Math.floor(pkHash(x, y, 9) * 3) : 0;
       ctx.drawImage(pkTexture(t, v, y >= PK_DEEP ? 1 : 0), sx(x), sy(y), cell, cell);
-      if (PK_ORE[t] && t !== "redstone") {      // мерцание руды
+      if (["gold", "diamond", "emerald", "lapis"].includes(t)) {      // мерцание ценной руды
         const ph = (now / 1300 + pkHash(x, y, 3)) % 1;
         if (ph < 0.2) {
           const k = Math.sin(ph / 0.2 * Math.PI), s = cell * 0.13 * k;
