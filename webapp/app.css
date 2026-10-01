@@ -554,10 +554,20 @@ button { -webkit-user-select: none; user-select: none; }
 .pk-bar::after { content: ""; position: absolute; inset: 0;
   background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(0, 0, 0, .55) calc(10% - 2px) 10%); }
 @keyframes pkblink { 50% { opacity: .55; } }
-.pk-wheel-box { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; background: rgba(5, 7, 12, .55);
-  opacity: 0; pointer-events: none; transition: opacity .25s; }
-.pk-wheel-box.show { opacity: 1; }
-#pk-wheel { width: 74%; aspect-ratio: 1; filter: drop-shadow(0 10px 30px rgba(0, 0, 0, .6)); }
+/* финальный экран, как в конце видео: небо с облаками и пиксельная табличка */
+.pk-win { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; opacity: 0; pointer-events: none;
+  transition: opacity .3s; background:
+    radial-gradient(40% 14% at 22% 30%, #fff 0 60%, transparent 62%), radial-gradient(34% 12% at 78% 70%, #fff 0 60%, transparent 62%),
+    radial-gradient(26% 9% at 70% 22%, #f2f8ff 0 60%, transparent 62%), linear-gradient(#8fd0f2, #d6f1fd); }
+.pk-win.show { opacity: 1; }
+.pk-win-plank { display: grid; justify-items: center; gap: 10px; padding: 16px 26px 14px; min-width: 70%;
+  background: linear-gradient(#7d8a99, #5f6b79); border: 4px solid #2d3540; box-shadow: inset 0 4px 0 #9aa7b6, inset 0 -4px 0 #48525e,
+    0 -6px 0 #4caf50, 0 10px 24px rgba(0, 0, 0, .35); image-rendering: pixelated; transform: scale(.8);
+  transition: transform .35s cubic-bezier(.2, 1.6, .4, 1); }
+.pk-win.show .pk-win-plank { transform: scale(1); }
+.pk-win-plank span { font: 14px 'Press Start 2P', monospace; color: #fff; text-shadow: 2px 2px 0 #2d3540; }
+.pk-win-plank b { font: 22px 'Press Start 2P', monospace; color: #FFE14D; text-shadow: 3px 3px 0 #7a4b00; white-space: nowrap; }
+.pk-win-plank i { font: 10px 'Press Start 2P', monospace; font-style: normal; color: #e8f1ff; }
 .pk-ores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 10px 0 0; }
 .pk-ores div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border-radius: 12px;
   background: var(--surface); border: 1px solid var(--line); font-size: 10px; color: var(--muted, #999); min-width: 0; }

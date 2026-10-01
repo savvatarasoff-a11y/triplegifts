@@ -116,13 +116,16 @@ def plinko_drop(rows: int, risk: str, rng: random.Random = RNG) -> tuple[list[in
 
 PICKAXE_RTP = 0.87
 PICKAXE_MAX_X = 5000          # потолок выигрыша за игру, в ставках
-PICKAXE_HEAL = 12             # сколько прочности возвращает верстак
+PICK_TOUCH = 4                # сколько прочности отнимает одно касание блока
+PICKAXE_HEAL = 48             # сколько прочности возвращает верстак (12 касаний)
 # колесо: (кирка, шанс); прочность кирок
 PICK_WHEEL = (("none", 0.25), ("wood", 0.35), ("iron", 0.22), ("gold", 0.12), ("diamond", 0.06))
-PICK_TIERS = {"wood": 25, "iron": 50, "gold": 75, "diamond": 120}
+PICK_TIERS = {"wood": 100, "iron": 200, "gold": 300, "diamond": 400}
 PICKAXES = tuple(PICK_TIERS)
 PICK_COLS = 7
-PICK_TOP = -3                 # потолок пещеры над шахтой
+PICK_TOP = -8                 # выше кирка не улетает (невидимый потолок в небе)
+PICK_START = (3.5, -3.5)      # отсюда — из барабана с кирками — кирка падает в шахту
+PICK_DIRT_ROWS = 3            # у поверхности больше земли (доля руд среди остального не меняется)
 PICK_G = 22.0                 # гравитация, клеток/с²
 PICK_DT = 1 / 180             # шаг физики, с
 PICK_REST = 0.78              # упругость отскока
@@ -138,24 +141,24 @@ _PICK_PTS = tuple((((i + 0.5) / 16 - 0.5) * PICK_SIZE, ((j + 0.5) / 16 - 0.5) * 
                   for j in range(16) for i in range(16) if PICK_ART[j][i] != ".")
 _PICK_BR = max(math.hypot(x, y) for x, y in _PICK_PTS) + 0.02
 # HP блоков по ценности; руды одной прочности в физике неотличимы — на этом держится точный расчёт RTP ниже
-PICK_HARD = {"dirt": 1, "tnt": 1, "bench": 1, "stone": 2, "coal": 2, "copper": 2,
-             "iron": 3, "gold": 3, "redstone": 3, "lapis": 3, "diamond": 5, "emerald": 5}
-PICK_CODES = {"dirt": "d", "stone": "s", "coal": "c", "copper": "u", "iron": "i", "gold": "o", "redstone": "r",
-              "lapis": "l", "diamond": "a", "emerald": "e", "tnt": "t", "bench": "b"}
+PICK_HARD = {"grass": 1, "dirt": 1, "tnt": 1, "bench": 1, "stone": 2, "coal": 2, "copper": 2,
+             "iron": 3, "gold": 3, "redstone": 3, "lapis": 3, "chest": 3, "diamond": 5, "emerald": 5}
+PICK_CODES = {"grass": "g", "dirt": "d", "stone": "s", "coal": "c", "copper": "u", "iron": "i", "gold": "o",
+              "redstone": "r", "lapis": "l", "chest": "h", "diamond": "a", "emerald": "e", "tnt": "t", "bench": "b"}
 _PAY_CLASSES = (2, 3, 5)
 PICK_WEIGHTS = {"dirt": 28, "stone": 38, "coal": 8, "copper": 5, "iron": 4, "gold": 4, "redstone": 3, "lapis": 2,
-                "diamond": 0.6, "emerald": 0.05, "tnt": 2, "bench": 1.6}
-_PICK_VALUES = {"coal": 0.5, "copper": 0.8, "iron": 1, "gold": 3, "redstone": 5, "lapis": 6, "diamond": 40,
-                "emerald": 400}
+                "chest": 1.2, "diamond": 0.6, "emerald": 0.05, "tnt": 2, "bench": 1.6}
+_PICK_VALUES = {"coal": 0.5, "copper": 0.8, "iron": 1, "gold": 3, "redstone": 5, "lapis": 6, "chest": 8,
+                "diamond": 40, "emerald": 400}
 ORES = tuple(_PICK_VALUES)
 # Среднее число сломанных блоков каждого класса прочности за игру каждой киркой (Монте-Карло, 50000 игр;
 # пересчитать: pickaxe_class_counts). Тип блока внутри класса на физику не влияет, поэтому
 # E[выигрыш] = Σ по классам E[N_класса] × средняя ценность руды класса — без шума от редких изумрудов.
 PICKAXE_CLASS_COUNTS: dict[str, dict[int, float]] = {
-    "wood": {2: 8.3266, 3: 1.6931, 5: 0.0483},
-    "iron": {2: 17.025, 3: 3.6617, 5: 0.1241},
-    "gold": {2: 25.7142, 3: 5.6255, 5: 0.199},
-    "diamond": {2: 41.3411, 3: 9.1503, 5: 0.3323},
+    "wood": {2: 4.3971, 3: 0.9146, 5: 0.0225},
+    "iron": {2: 12.5309, 3: 2.8865, 5: 0.089},
+    "gold": {2: 20.9976, 3: 4.9832, 5: 0.1611},
+    "diamond": {2: 29.4733, 3: 7.0739, 5: 0.2331},
 }
 
 
@@ -171,6 +174,7 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
     прочностью сломалась бы (траектория от прочности не зависит — она лишь решает, когда остановиться)."""
     pays = PICKAXE_TABLE if pays is None else pays
     types, ws = list(PICK_WEIGHTS), list(PICK_WEIGHTS.values())
+    ws_top = [w * 3 if t == "dirt" else w for t, w in PICK_WEIGHTS.items()]
     world: dict[tuple[int, int], list] = {}
 
     def get(x: int, y: int):
@@ -180,7 +184,7 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
             return None
         k = (x, y)
         if k not in world:
-            t = rng.choices(types, ws)[0]
+            t = "grass" if y == 0 else rng.choices(types, ws_top if y <= PICK_DIRT_ROWS else ws)[0]
             world[k] = [t, PICK_HARD[t]]
         c = world[k]
         return c if c[1] > 0 else None
@@ -197,9 +201,9 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
                     if dx or dy:
                         smash(cx + dx, cy + dy, out)
 
-    x, y = 3.5, -1.5
+    x, y = PICK_START
     vx, vy = round(rng.uniform(-3, 3), 4), 0.0
-    th, om = round(rng.uniform(0, 6.2832), 4), round(rng.choice((-1, 1)) * rng.uniform(5, 10), 4)
+    th, om = 0.0, round(rng.choice((-1, 1)) * rng.uniform(5, 10), 4)     # стартует ровно как стоит в барабане
     start = {"t": 0, "x": x, "y": y, "vx": vx, "vy": vy, "a": th, "w": om}
     touches = heals = 0
     t, total = 0.0, 0.0
@@ -208,7 +212,10 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
     snaps: dict[int, dict[int, int]] = {}
     pending = sorted(set(checkpoints))
     dt, g = PICK_DT, PICK_G
-    while hp0 - touches + heals * PICKAXE_HEAL > 0 and t < PICK_MAX_T:
+    def hp_left(h: int) -> int:
+        return h - touches * PICK_TOUCH + heals * PICKAXE_HEAL
+
+    while hp_left(hp0) > 0 and t < PICK_MAX_T:
         nx, ny = x + vx * dt, y + vy * dt + 0.5 * g * dt * dt
         nvy, nth = vy + g * dt, th + om * dt
         t += dt
@@ -269,14 +276,14 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
                         if PICK_HARD[bt] in counts:
                             counts[PICK_HARD[bt]] += 1
                         total += pays.get(bt, 0)
-            while pending and pending[0] - touches + heals * PICKAXE_HEAL <= 0:
+            while pending and hp_left(pending[0]) <= 0:
                 snaps[pending.pop(0)] = dict(counts)
         # округляем состояние сразу — приложение продолжит траекторию ровно с тех же чисел
         x, y, vx, vy = round(x, 5), round(y, 5), round(vx, 5), round(vy, 5)
         th, om = round(th, 5), round(om, 5)
         if record:
             events.append({"t": round(t, 5), "x": x, "y": y, "vx": vx, "vy": vy, "a": th, "w": om, "k": kind,
-                           "c": [cx, cy] if kind == 1 else None, "hp": max(0, hp0 - touches + heals * PICKAXE_HEAL),
+                           "c": [cx, cy] if kind == 1 else None, "hp": max(0, hp_left(hp0)),
                            "br": [[bx, by, round(pays.get(bt, 0), 4)] for bx, by, bt in broken]})
     for h in pending:
         snaps[h] = dict(counts)

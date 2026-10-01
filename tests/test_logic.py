@@ -46,13 +46,14 @@ def test_pickaxe_physics_and_rtp():
     run = g.pickaxe_run(g.PICK_TIERS["gold"], rng=rng)
     ev = run["events"]
     assert ev and ev[-1]["hp"] == 0 and all(a["t"] <= b["t"] for a, b in zip(ev, ev[1:]))
-    assert all(len(row) == g.PICK_COLS for row in run["world"])
+    assert all(len(row) == g.PICK_COLS for row in run["world"]) and set(run["world"][0]) == {"g"}   # сверху трава
+    assert run["start"]["a"] == 0 and (run["start"]["x"], run["start"]["y"]) == g.PICK_START       # из барабана
     codes = {v: k for k, v in g.PICK_CODES.items()}
     # прочность: −1 за каждое касание блока, стены и выталкивания бесплатны, верстак добавляет
     hp = g.PICK_TIERS["gold"]
     for e in ev:
         if e["k"] == 1:
-            hp -= 1
+            hp -= g.PICK_TOUCH
         hp += g.PICKAXE_HEAL * sum(1 for bx, by, _ in e["br"] if run["world"][by][bx] == "b")
         assert e["hp"] == max(0, hp)
         assert (e["c"] is not None) == (e["k"] == 1) and (e["k"] == 1 or not e["br"])
@@ -67,10 +68,10 @@ def test_pickaxe_physics_and_rtp():
             broke[(bx, by)] = m
     assert run["mult"] == round(min(sum(broke.values()), g.PICKAXE_MAX_X), 2)
     # траектория не зависит от прочности: короткая партия — начало длинной (на этом стоит калибровка)
-    short = g.pickaxe_run(25, rng=random.Random(5))
-    long_ = g.pickaxe_run(120, rng=random.Random(5), checkpoints=(25,))
-    assert short["events"] == [dict(e, hp=e["hp"] - 95) for e in long_["events"][:len(short["events"])]]
-    assert long_["snaps"][25] == short["counts"]
+    short = g.pickaxe_run(100, rng=random.Random(5))
+    long_ = g.pickaxe_run(400, rng=random.Random(5), checkpoints=(100,))
+    assert short["events"] == [dict(e, hp=e["hp"] - 300) for e in long_["events"][:len(short["events"])]]
+    assert long_["snaps"][100] == short["counts"]
     # колесо выдаёт кирки примерно с заявленными шансами
     spins = [g.pickaxe_spin(rng) for _ in range(20000)]
     for tier, p in g.PICK_WHEEL:

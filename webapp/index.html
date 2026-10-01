@@ -8,7 +8,7 @@
   <link rel="icon" href="static/logo.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Unbounded:wght@600;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Unbounded:wght@600;800;900&family=Press+Start+2P&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="static/app.css">
 </head>
@@ -426,9 +426,11 @@
           <div class="pk-pill gold"><span>Добыто</span><b id="pk-sum">—</b></div>
         </div>
         <canvas id="pk-canvas"></canvas>
-        <div class="pk-wheel-box" id="pk-wheel-box"><canvas id="pk-wheel"></canvas></div>
+        <div class="pk-win" id="pk-win">
+          <div class="pk-win-plank"><span>WIN</span><b id="pk-win-sum">0</b><i id="pk-win-x">×0</i></div>
+        </div>
       </div>
-      <div class="result" id="pk-result">Колесо решает, какая кирка выпадет. Она падает в шахту и отскакивает от блоков: руды приносят звёзды, TNT взрывает всё вокруг, верстак чинит кирку</div>
+      <div class="result" id="pk-result">Барабан решает, какая кирка выпадет. Она падает в шахту и отскакивает от блоков: руды и сундуки приносят звёзды, TNT взрывает всё вокруг, верстак чинит кирку</div>
       <div class="pk-ores" id="pk-ores"></div>
       <div class="panel controls">
         <div class="betbox" data-bet="pickaxe"></div>
