@@ -1896,7 +1896,6 @@ const PK_N = 16;                        // размер текстуры бло�
 const PK_ORE = { gold: ["#FFE45C", "#E8A317", "#FFF8C9", "#7A5205"], redstone: ["#FF3B2F", "#B0140C", "#FFB3AA", "#5E0704"],
   diamond: ["#7DF9FF", "#1CB8C9", "#E8FFFF", "#0A5E66"], emerald: ["#4CFF84", "#14A84A", "#D2FFE0", "#085A25"] };
 const PK_ORE_NAMES = { gold: "Золото", redstone: "Редстоун", diamond: "Алмаз", emerald: "Изумруд" };
-const PK_BANNER = { diamond: "АЛМАЗ!", emerald: "ИЗУМРУД!" };
 // цвета головки как у кирок Minecraft: блик, основной, тень, контур
 const PK_PICK = { iron: ["#FFFFFF", "#D8D8D8", "#A0A0A0", "#2B2B2B"], gold: ["#FFFFB5", "#FADC4A", "#D2A31B", "#3E2A07"],
   diamond: ["#D5FFF6", "#4AEDD9", "#2A9C8E", "#0F2F2B"] };
@@ -1904,7 +1903,7 @@ const PK_BITS = { dirt: ["#8A5A2E", "#68421F", "#996638"], grass: ["#62C24A", "#
   stone: ["#888D93", "#6E7379", "#A3A8AE"], tnt: ["#DB3B2E", "#ECECEC", "#8E1A14", "#FFB13B"],
   repair: ["#52E86A", "#E3A92B", "#B6FFC2"] };
 const pk = { level: "iron", run: null, world: null, raf: 0, fast: false, camY: -2.3, lastPos: null, last: 0, parts: [], texts: [],
-  seed: 1, tex: {}, hp: null, sum: null, bet: 0, cur: "stars", hidden: false, banner: null, clouds: null };
+  seed: 1, tex: {}, hp: null, sum: null, bet: 0, cur: "stars", hidden: false, clouds: null };
 
 function pkRand(seed) {   // mulberry32 — детерминированный генератор для текстур и декора
   let a = seed >>> 0;
@@ -2132,7 +2131,6 @@ function pkBreak(r, idx) {
   if (s.m > 0) {
     text(s.x, s.y, `+${pkAmount(s.m)}`, PK_ORE[s.t] ? PK_ORE[s.t][0] : "#fff", s.m >= 1);
     haptic();
-    if (PK_BANNER[s.t]) pk.banner = { txt: PK_BANNER[s.t], sub: `+${pkAmount(s.m)}`, color: PK_ORE[s.t][0], age: 0 };
   }
   if (s.t === "repair") { text(s.x, s.y, "+30 ❤", "#5CFF8F", false); pkSparks(s.x + 0.5, s.y + 0.5, "#9CFFB0", 14); }
   if (s.t === "tnt") {
@@ -2143,7 +2141,6 @@ function pkBreak(r, idx) {
       if (b.cell) { pk.world.mined.add(pkKey(b.x, b.y)); pkBits(b.x + 0.5, b.y + 0.5, bits(b.t), 8, 1.4); }
       pk.sum += b.m;
       if (b.m > 0) text(b.x, b.y, `+${pkAmount(b.m)}`, PK_ORE[b.t] ? PK_ORE[b.t][0] : "#fff", b.m >= 1);
-      if (PK_BANNER[b.t]) pk.banner = { txt: PK_BANNER[b.t], sub: `+${pkAmount(b.m)}`, color: PK_ORE[b.t][0], age: 0 };
     });
   }
   pkHud();
@@ -2339,18 +2336,6 @@ function pkDraw() {
     ctx.shadowBlur = 0;
   }
   ctx.globalAlpha = 1;
-  if (pk.banner) {                              // «АЛМАЗ!» по центру
-    const b = pk.banner, k = Math.min(1, b.age / 180), fade = Math.min(1, (1500 - b.age) / 300);
-    ctx.globalAlpha = Math.max(0, fade);
-    const fs = Math.round(cell * 0.75 * (0.6 + 0.4 * k + 0.12 * Math.sin(b.age / 90)));
-    ctx.font = `900 ${fs}px ${font}`;
-    ctx.shadowColor = b.color; ctx.shadowBlur = cell * 0.6;
-    ctx.lineWidth = fs * 0.22; ctx.strokeStyle = "#000"; ctx.strokeText(b.txt, W / 2, H * 0.42);
-    ctx.fillStyle = b.color; ctx.fillText(b.txt, W / 2, H * 0.42);
-    ctx.font = `900 ${Math.round(fs * 0.5)}px ${font}`;
-    ctx.strokeText(b.sub, W / 2, H * 0.42 + fs * 0.75); ctx.fillStyle = "#fff"; ctx.fillText(b.sub, W / 2, H * 0.42 + fs * 0.75);
-    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
-  }
   if (r && r.flash > 0) { ctx.fillStyle = `rgba(255, 236, 190, ${r.flash * 0.5})`; ctx.fillRect(0, 0, W, H); }
   const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);   // виньетка
   vg.addColorStop(0, "rgba(0, 0, 0, 0)"); vg.addColorStop(1, "rgba(0, 0, 0, .35)");
@@ -2386,7 +2371,6 @@ function pkFrame(now) {
   pk.parts = pk.parts.filter((q) => q.life > 0);
   for (const t of pk.texts) { t.age += dt; t.y -= dt * 0.0008; t.life -= dt / 1400; }
   pk.texts = pk.texts.filter((t) => t.life > 0);
-  if (pk.banner && (pk.banner.age += dt) > 1500) pk.banner = null;
   if (pk.run || !pk.hidden) {
     const pose = pkPose(pk.run);
     const target = Math.max(-2.3, pose.y - 2.6);           // камера держит кирку в верхней трети
@@ -2410,7 +2394,7 @@ function pkOres() {
 }
 
 function pickaxeEnter() {
-  if (!pk.run) Object.assign(pk, { world: null, hidden: false, camY: -2.3, hp: null, sum: null, banner: null });
+  if (!pk.run) Object.assign(pk, { world: null, hidden: false, camY: -2.3, hp: null, sum: null });
   pkOres();
   pkHud();
   pkKick();
@@ -2428,7 +2412,7 @@ async function pickaxePlay() {
     showBetTaken(bet);
     haptic();
     pk.seed = Math.floor(Math.random() * 1e9);
-    Object.assign(pk, { fast: false, parts: [], texts: [], bet, cur: r.cur, hp: r.hp, sum: 0, hidden: false, banner: null,
+    Object.assign(pk, { fast: false, parts: [], texts: [], bet, cur: r.cur, hp: r.hp, sum: 0, hidden: false,
       camY: -2.3, world: pkWorld(r.hits) });
     const res = $("#pk-result");
     res.className = "result";
