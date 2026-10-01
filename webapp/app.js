@@ -1896,9 +1896,12 @@ const PK_N = 16;                        // размер текстуры бло�
 const PK_ORE = { gold: ["#FFE45C", "#E8A317", "#FFF8C9", "#7A5205"], redstone: ["#FF3B2F", "#B0140C", "#FFB3AA", "#5E0704"],
   diamond: ["#7DF9FF", "#1CB8C9", "#E8FFFF", "#0A5E66"], emerald: ["#4CFF84", "#14A84A", "#D2FFE0", "#085A25"] };
 const PK_ORE_NAMES = { gold: "Золото", redstone: "Редстоун", diamond: "Алмаз", emerald: "Изумруд" };
-// цвета головки как у кирок Minecraft: блик, основной, тень, контур
-const PK_PICK = { iron: ["#FFFFFF", "#D8D8D8", "#A0A0A0", "#2B2B2B"], gold: ["#FFFFB5", "#FADC4A", "#D2A31B", "#3E2A07"],
-  diamond: ["#D5FFF6", "#4AEDD9", "#2A9C8E", "#0F2F2B"] };
+// цвета головки по уровням кирки (контур, основной, светлый, блик-серый, яркий блик)
+const PK_PICK = {
+  iron: { O: "#3F4243", M: "#A9B0B3", L: "#C4CBCE", Q: "#B8BFC2", H: "#F2FBFC" },
+  gold: { O: "#E09A00", M: "#E6DF1A", L: "#F7F535", Q: "#DCD62A", H: "#FFFF9E" },
+  diamond: { O: "#11544B", M: "#23B49C", L: "#2BC8AB", Q: "#47BEAB", H: "#33EBC8" },
+};
 const PK_BITS = { dirt: ["#8A5A2E", "#68421F", "#996638"], grass: ["#62C24A", "#8A5A2E", "#4AA037"],
   stone: ["#888D93", "#6E7379", "#A3A8AE"], tnt: ["#DB3B2E", "#ECECEC", "#8E1A14", "#FFB13B"],
   repair: ["#52E86A", "#E3A92B", "#B6FFC2"] };
@@ -2004,32 +2007,32 @@ function pkTexture(type, v = 0) {
   return pk.tex[key];
 }
 
-// Кирка — пиксель-арт 16×16 в стиле Minecraft: o — контур, H/M/D — светлый/основной/тёмный цвет головки, S/s — рукоять
+// Кирка — пиксель-арт 16×16 с текстуры Minecraft: O — контур, M/L/Q/H — оттенки головки, b/e/i/k — рукоять
 const PK_PICK_ART = [
   "................",
-  "...oooooo.......",
-  "..oHHHHHMoo.....",
-  "..oMMMMMMMDo....",
-  "...ooooDMMMDo...",
-  ".......oSDMMDo..",
-  "......oSsooMMDo.",
-  ".....oSso..oMDo.",
-  "....oSso...oMDo.",
-  "...oSso....oMDo.",
-  "..oSso.....oMDo.",
-  ".oSso......oDDo.",
-  "oSso........oo..",
-  "oso.............",
-  ".o..............",
+  "................",
+  ".....OOOOO......",
+  "....OHMQMLOei...",
+  ".....OOOOMMkb...",
+  ".........eLMO...",
+  "........eibMLO..",
+  ".......ekb.OMO..",
+  "......eib..OQO..",
+  ".....ekb...OLO..",
+  "....eib....OHO..",
+  "...ekb......O...",
+  "..eib...........",
+  "..kb............",
+  "................",
   "................",
 ];
-const PK_GRIP = [1.5, 13.5];      // где кирку держат
-const PK_REACH = 11.5;            // от хвата до середины головки
+const PK_GRIP = [2.5, 13.5];      // где кирку держат
+const PK_REACH = 12.5;            // от хвата до середины головки
+const PK_STICK = { b: "#291E0B", e: "#4B3418", i: "#674E20", k: "#8A6727" };
 function pkPickSprite(level) {
   const key = `pick:${level}`;
   if (pk.tex[key]) return pk.tex[key];
-  const [hi, mid, low, out] = PK_PICK[level];
-  const cols = { o: out, H: hi, M: mid, D: low, S: "#9C7637", s: "#6B511F" };
+  const cols = { ...PK_STICK, ...PK_PICK[level] };
   const grid = PK_PICK_ART.join("").split("").map((ch) => cols[ch] || null);
   pk.tex[key] = pkCanvas(grid, 16);
   return pk.tex[key];
@@ -2179,6 +2182,7 @@ function pkDrawPick(ctx, hx, hy, size, dx, dy, swing, alpha) {
   ctx.globalAlpha = alpha;
   ctx.translate(gx, gy);
   ctx.rotate(Math.atan2(dx, -dy) + swing - Math.PI / 4);   // спрайт смотрит головкой вверх-вправо
+  ctx.shadowColor = "rgba(0, 0, 0, .7)"; ctx.shadowBlur = k * 1.5;     // тень — чтобы кирка не сливалась с камнем
   ctx.drawImage(pkPickSprite(pk.level), -PK_GRIP[0] * k, -PK_GRIP[1] * k, 16 * k, 16 * k);
   ctx.restore();
 }
@@ -2355,7 +2359,7 @@ function pkFrame(now) {
     if (r.t >= n * r.step) {                   // прочность кончилась — кирка разлетается
       const last = path[n - 1];
       pk.lastPos = { x: last.x + 0.5, y: last.y + 0.5 };
-      pkBits(last.x + 0.5, last.y + 0.3, [...PK_PICK[pk.level].slice(0, 3), "#9C7637", "#6B511F"], 22, 1.3);
+      pkBits(last.x + 0.5, last.y + 0.3, [PK_PICK[pk.level].M, PK_PICK[pk.level].L, PK_PICK[pk.level].H, PK_STICK.i, PK_STICK.k], 22, 1.3);
       pk.hidden = true;
       pk.run = null;
       r.done();
