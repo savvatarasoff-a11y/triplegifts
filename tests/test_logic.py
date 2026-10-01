@@ -38,24 +38,44 @@ def test_plinko_tables():
     assert len(path) == 12 and bucket == sum(path) and mult == g.PLINKO_TABLES[(12, "medium")][bucket]
 
 
-def test_pickaxe_rtp_and_dig():
+def test_pickaxe_physics_and_rtp():
     import random
     for lv in g.PICKAXES:
-        assert 0.92 < g.pickaxe_rtp(lv) <= g.PICKAXE_RTP                       # точный расчёт, не выше 93%
-        rng = random.Random(3)
-        n = 30_000
-        xs = [g.pickaxe_dig(lv, rng)[1] for _ in range(n)]
-        mean = sum(xs) / n
-        se = (sum((x - mean) ** 2 for x in xs) / n / n) ** 0.5             # у алмазной кирки огромный разброс
-        assert abs(mean - g.pickaxe_rtp(lv)) < 4 * se + 0.01, lv               # симуляция сходится с расчётом
+        assert 0.92 < g.pickaxe_rtp(lv) <= g.PICKAXE_RTP                       # по откалиброванным счётчикам
+    # руды одной прочности ведут себя одинаково → E[выигрыш] раскладывается по классам; сверяем со «сырой» симуляцией
+    rng = random.Random(11)
+    counts = g.pickaxe_class_counts("iron", 1500, rng)
+    for k, v in counts.items():
+        assert abs(v - g.PICKAXE_CLASS_COUNTS["iron"][k]) < 0.15 * g.PICKAXE_CLASS_COUNTS["iron"][k] + 0.05, k
     # дороже кирка — крупнее самая ценная руда
     tops = [g.PICKAXE_TABLES[lv]["emerald"] for lv in g.PICKAXES]
     assert tops == sorted(tops)
-    hits, mult = g.pickaxe_dig("gold", random.Random(1))
-    assert hits[-1]["hp"] == 0 and all(h["hp"] > 0 for h in hits[:-1])
-    total = sum(h["m"] + sum(b["m"] for b in h.get("boom", [])) for h in hits)
-    assert mult == round(min(total, g.PICKAXE_MAX_X), 2)
-    assert all(len(h["boom"]) == g.PICKAXE_TNT_BLAST for h in hits if h["t"] == "tnt")
+    run = g.pickaxe_run("gold", rng=random.Random(1))
+    ev = run["events"]
+    assert ev and ev[-1]["hp"] == 0 and all(e["t"] > 0 for e in ev)
+    assert all(a["t"] <= b["t"] for a, b in zip(ev, ev[1:]))
+    assert len(run["world"][0]) == g.PICK_COLS and set(run["world"][0]) == {"g"}       # сверху трава
+    # прочность кирки падает ровно на 1 за касание блока (стены бесплатны, починка добавляет)
+    hp = g.PICKAXE_HP
+    for e in ev:
+        if e["c"] is not None:
+            hp -= 1
+        rep = sum(1 for bx, by, _ in e["br"] if run["world"][by][bx] == "h")
+        hp = min(g.PICKAXE_HP, hp + rep * g.PICKAXE_REPAIR)
+        assert e["hp"] == max(0, hp)
+    # каждый сломанный блок получил ровно столько ударов, сколько у него HP (или снесён взрывом TNT)
+    hits, broke = {}, {}
+    for e in ev:
+        if e["c"]:
+            k = tuple(e["c"]); hits[k] = hits.get(k, 0) + 1
+        for bx, by, m in e["br"]:
+            broke[(bx, by)] = m
+    codes = {v: k for k, v in g.PICK_CODES.items()}
+    for (bx, by) in broke:
+        t = codes[run["world"][by][bx]]
+        assert hits.get((bx, by), 0) <= g.PICK_HARD[t]
+    total = sum(m for m in broke.values())
+    assert run["mult"] == round(min(total, g.PICKAXE_MAX_X), 2)
 
 
 def test_mines_multiplier_expected_value():

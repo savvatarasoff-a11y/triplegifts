@@ -108,21 +108,27 @@ def plinko_drop(rows: int, risk: str, rng: random.Random = RNG) -> tuple[list[in
 
 
 # ---------------- Кирка ----------------
-# Кирка с запасом прочности сама копает шахту: каждый блок отнимает прочность, руды платят долю ставки,
-# TNT взрывает соседние блоки бесплатно, стрелка чинит кирку. Игра кончается, когда прочность на нуле.
-# Выплаты подобраны так, чтобы матожидание (точный расчёт динамикой по прочности) было ровно PICKAXE_RTP.
+# Кирка летает по шахте под действием гравитации и отскакивает от каждого блока, которого коснулась.
+# Каждое касание снимает 1 прочности кирки и 1 HP блока; HP блока зависит от его ценности. Сломанная руда платит,
+# TNT взрывает всё вокруг, блок починки возвращает кирке прочность. Игра кончается, когда прочность на нуле.
+# Всю физику считает сервер; приложение получает мир и точки отскоков и рисует те же параболы.
 
 PICKAXE_RTP = 0.93
-PICKAXE_HP = 100
-PICKAXE_MAX_HITS = 400        # страховка от бесконечной починки (на RTP не влияет — только снижает)
+PICKAXE_HP = 60
 PICKAXE_MAX_X = 5000          # потолок выигрыша за игру, в ставках
-PICKAXE_TNT_BLAST = 4         # сколько соседних блоков сносит TNT
-PICKAXE_REPAIR = 30           # сколько прочности возвращает стрелка
+PICKAXE_REPAIR = 10           # сколько прочности возвращает блок починки
+PICK_COLS = 7
+PICK_G = 22.0                 # гравитация, клеток/с²
+PICK_DT = 1 / 240             # шаг физики, с
+PICK_R = 0.3                  # радиус кирки, клеток
+PICK_REST = 0.78              # упругость отскока
+PICK_VMIN, PICK_VMAX = 6.0, 12.0
+PICK_MAX_T = 240.0            # страховка: дольше 4 минут игра не идёт
+# HP блоков по ценности; руды одной прочности в физике неотличимы — на этом держится точный расчёт RTP ниже
+PICK_HARD = {"grass": 1, "dirt": 1, "tnt": 1, "repair": 1, "stone": 2, "coal": 2, "copper": 2,
+             "iron": 3, "gold": 3, "redstone": 3, "lapis": 3, "diamond": 5, "emerald": 5}
+_PAY_CLASSES = (2, 3, 5)
 
-# тип: (прочность, которую отнимает блок; сырая выплата в ставках — ниже масштабируется до PICKAXE_RTP)
-_PICK_BLOCKS = {"dirt": (3, 0.0), "stone": (5, 0.0), "coal": (5, 1.0), "copper": (6, 1.0), "iron": (6, 1.0),
-                "gold": (6, 1.0), "redstone": (6, 1.0), "lapis": (6, 1.0), "diamond": (8, 1.0), "emerald": (8, 1.0),
-                "tnt": (0, 0.0), "repair": (-PICKAXE_REPAIR, 0.0)}
 # по кирке: веса блоков и относительная ценность руд (дороже кирка — реже, но крупнее руды)
 _PICK_LEVELS = {
     "iron":    {"w": {"dirt": 26, "stone": 34, "coal": 10, "copper": 7, "iron": 6, "gold": 5, "redstone": 4, "lapis": 3,
@@ -140,64 +146,154 @@ _PICK_LEVELS = {
 }
 PICKAXES = tuple(_PICK_LEVELS)
 ORES = ("coal", "copper", "iron", "gold", "redstone", "lapis", "diamond", "emerald")
+# Среднее число сломанных блоков каждого класса прочности за игру (Монте-Карло: 60 000 игр, у алмазной — 120 000;
+# пересчитать: pickaxe_class_counts). Тип блока внутри класса на физику не влияет, поэтому
+# E[выигрыш] = Σ по классам E[N_класса] × средняя ценность руды класса — без шума от редких изумрудов.
+PICKAXE_CLASS_COUNTS = {
+    "iron": {2: 16.6596, 3: 4.9127, 5: 0.2287},
+    "gold": {2: 18.2105, 3: 3.8484, 5: 0.1294},
+    "diamond": {2: 19.3552, 3: 2.9146, 5: 0.0623},
+}
 
 
-def _pick_value(weights: dict, pays: dict) -> float:
-    """Матожидание суммы выплат за игру (в ставках): V(h) = Σ p·(pay + V(h − cost)), V(h ≤ 0) = 0."""
-    total = sum(weights.values())
-    p = {t: w / total for t, w in weights.items()}
-    plain = [t for t in weights if t not in ("tnt", "repair")]
-    pp = sum(p[t] for t in plain)
-    blast = PICKAXE_TNT_BLAST * sum(p[t] * pays.get(t, 0) for t in plain) / pp     # TNT: 4 случайных обычных блока
-    v = [0.0] * (PICKAXE_HP + 1)
-    for _ in range(500):                       # починка ссылается на большую прочность — считаем итерациями
-        new = [0.0] * (PICKAXE_HP + 1)
-        for h in range(1, PICKAXE_HP + 1):
-            acc = 0.0
-            for t, pt in p.items():
-                cost = _PICK_BLOCKS[t][0]
-                nh = min(PICKAXE_HP, h - cost)
-                acc += pt * (pays.get(t, 0) + (blast if t == "tnt" else 0) + (v[nh] if nh > 0 else 0))
-            new[h] = acc
-        if max(abs(a - b) for a, b in zip(new, v)) < 1e-12:
-            break
-        v = new
-    return new[PICKAXE_HP]
+def pickaxe_run(level: str, pays: dict[str, float] | None = None, rng: random.Random = RNG, record: bool = True
+                ) -> dict[str, Any]:
+    """Одна партия: мир, точки отскоков (t, x, y, vx, vy, клетка, прочность, сломанные блоки), итог."""
+    weights = _PICK_LEVELS[level]["w"]
+    pays = PICKAXE_TABLES[level] if pays is None else pays
+    types, ws = list(weights), list(weights.values())
+    world: dict[tuple[int, int], list] = {}
+
+    def get(x: int, y: int):
+        if x < 0 or x >= PICK_COLS:
+            return "wall"
+        if y < 0:
+            return None
+        k = (x, y)
+        if k not in world:
+            t = "grass" if y == 0 else rng.choices(types, ws)[0]
+            world[k] = [t, PICK_HARD[t]]
+        c = world[k]
+        return c if c[1] > 0 else None
+
+    def smash(cx: int, cy: int, out: list) -> None:
+        c = get(cx, cy)
+        if c is None or c == "wall":
+            return
+        c[1] = 0
+        out.append((cx, cy, c[0]))
+        if c[0] == "tnt":                       # взрыв: всё вокруг ломается сразу
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx or dy:
+                        smash(cx + dx, cy + dy, out)
+
+    x, y = 3.5, -1.6
+    vx, vy = round(rng.uniform(-3, 3), 4), 0.0
+    start = {"t": 0, "x": x, "y": y, "vx": round(vx, 4), "vy": vy}
+    hp, t, total = PICKAXE_HP, 0.0, 0.0
+    events: list[dict[str, Any]] = []
+    counts = {k: 0 for k in _PAY_CLASSES}
+    dt, g, r = PICK_DT, PICK_G, PICK_R
+    while hp > 0 and t < PICK_MAX_T:
+        nx = x + vx * dt
+        ny = y + vy * dt + 0.5 * g * dt * dt
+        nvy = vy + g * dt
+        best = None
+        for cx in range(math.floor(nx - r), math.floor(nx + r) + 1):
+            for cy in range(math.floor(ny - r), math.floor(ny + r) + 1):
+                c = get(cx, cy)
+                if c is None:
+                    continue
+                px, py = min(max(nx, cx), cx + 1), min(max(ny, cy), cy + 1)
+                dx, dy = nx - px, ny - py
+                d = math.hypot(dx, dy)
+                if d >= r:
+                    continue
+                if d < 1e-9:
+                    dx, dy = -vx, -nvy
+                    d = math.hypot(dx, dy) or 1.0
+                if best is None or r - d > best[0]:
+                    best = (r - d, cx, cy, dx / d, dy / d, c)
+        t += dt
+        if best is None:
+            x, y, vy = nx, ny, nvy
+            continue
+        pen, cx, cy, nxn, nyn, c = best
+        x, y = nx + nxn * pen, ny + nyn * pen
+        dot = vx * nxn + nvy * nyn
+        rvx, rvy = vx - (1 + PICK_REST) * dot * nxn, nvy - (1 + PICK_REST) * dot * nyn
+        ang = math.atan2(rvy, rvx) + rng.uniform(-0.45, 0.45)
+        sp = min(PICK_VMAX, max(PICK_VMIN, math.hypot(rvx, rvy)))
+        vx, vy = math.cos(ang) * sp, math.sin(ang) * sp
+        if vx * nxn + vy * nyn < 0.35 * sp:     # отскок всегда от блока, а не вдоль него
+            ang = math.atan2(nyn, nxn) + rng.uniform(-0.8, 0.8)
+            vx, vy = math.cos(ang) * sp, math.sin(ang) * sp
+        broken: list = []
+        if c != "wall":
+            hp -= 1
+            c[1] -= 1
+            if c[1] <= 0:
+                c[1] = 1
+                smash(cx, cy, broken)
+                for _, _, bt in broken:
+                    if bt == "repair":
+                        hp = min(PICKAXE_HP, hp + PICKAXE_REPAIR)
+                    if PICK_HARD[bt] in counts:
+                        counts[PICK_HARD[bt]] += 1
+                    total += pays.get(bt, 0)
+        if record:
+            events.append({"t": round(t, 4), "x": round(x, 4), "y": round(y, 4), "vx": round(vx, 4), "vy": round(vy, 4),
+                           "c": None if c == "wall" else [cx, cy], "hp": max(0, hp),
+                           "br": [[bx, by, round(pays.get(bt, 0), 4)] for bx, by, bt in broken]})
+    out: dict[str, Any] = {"mult": round(min(total, PICKAXE_MAX_X), 2), "counts": counts, "t": round(t, 4)}
+    if record:
+        rows = max(y for _, y in world) + 10
+        for xx in range(PICK_COLS):             # мир с запасом ниже, чтобы камере было что показать
+            for yy in range(rows):
+                get(xx, yy)
+        out["world"] = ["".join(PICK_CODES[world[(xx, yy)][0]] for xx in range(PICK_COLS)) for yy in range(rows)]
+        out["events"] = events
+        out["start"] = start
+    return out
+
+
+PICK_CODES = {"grass": "g", "dirt": "d", "stone": "s", "coal": "c", "copper": "u", "iron": "i", "gold": "o",
+              "redstone": "r", "lapis": "l", "diamond": "a", "emerald": "e", "tnt": "t", "repair": "h"}
+
+
+def pickaxe_class_counts(level: str, n: int, rng: random.Random) -> dict[int, float]:
+    acc = {k: 0 for k in _PAY_CLASSES}
+    for _ in range(n):
+        for k, v in pickaxe_run(level, {}, rng, record=False)["counts"].items():
+            acc[k] += v
+    return {k: v / n for k, v in acc.items()}
+
+
+def _class_value(level: str, pays: dict[str, float], counts: dict) -> float:
+    w = _PICK_LEVELS[level]["w"]
+    ev = 0.0
+    for k in _PAY_CLASSES:
+        members = [t for t in w if PICK_HARD.get(t) == k]
+        wsum = sum(w[t] for t in members)
+        ev += counts[k] * sum(w[t] * pays.get(t, 0) for t in members) / wsum
+    return ev
 
 
 def _pick_table(level: str) -> dict[str, float]:
+    counts = PICKAXE_CLASS_COUNTS[level]
     lv = _PICK_LEVELS[level]
-    raw = _pick_value(lv["w"], lv["v"])
-    f = PICKAXE_RTP / raw
-    # округляем вниз до тысячных — RTP не превышает PICKAXE_RTP
-    return {t: math.floor(v * f * 1000) / 1000 for t, v in lv["v"].items()}
+    if not counts:
+        return dict(lv["v"])
+    f = PICKAXE_RTP / _class_value(level, lv["v"], counts)
+    return {t: math.floor(v * f * 1000) / 1000 for t, v in lv["v"].items()}   # вниз — RTP не выше PICKAXE_RTP
 
 
 PICKAXE_TABLES = {lv: _pick_table(lv) for lv in PICKAXES}
 
 
 def pickaxe_rtp(level: str) -> float:
-    return _pick_value(_PICK_LEVELS[level]["w"], PICKAXE_TABLES[level])
-
-
-def pickaxe_dig(level: str, rng: random.Random = RNG) -> tuple[list[dict[str, Any]], float]:
-    """Сыгранная партия: список ударов {t, m, hp[, boom]} и общий множитель."""
-    weights = _PICK_LEVELS[level]["w"]
-    pays = PICKAXE_TABLES[level]
-    types, ws = list(weights), list(weights.values())
-    plain = [t for t in types if t not in ("tnt", "repair")]
-    plain_w = [weights[t] for t in plain]
-    hp, total, hits = PICKAXE_HP, 0.0, []
-    while hp > 0 and len(hits) < PICKAXE_MAX_HITS:
-        t = rng.choices(types, ws)[0]
-        hp = min(PICKAXE_HP, hp - _PICK_BLOCKS[t][0])
-        hit: dict[str, Any] = {"t": t, "m": pays.get(t, 0), "hp": max(0, hp)}
-        total += hit["m"]
-        if t == "tnt":
-            hit["boom"] = [{"t": b, "m": pays.get(b, 0)} for b in rng.choices(plain, plain_w, k=PICKAXE_TNT_BLAST)]
-            total += sum(b["m"] for b in hit["boom"])
-        hits.append(hit)
-    return hits, round(min(total, PICKAXE_MAX_X), 2)
+    return _class_value(level, PICKAXE_TABLES[level], PICKAXE_CLASS_COUNTS[level])
 
 
 # ---------------- Мины ----------------

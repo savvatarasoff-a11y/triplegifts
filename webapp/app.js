@@ -1907,7 +1907,7 @@ const PK_PICK = {
 const PK_BITS = { dirt: ["#8A5A2E", "#68421F", "#996638"], grass: ["#62C24A", "#8A5A2E", "#4AA037"],
   stone: ["#888D93", "#6E7379", "#A3A8AE"], tnt: ["#DB3B2E", "#ECECEC", "#8E1A14", "#FFB13B"],
   repair: ["#52E86A", "#E3A92B", "#B6FFC2"] };
-const pk = { level: "iron", run: null, world: null, raf: 0, fast: false, camY: -2.3, lastPos: null, last: 0, parts: [], texts: [],
+const pk = { level: "iron", run: null, world: null, raf: 0, fast: false, camY: -2.6, trail: [], lastPos: null, last: 0, parts: [], texts: [],
   seed: 1, tex: {}, hp: null, sum: null, bet: 0, cur: "stars", hidden: false, clouds: null };
 
 function pkRand(seed) {   // mulberry32 — детерминированный генератор для текстур и декора
@@ -2053,8 +2053,6 @@ const PK_PICK_ART = [
   "................",
   "................",
 ];
-const PK_GRIP = [2.5, 13.5];      // где кирку держат
-const PK_REACH = 12.5;            // от хвата до середины головки
 const PK_STICK = { b: "#291E0B", e: "#4B3418", i: "#674E20", k: "#8A6727" };
 function pkPickSprite(level) {
   const key = `pick:${level}`;
@@ -2075,37 +2073,20 @@ function pkDeco(x, y) {     // блоки вокруг шахты — прост
   return v < 0.16 && y < 6 ? "dirt" : "stone";
 }
 
-// Раскладываем удары сервера по клеткам: кирка идёт в основном вниз, иногда вбок, не возвращаясь в выкопанное
-function pkWorld(hits) {
-  const rnd = pkRand(pk.seed * 7 + 3);
+// Мир партии приходит с сервера строками кодов; у каждой клетки — тип и оставшиеся HP
+const PK_CODE = { g: "grass", d: "dirt", s: "stone", c: "coal", u: "copper", i: "iron", o: "gold", r: "redstone",
+  l: "lapis", a: "diamond", e: "emerald", t: "tnt", h: "repair" };
+const now = () => performance.now();
+const PK_HARD = { grass: 1, dirt: 1, tnt: 1, repair: 1, stone: 2, coal: 2, copper: 2, iron: 3, gold: 3, redstone: 3,
+  lapis: 3, diamond: 5, emerald: 5 };
+
+function pkWorld(rows) {
   const cells = new Map();
-  const path = [];
-  let cx = 3, cy = -1;
-  const free = (x, y) => x >= 0 && x < PK_COLS && y >= 0 && !cells.has(pkKey(x, y));
-  for (const h of hits) {
-    const opts = [[cx, cy + 1, 7], [cx - 1, cy, 2], [cx + 1, cy, 2]].filter(([x, y]) => free(x, y));
-    let nx = cx, ny = cy + 1;
-    if (opts.length) {
-      let s = opts.reduce((a, o) => a + o[2], 0) * rnd();
-      [nx, ny] = opts.find((q) => (s -= q[2]) <= 0) || opts[opts.length - 1];
-    } else {
-      while (cells.has(pkKey(nx, ny))) ny += 1;
-    }
-    cells.set(pkKey(nx, ny), h.t);
-    const step = { x: nx, y: ny, t: h.t, m: h.m, hp: h.hp, boom: [] };
-    if (h.boom) {
-      const around = [[0, 1], [-1, 0], [1, 0], [-1, 1], [1, 1], [0, 2], [-1, -1], [1, -1], [-2, 0], [2, 0], [0, -1]]
-        .map(([dx, dy]) => [nx + dx, ny + dy]).filter(([x, y]) => free(x, y));
-      h.boom.forEach((b, i) => {
-        const c = around[i];
-        if (c) cells.set(pkKey(c[0], c[1]), b.t);
-        step.boom.push({ x: c ? c[0] : nx, y: c ? c[1] : ny, t: b.t, m: b.m, cell: !!c });
-      });
-    }
-    path.push(step);
-    cx = nx; cy = ny;
-  }
-  return { cells, path, mined: new Set() };
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
+    const t = PK_CODE[ch] || "stone";
+    cells.set(pkKey(x, y), { t, hp: PK_HARD[t], max: PK_HARD[t] });
+  }));
+  return { cells, mined: new Set(), rows: rows.length };
 }
 
 function pkAmount(mult) {
@@ -2115,7 +2096,7 @@ function pkAmount(mult) {
 }
 
 function pkHud() {
-  const max = (state.config && state.config.pickaxe && state.config.pickaxe.hp) || 100;
+  const max = (state.config && state.config.pickaxe && state.config.pickaxe.hp) || 60;
   const hp = pk.hp === null ? max : pk.hp;
   $("#pk-hp").textContent = `${hp}/${max}`;
   $("#pk-hpbar").style.width = `${Math.max(0, Math.min(100, hp / max * 100))}%`;
@@ -2148,104 +2129,92 @@ function pkExplode(x, y) {
   pkBits(x, y, PK_BITS.tnt, 26, 1.8);
   pkSparks(x, y, "#FFD45C", 18);
 }
+const pkBitCols = (t) => PK_BITS[t] || (PK_ORE[t] ? [PK_ORE[t][0], "#888D93", PK_ORE[t][1], "#6E7379"] : PK_BITS.stone);
 
-function pkBreak(r, idx) {
-  const s = pk.world.path[idx];
+// Отскок с сервера: удар по блоку (трещина/поломка), выплаты, взрывы, починка
+function pkApply(ev) {
+  const r = pk.run;
+  r.seg = ev;
+  r.spin = -r.spin * (0.8 + Math.random() * 0.4);            // после отскока кирка крутится в другую сторону
   const text = (x, y, txt, color, big) => pk.texts.push({ x: x + 0.5, y: y + 0.35, txt, color, big, life: 1, age: 0 });
-  const bits = (t) => PK_BITS[t] || (PK_ORE[t] ? [PK_ORE[t][0], "#888D93", PK_ORE[t][1], "#6E7379"] : PK_BITS.stone);
-  pk.world.mined.add(pkKey(s.x, s.y));
-  pk.hp = s.hp;
-  pk.sum += s.m;
-  pkBits(s.x + 0.5, s.y + 0.5, bits(s.t), 14);
-  if (PK_ORE[s.t]) pkSparks(s.x + 0.5, s.y + 0.5, PK_ORE[s.t][2], 8);
-  if (s.m > 0) {
-    text(s.x, s.y, `+${pkAmount(s.m)}`, PK_ORE[s.t] ? PK_ORE[s.t][0] : "#fff", s.m >= 1);
-    haptic();
+  if (ev.c) {
+    const cell = pk.world.cells.get(pkKey(ev.c[0], ev.c[1]));
+    if (cell) {
+      cell.hp = Math.max(0, cell.hp - 1);
+      pkBits(ev.x, ev.y, pkBitCols(cell.t), 4, 0.5);          // крошка от удара
+      cell.shake = 1;
+    }
+    if (now() - (r.lastHaptic || 0) > 90) { haptic(); r.lastHaptic = now(); }
   }
-  if (s.t === "repair") { text(s.x, s.y, "+30 ❤", "#5CFF8F", false); pkSparks(s.x + 0.5, s.y + 0.5, "#9CFFB0", 14); }
-  if (s.t === "tnt") {
-    r.flash = 1;
-    haptic("win");
-    pkExplode(s.x + 0.5, s.y + 0.5);
-    s.boom.forEach((b) => {
-      if (b.cell) { pk.world.mined.add(pkKey(b.x, b.y)); pkBits(b.x + 0.5, b.y + 0.5, bits(b.t), 8, 1.4); }
-      pk.sum += b.m;
-      if (b.m > 0) text(b.x, b.y, `+${pkAmount(b.m)}`, PK_ORE[b.t] ? PK_ORE[b.t][0] : "#fff", b.m >= 1);
-    });
+  for (const [bx, by, m] of ev.br) {
+    const cell = pk.world.cells.get(pkKey(bx, by));
+    const t = cell ? cell.t : "stone";
+    pk.world.mined.add(pkKey(bx, by));
+    pkBits(bx + 0.5, by + 0.5, pkBitCols(t), 14);
+    if (PK_ORE[t]) pkSparks(bx + 0.5, by + 0.5, PK_ORE[t][2], 8);
+    if (t === "tnt") { r.flash = 1; haptic("win"); pkExplode(bx + 0.5, by + 0.5); }
+    if (t === "repair") { text(bx, by, `+${(state.config && state.config.pickaxe && state.config.pickaxe.repair) || 10} ❤`, "#5CFF8F", false); pkSparks(bx + 0.5, by + 0.5, "#9CFFB0", 14); }
+    if (m > 0) { pk.sum += m; text(bx, by, `+${pkAmount(m)}`, PK_ORE[t] ? PK_ORE[t][0] : "#fff", m >= 1); }
   }
+  pk.hp = ev.hp;
   pkHud();
 }
 
-// Поза кирки: голова подлетает к блоку, замах, удар, блок ломается — кирка заходит в выкопанную клетку
-function pkPose(r) {
-  const start = { x: 3.5, y: -0.55 };
-  const t = performance.now();
-  if (!r) return { x: start.x, y: start.y + Math.sin(t / 420) * 0.06, dx: 0.45, dy: 0.9, swing: Math.sin(t / 650) * 0.08, crack: 0 };
-  const path = pk.world.path, n = path.length;
-  const i = Math.min(Math.floor(r.t / r.step), n - 1);
-  const p = Math.min(1, (r.t - i * r.step) / r.step);
-  const prev = i === 0 ? start : { x: path[i - 1].x + 0.5, y: path[i - 1].y + 0.5 };
-  const to = { x: path[i].x + 0.5, y: path[i].y + 0.5 };
-  let dx = to.x - prev.x, dy = to.y - prev.y;
-  const len = Math.hypot(dx, dy) || 1;
-  dx /= len; dy /= len;
-  const edge = { x: prev.x + (to.x - prev.x) * 0.5, y: prev.y + (to.y - prev.y) * 0.5 };
-  const lerp = (a, b, k) => a + (b - a) * k;
-  const ease = (k) => k * k * (3 - 2 * k);
-  let x, y, swing, strike = false;
-  if (p < 0.4) { const k = ease(p / 0.4); x = lerp(prev.x, edge.x, k); y = lerp(prev.y, edge.y, k); swing = -1.1 * k; }
-  else if (p < 0.62) { const k = (p - 0.4) / 0.22; x = edge.x; y = edge.y; swing = -1.1 + 1.45 * k * k; strike = true; }
-  else { const k = ease((p - 0.62) / 0.38); x = lerp(edge.x, to.x, k); y = lerp(edge.y, to.y, k); swing = 0.35 * (1 - k); }
-  return { x, y, dx, dy, swing, strike, crack: p >= 0.3 && p < 0.7 ? Math.min(1, (p - 0.3) / 0.32) : 0,
-    target: p < 0.7 ? path[i] : null };
+// Положение кирки — та же парабола, что считал сервер, от последнего отскока
+function pkPos(r) {
+  const s = r.seg, dt = Math.max(0, r.t - s.t), g = (state.config && state.config.pickaxe && state.config.pickaxe.g) || 22;
+  return { x: s.x + s.vx * dt, y: s.y + s.vy * dt + 0.5 * g * dt * dt };
 }
 
-function pkDrawPick(ctx, hx, hy, size, dx, dy, swing, alpha) {
-  // (hx, hy) — куда смотрит головка без замаха; вращаем вокруг хвата
-  const reach = PK_REACH / 16 * size;
-  const gx = hx - dx * reach, gy = hy - dy * reach;
-  const k = size / 16;
+function pkDrawSpin(ctx, cx, cy, size, ang, alpha) {
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.translate(gx, gy);
-  ctx.rotate(Math.atan2(dx, -dy) + swing - Math.PI / 4);   // спрайт смотрит головкой вверх-вправо
-  ctx.shadowColor = "rgba(0, 0, 0, .7)"; ctx.shadowBlur = k * 1.5;     // тень — чтобы кирка не сливалась с камнем
-  ctx.drawImage(pkPickSprite(pk.level), -PK_GRIP[0] * k, -PK_GRIP[1] * k, 16 * k, 16 * k);
+  ctx.translate(cx, cy);
+  ctx.rotate(ang);
+  ctx.shadowColor = "rgba(0, 0, 0, .7)"; ctx.shadowBlur = size / 12;
+  ctx.drawImage(pkPickSprite(pk.level), -size / 2, -size / 2, size, size);
   ctx.restore();
 }
 
+// Небо как в Minecraft: ровный градиент и блочные облака
 function pkSky(ctx, W, cell, sy) {
   const horizon = sy(0);
   if (horizon <= 0) return;
-  const g = ctx.createLinearGradient(0, horizon - cell * 4, 0, horizon);
-  g.addColorStop(0, "#4FA6E6"); g.addColorStop(1, "#CDEFFF");
+  const g = ctx.createLinearGradient(0, horizon - cell * 5, 0, horizon);
+  g.addColorStop(0, "#6E9BF5"); g.addColorStop(1, "#B9D2FF");
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, horizon);
-  const px = cell / 8;                        // «пиксель» пейзажа
-  ctx.fillStyle = "#FFF4B8"; ctx.fillRect(W - cell * 1.6, horizon - cell * 3.3, cell * 0.75, cell * 0.75);   // солнце
-  ctx.fillStyle = "rgba(255, 244, 184, .35)"; ctx.fillRect(W - cell * 1.6 - px, horizon - cell * 3.3 - px, cell * 0.75 + 2 * px, cell * 0.75 + 2 * px);
   if (!pk.clouds) {
     const r = pkRand(42);
-    pk.clouds = Array.from({ length: 5 }, () => ({ x: r(), y: 2.2 + r() * 1.6, w: 1.2 + r() * 1.6, v: 0.000004 + r() * 0.000006 }));
+    pk.clouds = Array.from({ length: 4 }, (_, i) => ({ x: r() + i * 0.3, y: 2.6 + r() * 1.6, w: 1.6 + r() * 1.4,
+      v: 0.0000025 + r() * 0.000003 }));
   }
-  const now = performance.now();
-  ctx.fillStyle = "rgba(255, 255, 255, .92)";
+  const t = now(), q = cell / 4;
   for (const c of pk.clouds) {
-    const cx = (((c.x + now * c.v) % 1.4) - 0.2) * W, cy = horizon - c.y * cell;
-    ctx.fillRect(cx, cy, c.w * cell, px * 2);
-    ctx.fillRect(cx + px * 2, cy - px * 2, c.w * cell - px * 5, px * 2);
-    ctx.fillRect(cx + px * 5, cy - px * 3.5, c.w * cell * 0.35, px * 2);
+    const cx = Math.round((((c.x + t * c.v) % 1.5) - 0.25) * W / q) * q, cy = Math.round((horizon - c.y * cell) / q) * q;
+    ctx.fillStyle = "rgba(255, 255, 255, .85)";
+    ctx.fillRect(cx, cy, Math.round(c.w * cell / q) * q, q * 2);
+    ctx.fillRect(cx + q * 2, cy - q, Math.round(c.w * cell * 0.55 / q) * q, q);
+    ctx.fillStyle = "rgba(210, 222, 245, .85)";
+    ctx.fillRect(cx, cy + q * 2, Math.round(c.w * cell / q) * q, q * 0.6);
   }
-  const ridge = (color, amp, base, f, ph) => {   // ступенчатые пиксельные горы
-    ctx.fillStyle = color;
-    for (let x = 0; x < W; x += px * 2) {
-      const h = base + amp * (0.5 + 0.5 * Math.sin(x / W * f + ph)) * (0.7 + 0.3 * Math.sin(x / W * f * 3.1 + ph * 2));
-      const hh = Math.round(h / px) * px;
-      ctx.fillRect(x, horizon - hh, px * 2 + 1, hh);
+}
+
+// Трещины по мере потери HP — как стадии разрушения блока в Minecraft
+function pkCracks(ctx, X, Y, cell, stage, seed) {
+  if (stage <= 0) return;
+  const rr = pkRand(seed), q = cell / PK_N;
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + stage * 0.4})`;
+  const lines = 2 + Math.floor(stage * 7);
+  for (let i = 0; i < lines; i++) {
+    let px = 8, py = 8, a = rr() * Math.PI * 2;
+    const len = 3 + Math.floor(stage * 6 * rr());
+    for (let j = 0; j < len; j++) {
+      a += (rr() - 0.5) * 1.2;
+      px += Math.cos(a); py += Math.sin(a);
+      if (px < 0 || px > 15 || py < 0 || py > 15) break;
+      ctx.fillRect(X + Math.floor(px) * q, Y + Math.floor(py) * q, q, q);
     }
-  };
-  ridge("#A9CBE6", cell * 1.3, cell * 0.4, 7, 1);
-  ridge("#7FB2D6", cell * 0.8, cell * 0.25, 11, 4);
-  ridge("#5E9E5A", cell * 0.3, cell * 0.12, 23, 2);     // лес у горизонта
+  }
 }
 
 function pkDraw() {
@@ -2270,34 +2239,38 @@ function pkDraw() {
   pkSky(ctx, W, cell, sy);
   const world = pk.world;
   const mined = (x, y) => !!world && world.mined.has(pkKey(x, y));
-  const now = performance.now();
+  const tnow = now();
   const y0 = Math.max(0, Math.floor(top)), y1 = Math.ceil(top + H / cell) + 1;
   const xs = Math.ceil(ox / cell) + 1;
   for (let y = y0; y <= y1; y++) {
+    const deep = y >= PK_DEEP ? 1 : 0;
     for (let x = -xs; x < PK_COLS + xs; x++) {
       if (mined(x, y)) {
         if (y === 0) continue;
-        ctx.drawImage(pkTexture("cave", Math.floor(pkHash(x, y, 5) * 3), y >= PK_DEEP ? 1 : 0), sx(x), sy(y), cell, cell);
-        // тени от соседних блоков внутрь туннеля
-        const sh = (x0, y0_, x1, y1_) => {
+        ctx.drawImage(pkTexture("cave", 0, deep), sx(x), sy(y), cell, cell);
+        const sh = (x0, y0_, x1, y1_) => {       // тени от соседних блоков внутрь выработки
           const g = ctx.createLinearGradient(x0, y0_, x1, y1_);
-          g.addColorStop(0, "rgba(0, 0, 0, .6)"); g.addColorStop(1, "rgba(0, 0, 0, 0)");
+          g.addColorStop(0, "rgba(0, 0, 0, .55)"); g.addColorStop(1, "rgba(0, 0, 0, 0)");
           ctx.fillStyle = g; ctx.fillRect(Math.min(x0, x1), Math.min(y0_, y1_), Math.abs(x1 - x0) || cell, Math.abs(y1_ - y0_) || cell);
         };
-        const X = sx(x), Y = sy(y), d = cell * 0.32;
-        if (!mined(x, y - 1) && y > 0) sh(X, Y, X, Y + d);
+        const X = sx(x), Y = sy(y), d = cell * 0.3;
+        if (!mined(x, y - 1) && y > 1) sh(X, Y, X, Y + d);
         if (!mined(x - 1, y)) sh(X, Y, X + d, Y);
         if (!mined(x + 1, y)) sh(X + cell, Y, X + cell - d, Y);
         continue;
       }
-      const t = (world && world.cells.get(pkKey(x, y))) || pkDeco(x, y);
-      const v = ["stone", "dirt", ...Object.keys(PK_ORE)].includes(t) ? Math.floor(pkHash(x, y, 9) * 3) : 0;
-      ctx.drawImage(pkTexture(t, v, y >= PK_DEEP ? 1 : 0), sx(x), sy(y), cell, cell);
+      const inField = world && x >= 0 && x < PK_COLS;
+      const cl = inField ? world.cells.get(pkKey(x, y)) : null;
+      const t = cl ? cl.t : pkDeco(x, y);
+      let X = sx(x), Y = sy(y);
+      if (cl && cl.shake > 0) { X += (Math.random() - 0.5) * cell * 0.06 * cl.shake; Y += (Math.random() - 0.5) * cell * 0.06 * cl.shake; }
+      ctx.drawImage(pkTexture(t, 0, deep), X, Y, cell, cell);
+      if (cl && cl.hp < cl.max) pkCracks(ctx, X, Y, cell, 1 - cl.hp / cl.max, x * 131 + y * 71);
       if (["gold", "diamond", "emerald", "lapis"].includes(t)) {      // мерцание ценной руды
-        const ph = (now / 1300 + pkHash(x, y, 3)) % 1;
+        const ph = (tnow / 1300 + pkHash(x, y, 3)) % 1;
         if (ph < 0.2) {
           const k = Math.sin(ph / 0.2 * Math.PI), s = cell * 0.13 * k;
-          const px = sx(x) + cell * (0.2 + pkHash(x, y, 4) * 0.6), py = sy(y) + cell * (0.2 + pkHash(x, y, 6) * 0.6);
+          const px = X + cell * (0.2 + pkHash(x, y, 4) * 0.6), py = Y + cell * (0.2 + pkHash(x, y, 6) * 0.6);
           ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * k})`;
           ctx.fillRect(px - s, py - cell * 0.02, s * 2, cell * 0.04);
           ctx.fillRect(px - cell * 0.02, py - s, cell * 0.04, s * 2);
@@ -2305,37 +2278,20 @@ function pkDraw() {
       }
     }
   }
-  const pose = pkPose(r);
-  if (pose.target && pose.crack > 0) {        // трещины на блоке, по которому бьём
-    const t = pose.target, cx = sx(t.x + 0.5), cy = sy(t.y + 0.5);
-    const rr = pkRand(t.x * 31 + t.y * 17 + pk.seed);
-    ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + pose.crack * 0.45})`;
-    const q = cell / PK_N;
-    for (let i = 0; i < 2 + Math.floor(pose.crack * 5); i++) {
-      let a = rr() * Math.PI * 2, px = cx, py = cy;
-      for (let j = 0; j < 4; j++) {
-        a += (rr() - 0.5) * 1.3;
-        px += Math.cos(a) * q * 1.6; py += Math.sin(a) * q * 1.6;
-        ctx.fillRect(Math.round((px - ox) / q) * q + ox, Math.round(py / q) * q, q, q);
-      }
-    }
-  }
+  const pos = r ? pkPos(r) : (pk.hidden && pk.lastPos ? pk.lastPos : { x: 3.5, y: -1.6 + Math.sin(tnow / 420) * 0.08 });
   // темнота на глубине: светло только вокруг кирки
-  const light = pk.hidden && pk.lastPos ? pk.lastPos : pose;
-  const depth = Math.max(0, Math.min(0.6, (light.y - 1.5) / 10));
+  const depth = Math.max(0, Math.min(0.6, (pos.y - 1.5) / 10));
   if (depth > 0) {
-    const lx = sx(light.x), ly = sy(light.y);
+    const lx = sx(pos.x), ly = sy(pos.y);
     const g = ctx.createRadialGradient(lx, ly, cell * 1.3, lx, ly, cell * 5.2);
     g.addColorStop(0, "rgba(255, 200, 120, 0)"); g.addColorStop(1, `rgba(4, 5, 10, ${depth})`);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
-  const size = cell * 1.45;
+  const size = cell * 1.05;
   if (!pk.hidden) {
-    if (pose.strike) {                          // шлейф замаха
-      pkDrawPick(ctx, sx(pose.x), sy(pose.y), size, pose.dx, pose.dy, pose.swing - 0.35, 0.18);
-      pkDrawPick(ctx, sx(pose.x), sy(pose.y), size, pose.dx, pose.dy, pose.swing - 0.18, 0.32);
-    }
-    pkDrawPick(ctx, sx(pose.x), sy(pose.y), size, pose.dx, pose.dy, pose.swing, 1);
+    const ang = r ? r.ang : -0.6 + Math.sin(tnow / 650) * 0.15;
+    if (r) pk.trail.forEach((p, i) => pkDrawSpin(ctx, sx(p.x), sy(p.y), size, p.a, 0.07 + i * 0.05));   // смаз движения
+    pkDrawSpin(ctx, sx(pos.x), sy(pos.y), size, ang, 1);
   }
   for (const q of pk.parts) {
     const a = Math.max(0, Math.min(1, q.life));
@@ -2373,25 +2329,34 @@ function pkDraw() {
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 }
 
-function pkFrame(now) {
-  const dt = Math.min(50, now - (pk.last || now));
-  pk.last = now;
+const PK_SPEED = 1.5;       // партия на сервере длится ~20 с — показываем быстрее
+
+function pkFrame(tf) {
+  const dt = Math.min(50, tf - (pk.last || tf));
+  pk.last = tf;
   const r = pk.run;
   if (r) {
     if (state.screen !== "pickaxe") r.t = Infinity;          // ушли с экрана — досчитываем мгновенно
-    r.t += dt * (pk.fast ? 6 : 1);
-    const path = pk.world.path, n = path.length;
-    while (r.broken < n && r.t >= (r.broken + 0.62) * r.step) pkBreak(r, r.broken++);
+    r.t += dt / 1000 * (pk.fast ? 6 : PK_SPEED);
+    while (r.i < r.events.length && r.events[r.i].t <= r.t) pkApply(r.events[r.i++]);
+    r.ang += r.spin * dt / 1000 * (pk.fast ? 3 : 1);
     if (r.flash > 0) r.flash = Math.max(0, r.flash - dt / 380);
-    if (r.t >= n * r.step) {                   // прочность кончилась — кирка разлетается
-      const last = path[n - 1];
-      pk.lastPos = { x: last.x + 0.5, y: last.y + 0.5 };
-      pkBits(last.x + 0.5, last.y + 0.3, [PK_PICK[pk.level].M, PK_PICK[pk.level].L, PK_PICK[pk.level].H, PK_STICK.i, PK_STICK.k], 22, 1.3);
+    if (r.t !== Infinity) {
+      const p = pkPos(r);
+      pk.trail.push({ x: p.x, y: p.y, a: r.ang });
+      if (pk.trail.length > 4) pk.trail.shift();
+    }
+    const last = r.events[r.events.length - 1];
+    if (r.i >= r.events.length && r.t >= last.t + 0.15) {   // прочность кончилась — кирка разлетается
+      pk.lastPos = { x: last.x, y: last.y };
+      pkBits(last.x, last.y, [PK_PICK[pk.level].M, PK_PICK[pk.level].L, PK_PICK[pk.level].H, PK_STICK.i, PK_STICK.k], 22, 1.3);
       pk.hidden = true;
       pk.run = null;
+      pk.trail = [];
       r.done();
     }
   }
+  if (pk.world) for (const cl of pk.world.cells.values()) if (cl.shake > 0) cl.shake = Math.max(0, cl.shake - dt / 160);
   for (const q of pk.parts) {
     q.life -= dt * (q.decay || 0.001);
     if (q.kind === "ring") { q.r += dt * 0.006; continue; }
@@ -2402,10 +2367,10 @@ function pkFrame(now) {
   pk.parts = pk.parts.filter((q) => q.life > 0);
   for (const t of pk.texts) { t.age += dt; t.y -= dt * 0.0008; t.life -= dt / 1400; }
   pk.texts = pk.texts.filter((t) => t.life > 0);
-  if (pk.run || !pk.hidden) {
-    const pose = pkPose(pk.run);
-    const target = Math.max(-2.3, pose.y - 2.6);           // камера держит кирку в верхней трети
-    pk.camY += (target - pk.camY) * Math.min(1, dt * 0.005);
+  if (pk.run) {
+    const p = pkPos(pk.run);
+    const target = Math.max(-2.6, p.y - 2.4);           // камера держит кирку чуть выше центра, под панелью
+    pk.camY += (target - pk.camY) * Math.min(1, dt * 0.007);
   }
   pkDraw();
   pk.raf = state.screen === "pickaxe" ? requestAnimationFrame(pkFrame) : 0;
@@ -2421,11 +2386,12 @@ function pkOres() {
   const img = (type) => `<img src="${pkTexture(type).toDataURL()}" alt="">`;
   $("#pk-ores").innerHTML = Object.keys(PK_ORE_NAMES).map((o) =>
     `<div>${img(o)}<b>×${fmtX(t[o]).replace(/^×/, "")}</b><span>${PK_ORE_NAMES[o]}</span></div>`).join("")
-    + `<div>${img("tnt")}<b>взрыв</b><span>TNT</span></div><div>${img("repair")}<b>+30 ❤</b><span>починка</span></div>`;
+    + `<div>${img("tnt")}<b>взрыв</b><span>TNT</span></div>`
+    + `<div>${img("repair")}<b>+${state.config.pickaxe.repair || 10} ❤</b><span>починка</span></div>`;
 }
 
 function pickaxeEnter() {
-  if (!pk.run) Object.assign(pk, { world: null, hidden: false, camY: -2.3, hp: null, sum: null });
+  if (!pk.run) Object.assign(pk, { world: null, hidden: false, camY: -2.6, hp: null, sum: null, trail: [] });
   pkOres();
   pkHud();
   pkKick();
@@ -2443,16 +2409,16 @@ async function pickaxePlay() {
     showBetTaken(bet);
     haptic();
     pk.seed = Math.floor(Math.random() * 1e9);
-    Object.assign(pk, { fast: false, parts: [], texts: [], bet, cur: r.cur, hp: r.hp, sum: 0, hidden: false,
-      camY: -2.3, world: pkWorld(r.hits) });
+    Object.assign(pk, { fast: false, parts: [], texts: [], trail: [], bet, cur: r.cur, hp: r.hp, sum: 0, hidden: false,
+      camY: -2.6, world: pkWorld(r.world) });
+    window.scrollTo({ top: 0, behavior: "smooth" });       // шахта — наверху экрана
     const res = $("#pk-result");
     res.className = "result";
     res.textContent = "Копаем…";
     btn.disabled = false;
     btn.textContent = "Быстрее ⏩";
-    const n = r.hits.length;
     await new Promise((resolve) => {
-      pk.run = { t: 0, step: Math.max(110, Math.min(300, 9000 / n)), broken: 0, flash: 0, done: resolve };
+      pk.run = { t: 0, i: 0, events: r.events, seg: r.start, ang: -0.6, spin: 9, flash: 0, done: resolve };
       pkHud();
       pkKick();
     });
