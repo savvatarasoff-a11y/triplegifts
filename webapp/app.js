@@ -1934,8 +1934,32 @@ function pkCanvas(grid, n) {
   return c;
 }
 
+// Текстуры камня и руд из Minecraft: атлас 9×2 (верхний ряд — камень, нижний — глубинный сланец)
+const PK_ATLAS = ["stone", "coal", "iron", "copper", "gold", "redstone", "emerald", "lapis", "diamond"];
+const PK_DEEP = 12;               // с этой глубины порода — глубинный сланец
+const pkAtlas = new Image();
+pkAtlas.onload = () => { pk.tex = {}; if (state.screen === "pickaxe") pkOres(); };
+pkAtlas.src = "static/mc/ores.png";
+
+function pkAtlasTile(type, deep) {
+  const base = type === "cave" ? "stone" : type;
+  const i = PK_ATLAS.indexOf(base);
+  if (i < 0 || !pkAtlas.naturalWidth) return null;
+  const key = `mc:${type}:${deep}`;
+  if (pk.tex[key]) return pk.tex[key];
+  const c = document.createElement("canvas");
+  c.width = c.height = PK_N;
+  const x = c.getContext("2d");
+  x.drawImage(pkAtlas, i * PK_N, deep * PK_N, PK_N, PK_N, 0, 0, PK_N, PK_N);
+  if (type === "cave") { x.fillStyle = "rgba(6, 8, 14, .7)"; x.fillRect(0, 0, PK_N, PK_N); }
+  pk.tex[key] = c;
+  return c;
+}
+
 // Пиксельные текстуры блоков 16×16 (у камня, земли и руд — по 3 варианта, чтобы стена не была «обоями»)
-function pkTexture(type, v = 0) {
+function pkTexture(type, v = 0, deep = 0) {
+  const mc = pkAtlasTile(type, deep);
+  if (mc) return mc;
   const key = `${type}:${v}`;
   if (pk.tex[key]) return pk.tex[key];
   const N = PK_N;
@@ -1995,7 +2019,7 @@ function pkTexture(type, v = 0) {
   }
   if (type === "cave") {
     for (let i = 0; i < grid.length; i++) grid[i] = pkShade(grid[i].startsWith("#") ? grid[i] : "#6E7379", -0.68);
-  } else {                                    // фаска: светлый верх-лево, тёмный низ-право — блоки читаются как кубы
+  } else if (type === "tnt" || type === "repair") {   // фаска только у «предметных» блоков: камень и земля бесшовные, как в Minecraft
     for (let i = 0; i < N; i++) {
       const lt = (col) => (col.startsWith("#") ? pkShade(col, 0.2) : col);
       const dk = (col) => (col.startsWith("#") ? pkShade(col, -0.32) : col);
@@ -2042,9 +2066,11 @@ function pkDeco(x, y) {     // блоки вокруг шахты — прост
   if (y === 0) return "grass";
   const v = pkHash(x, y);
   if (y < 3) return v < 0.72 ? "dirt" : "stone";
-  if (v < 0.045) return "gold";
-  if (v < 0.07) return "redstone";
-  if (v < 0.075 && y > 8) return "diamond";
+  if (v < 0.045) return "coal";
+  if (v < 0.07) return "iron";
+  if (v < 0.085) return "copper";
+  if (v < 0.1) return "gold";
+  if (v < 0.115) return "redstone";
   return v < 0.16 && y < 6 ? "dirt" : "stone";
 }
 
@@ -2250,7 +2276,7 @@ function pkDraw() {
     for (let x = -xs; x < PK_COLS + xs; x++) {
       if (mined(x, y)) {
         if (y === 0) continue;
-        ctx.drawImage(pkTexture("cave", Math.floor(pkHash(x, y, 5) * 3)), sx(x), sy(y), cell, cell);
+        ctx.drawImage(pkTexture("cave", Math.floor(pkHash(x, y, 5) * 3), y >= PK_DEEP ? 1 : 0), sx(x), sy(y), cell, cell);
         // тени от соседних блоков внутрь туннеля
         const sh = (x0, y0_, x1, y1_) => {
           const g = ctx.createLinearGradient(x0, y0_, x1, y1_);
@@ -2265,7 +2291,7 @@ function pkDraw() {
       }
       const t = (world && world.cells.get(pkKey(x, y))) || pkDeco(x, y);
       const v = ["stone", "dirt", "gold", "redstone", "diamond", "emerald"].includes(t) ? Math.floor(pkHash(x, y, 9) * 3) : 0;
-      ctx.drawImage(pkTexture(t, v), sx(x), sy(y), cell, cell);
+      ctx.drawImage(pkTexture(t, v, y >= PK_DEEP ? 1 : 0), sx(x), sy(y), cell, cell);
       if (PK_ORE[t] && t !== "redstone") {      // мерцание руды
         const ph = (now / 1300 + pkHash(x, y, 3)) % 1;
         if (ph < 0.2) {
