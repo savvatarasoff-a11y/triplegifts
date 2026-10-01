@@ -1934,7 +1934,7 @@ function pkCanvas(grid, n) {
   return c;
 }
 
-// Текстуры камня и руд из Minecraft: атлас 9×2 (верхний ряд — камень, нижний — глубинный сланец)
+// Текстуры из Minecraft: атлас 9×3 (ряд 0 — камень и руды, ряд 1 — то же в глубинном сланце, ряд 2 — трава и земля)
 const PK_ATLAS = ["stone", "coal", "iron", "copper", "gold", "redstone", "emerald", "lapis", "diamond"];
 const PK_DEEP = 12;               // с этой глубины порода — глубинный сланец
 const pkAtlas = new Image();
@@ -1943,14 +1943,15 @@ pkAtlas.src = "static/mc/ores.png";
 
 function pkAtlasTile(type, deep) {
   const base = type === "cave" ? "stone" : type;
-  const i = PK_ATLAS.indexOf(base);
+  let i = PK_ATLAS.indexOf(base), row = deep;
+  if (base === "grass" || base === "dirt") { i = base === "grass" ? 0 : 1; row = 2; }
   if (i < 0 || !pkAtlas.naturalWidth) return null;
   const key = `mc:${type}:${deep}`;
   if (pk.tex[key]) return pk.tex[key];
   const c = document.createElement("canvas");
   c.width = c.height = PK_N;
   const x = c.getContext("2d");
-  x.drawImage(pkAtlas, i * PK_N, deep * PK_N, PK_N, PK_N, 0, 0, PK_N, PK_N);
+  x.drawImage(pkAtlas, i * PK_N, row * PK_N, PK_N, PK_N, 0, 0, PK_N, PK_N);
   if (type === "cave") { x.fillStyle = "rgba(6, 8, 14, .7)"; x.fillRect(0, 0, PK_N, PK_N); }
   pk.tex[key] = c;
   return c;
