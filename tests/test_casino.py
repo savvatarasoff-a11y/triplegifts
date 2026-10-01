@@ -102,6 +102,15 @@ async def test_plinko(casino):
     for rows, risk in ((10, "low"), (8, "insane"), ("8", "low")):
         with pytest.raises(GameError):
             await casino.plinko(1, 10, rows, risk)
+
+
+async def test_pickaxe(casino):
+    await fund(casino, 1, 1000)
+    r = await casino.pickaxe(1, 100, "diamond")
+    assert r["hits"] and r["hits"][-1]["hp"] == 0 and r["win"] == g.payout(100, r["multiplier"])
+    assert r["balance"] == 900 + r["win"]
+    with pytest.raises(GameError):
+        await casino.pickaxe(1, 10, "wood")
     with pytest.raises(GameError):
         await casino.mines_start(1, 10, 1)
 

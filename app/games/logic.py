@@ -107,6 +107,95 @@ def plinko_drop(rows: int, risk: str, rng: random.Random = RNG) -> tuple[list[in
     return path, bucket, PLINKO_TABLES[(rows, risk)][bucket]
 
 
+# ---------------- Кирка ----------------
+# Кирка с запасом прочности сама копает шахту: каждый блок отнимает прочность, руды платят долю ставки,
+# TNT взрывает соседние блоки бесплатно, стрелка чинит кирку. Игра кончается, когда прочность на нуле.
+# Выплаты подобраны так, чтобы матожидание (точный расчёт динамикой по прочности) было ровно PICKAXE_RTP.
+
+PICKAXE_RTP = 0.93
+PICKAXE_HP = 100
+PICKAXE_MAX_HITS = 400        # страховка от бесконечной починки (на RTP не влияет — только снижает)
+PICKAXE_MAX_X = 5000          # потолок выигрыша за игру, в ставках
+PICKAXE_TNT_BLAST = 4         # сколько соседних блоков сносит TNT
+PICKAXE_REPAIR = 30           # сколько прочности возвращает стрелка
+
+# тип: (прочность, которую отнимает блок; сырая выплата в ставках — ниже масштабируется до PICKAXE_RTP)
+_PICK_BLOCKS = {"dirt": (3, 0.0), "stone": (5, 0.0), "gold": (6, 1.0), "redstone": (6, 1.0),
+                "diamond": (8, 1.0), "emerald": (8, 1.0), "tnt": (0, 0.0), "repair": (-PICKAXE_REPAIR, 0.0)}
+# по кирке: веса блоков и относительная ценность руд (дороже кирка — реже, но крупнее руды)
+_PICK_LEVELS = {
+    "iron":    {"w": {"dirt": 30, "stone": 40, "gold": 14, "redstone": 6, "diamond": 1.2, "emerald": 0.25,
+                      "tnt": 2.2, "repair": 1.6},
+                "v": {"gold": 1, "redstone": 3, "diamond": 15, "emerald": 60}},
+    "gold":    {"w": {"dirt": 30, "stone": 42, "gold": 10, "redstone": 4, "diamond": 0.7, "emerald": 0.06,
+                      "tnt": 2.2, "repair": 1.6},
+                "v": {"gold": 1, "redstone": 5, "diamond": 40, "emerald": 1000}},
+    "diamond": {"w": {"dirt": 30, "stone": 45, "gold": 7, "redstone": 2.5, "diamond": 0.3, "emerald": 0.012,
+                      "tnt": 2.2, "repair": 1.6},
+                "v": {"gold": 1, "redstone": 8, "diamond": 100, "emerald": 8000}},
+}
+PICKAXES = tuple(_PICK_LEVELS)
+ORES = ("gold", "redstone", "diamond", "emerald")
+
+
+def _pick_value(weights: dict, pays: dict) -> float:
+    """Матожидание суммы выплат за игру (в ставках): V(h) = Σ p·(pay + V(h − cost)), V(h ≤ 0) = 0."""
+    total = sum(weights.values())
+    p = {t: w / total for t, w in weights.items()}
+    plain = [t for t in weights if t not in ("tnt", "repair")]
+    pp = sum(p[t] for t in plain)
+    blast = PICKAXE_TNT_BLAST * sum(p[t] * pays.get(t, 0) for t in plain) / pp     # TNT: 4 случайных обычных блока
+    v = [0.0] * (PICKAXE_HP + 1)
+    for _ in range(500):                       # починка ссылается на большую прочность — считаем итерациями
+        new = [0.0] * (PICKAXE_HP + 1)
+        for h in range(1, PICKAXE_HP + 1):
+            acc = 0.0
+            for t, pt in p.items():
+                cost = _PICK_BLOCKS[t][0]
+                nh = min(PICKAXE_HP, h - cost)
+                acc += pt * (pays.get(t, 0) + (blast if t == "tnt" else 0) + (v[nh] if nh > 0 else 0))
+            new[h] = acc
+        if max(abs(a - b) for a, b in zip(new, v)) < 1e-12:
+            break
+        v = new
+    return new[PICKAXE_HP]
+
+
+def _pick_table(level: str) -> dict[str, float]:
+    lv = _PICK_LEVELS[level]
+    raw = _pick_value(lv["w"], lv["v"])
+    f = PICKAXE_RTP / raw
+    # округляем вниз до тысячных — RTP не превышает PICKAXE_RTP
+    return {t: math.floor(v * f * 1000) / 1000 for t, v in lv["v"].items()}
+
+
+PICKAXE_TABLES = {lv: _pick_table(lv) for lv in PICKAXES}
+
+
+def pickaxe_rtp(level: str) -> float:
+    return _pick_value(_PICK_LEVELS[level]["w"], PICKAXE_TABLES[level])
+
+
+def pickaxe_dig(level: str, rng: random.Random = RNG) -> tuple[list[dict[str, Any]], float]:
+    """Сыгранная партия: список ударов {t, m, hp[, boom]} и общий множитель."""
+    weights = _PICK_LEVELS[level]["w"]
+    pays = PICKAXE_TABLES[level]
+    types, ws = list(weights), list(weights.values())
+    plain = [t for t in types if t not in ("tnt", "repair")]
+    plain_w = [weights[t] for t in plain]
+    hp, total, hits = PICKAXE_HP, 0.0, []
+    while hp > 0 and len(hits) < PICKAXE_MAX_HITS:
+        t = rng.choices(types, ws)[0]
+        hp = min(PICKAXE_HP, hp - _PICK_BLOCKS[t][0])
+        hit: dict[str, Any] = {"t": t, "m": pays.get(t, 0), "hp": max(0, hp)}
+        total += hit["m"]
+        if t == "tnt":
+            hit["boom"] = [{"t": b, "m": pays.get(b, 0)} for b in rng.choices(plain, plain_w, k=PICKAXE_TNT_BLAST)]
+            total += sum(b["m"] for b in hit["boom"])
+        hits.append(hit)
+    return hits, round(min(total, PICKAXE_MAX_X), 2)
+
+
 # ---------------- Мины ----------------
 
 MINES_CELLS = 25

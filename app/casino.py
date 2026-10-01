@@ -651,6 +651,22 @@ class Casino:
         return {"path": path, "bucket": bucket, "multiplier": mult, "win": win, "rows": rows, "risk": risk,
                 "balance": balance, "cur": cur}
 
+    # ---------- Кирка ----------
+
+    async def pickaxe(self, user_id: int, bet: Any, level: Any = "iron", cur: Any = money.STARS) -> dict:
+        cur = self._cur(cur)
+        bet = self._check_bet(bet, cur)
+        if level not in g.PICKAXES:
+            raise GameError("Кирка — железная, золотая или алмазная")
+        hits, mult = g.pickaxe_dig(level)
+        win = g.payout(bet, mult)
+        async with self.db.tx() as c:
+            await self._take(c, user_id, bet, "pickaxe", cur)
+            balance = await self._settle(c, user_id, "pickaxe", bet, win,
+                                         {"level": level, "hits": len(hits), "multiplier": mult}, cur)
+        return {"hits": hits, "multiplier": mult, "win": win, "level": level, "hp": g.PICKAXE_HP,
+                "balance": balance, "cur": cur}
+
     # ---------- кейсы ----------
 
     async def open_case(self, user_id: int, case: dict, count: Any = 1, cur: Any = money.STARS) -> dict:

@@ -122,7 +122,7 @@ async def cors(request: web.Request, handler: Handler) -> web.StreamResponse:
 
 # Игровые действия — только для подписчиков канала (вывод, пополнение и продажа подарков доступны всем)
 SUB_REQUIRED = frozenset({
-    "/api/slots", "/api/plinko", "/api/case", "/api/mines/start", "/api/crash/bet", "/api/pvp/bet",
+    "/api/slots", "/api/plinko", "/api/pickaxe", "/api/case", "/api/mines/start", "/api/crash/bet", "/api/pvp/bet",
     "/api/upgrade", "/api/bonus", "/api/free_case",
 })
 SUB_OK_STATUSES = {"member", "administrator", "creator", "restricted"}
@@ -319,6 +319,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                           "two_sevens": g.SLOT_TWO_SEVENS, "pair": g.SLOT_PAIR, "jackpot_nft": True},
                 "plinko": {"rows": list(g.PLINKO_ROWS), "risks": list(g.PLINKO_RISKS),
                            "tables": {f"{r}:{k}": t for (r, k), t in g.PLINKO_TABLES.items()}},
+                "pickaxe": {"levels": list(g.PICKAXES), "tables": g.PICKAXE_TABLES, "hp": g.PICKAXE_HP},
                 "cases": [
                     {**{k: c[k] for k in ("id", "name", "emoji", "price")},
                      **({"rtp": c["rtp"]} if is_admin else {}),
@@ -437,6 +438,12 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         data = await body(request)
         return web.json_response(await casino.plinko(request[USER_ID], data.get("bet"), data.get("rows", 12),
                                                      data.get("risk", "medium"), data.get("cur")))
+
+    @routes.post("/api/pickaxe")
+    async def pickaxe(request: web.Request) -> web.Response:
+        data = await body(request)
+        return web.json_response(await casino.pickaxe(request[USER_ID], data.get("bet"), data.get("level", "iron"),
+                                                      data.get("cur")))
 
     @routes.get("/api/case/drops")
     async def case_drops(_: web.Request) -> web.Response:

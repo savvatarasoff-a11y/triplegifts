@@ -8,10 +8,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const STAR = "★";
 const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null,
   cur: "stars", bal: { stars: 0, ton: 0 } };
-const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", mines: "Мины", crash: "Краш", case: "Кейс",
+const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", pickaxe: "Кирка", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
 const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
-const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko",
+const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка",
   cases: "Кейсы", case: "Кейс", free: "Кейс дня", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного золотого и белый: [фон, цвет текста]
 const PVP_COLORS = [["#F5B93C", "#1A1305"], ["#FFFFFF", "#0A0A0D"], ["#9A6508", "#FFFFFF"], ["#FFE3A3", "#0A0A0D"],
@@ -294,7 +294,7 @@ function go(screen) {
   window.scrollTo(0, 0);
   const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
     pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
-    upgrade: upgradeEnter, plinko: plinkoEnter, free: freeEnter };
+    upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, free: freeEnter };
   if (enter[screen]) enter[screen]();
 }
 
@@ -1888,6 +1888,575 @@ async function plinkoDrop() {
   }
 }
 
+// ---------- Кирка ----------
+// Исход партии считает сервер (список ударов); здесь только строим под него шахту и проигрываем анимацию.
+
+const PK_COLS = 7;
+const PK_N = 16;                        // размер текстуры блока в пикселях
+const PK_ORE = { gold: ["#FFE45C", "#E8A317", "#FFF8C9", "#7A5205"], redstone: ["#FF3B2F", "#B0140C", "#FFB3AA", "#5E0704"],
+  diamond: ["#7DF9FF", "#1CB8C9", "#E8FFFF", "#0A5E66"], emerald: ["#4CFF84", "#14A84A", "#D2FFE0", "#085A25"] };
+const PK_ORE_NAMES = { gold: "Золото", redstone: "Редстоун", diamond: "Алмаз", emerald: "Изумруд" };
+const PK_BANNER = { diamond: "АЛМАЗ!", emerald: "ИЗУМРУД!" };
+// цвета головки как у кирок Minecraft: блик, основной, тень, контур
+const PK_PICK = { iron: ["#FFFFFF", "#D8D8D8", "#A0A0A0", "#2B2B2B"], gold: ["#FFFFB5", "#FADC4A", "#D2A31B", "#3E2A07"],
+  diamond: ["#D5FFF6", "#4AEDD9", "#2A9C8E", "#0F2F2B"] };
+const PK_BITS = { dirt: ["#8A5A2E", "#68421F", "#996638"], grass: ["#62C24A", "#8A5A2E", "#4AA037"],
+  stone: ["#888D93", "#6E7379", "#A3A8AE"], tnt: ["#DB3B2E", "#ECECEC", "#8E1A14", "#FFB13B"],
+  repair: ["#52E86A", "#E3A92B", "#B6FFC2"] };
+const pk = { level: "iron", run: null, world: null, raf: 0, fast: false, camY: -2.3, lastPos: null, last: 0, parts: [], texts: [],
+  seed: 1, tex: {}, hp: null, sum: null, bet: 0, cur: "stars", hidden: false, banner: null, clouds: null };
+
+function pkRand(seed) {   // mulberry32 — детерминированный генератор для текстур и декора
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const pkHash = (x, y, salt = 0) => pkRand((x * 73856093) ^ (y * 19349663) ^ (pk.seed + salt))();
+const pkKey = (x, y) => `${x},${y}`;
+
+function pkShade(hex, k) {     // k > 0 — светлее, k < 0 — темнее
+  const n = parseInt(hex.slice(1), 16);
+  const f = (c) => Math.round(k >= 0 ? c + (255 - c) * k : c * (1 + k));
+  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
+
+function pkCanvas(grid, n) {
+  const c = document.createElement("canvas");
+  c.width = c.height = n;
+  const x = c.getContext("2d");
+  grid.forEach((col, i) => { if (col) { x.fillStyle = col; x.fillRect(i % n, Math.floor(i / n), 1, 1); } });
+  return c;
+}
+
+// Пиксельные текстуры блоков 16×16 (у камня, земли и руд — по 3 варианта, чтобы стена не была «обоями»)
+function pkTexture(type, v = 0) {
+  const key = `${type}:${v}`;
+  if (pk.tex[key]) return pk.tex[key];
+  const N = PK_N;
+  const r = pkRand([...key].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7));
+  const grid = new Array(N * N).fill(null);
+  const set = (i, j, col) => { if (i >= 0 && i < N && j >= 0 && j < N) grid[j * N + i] = col; };
+  const noise = (cols) => {
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const t = r();
+      set(i, j, cols[t < 0.42 ? 0 : t < 0.68 ? 1 : t < 0.88 ? 2 : 3]);
+    }
+  };
+  const STONE = ["#888D93", "#7E8389", "#969BA1", "#6E7379"];
+  const DIRT = ["#8A5A2E", "#7B4F27", "#996638", "#68421F"];
+  if (type === "dirt" || type === "grass") {
+    noise(DIRT);
+    for (let k = 0; k < 6; k++) { const i = Math.floor(r() * 15), j = Math.floor(r() * 15); set(i, j, "#B0855A"); set(i + 1, j + 1, "#5A3819"); }
+    if (type === "grass") {
+      const G = ["#62C24A", "#55B23E", "#74D25A", "#4AA037"];
+      for (let i = 0; i < N; i++) {
+        const h = 3 + Math.floor(r() * 3);
+        for (let j = 0; j < h; j++) set(i, j, j === 0 ? "#93E676" : G[Math.floor(r() * 4)]);
+        if (r() < 0.4) set(i, h, "#3E8A2E");
+      }
+    }
+  } else if (type === "tnt") {
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) set(i, j, i % 4 < 2 ? "#DB3B2E" : "#B92A20");
+    for (let j = 4; j <= 11; j++) for (let i = 0; i < N; i++) set(i, j, j === 4 ? "#FFFFFF" : j === 11 ? "#A8A8A8" : "#E9E9E9");
+    const T = [[0, 0], [1, 0], [2, 0], [1, 1], [1, 2], [1, 3], [1, 4]];
+    const NN = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [1, 1], [2, 2], [3, 3], [4, 0], [4, 1], [4, 2], [4, 3], [4, 4]];
+    T.forEach(([a, b]) => set(1 + a, 5 + b, "#1A1A1A"));
+    NN.forEach(([a, b]) => set(6 + a - 0, 5 + b, "#1A1A1A"));
+    T.forEach(([a, b]) => set(12 + a, 5 + b, "#1A1A1A"));
+  } else if (type === "repair") {
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) set(i, j, (i + j) % 3 ? "#E3A92B" : "#F2C04A");
+    for (let j = 2; j < N - 2; j++) for (let i = 2; i < N - 2; i++) set(i, j, j < 4 ? "#2A1E0C" : "#3A2A12");
+    const A = ["#52E86A", "#C2FFCC", "#1E9C38"];
+    for (let k = 0; k < 4; k++) for (let i = 7 - k; i <= 8 + k; i++) set(i, 3 + k, i === 7 - k ? A[1] : i === 8 + k ? A[2] : A[0]);
+    for (let j = 7; j < 13; j++) for (let i = 6; i <= 9; i++) set(i, j, i === 6 ? A[1] : i === 9 ? A[2] : A[0]);
+  } else {
+    noise(STONE);
+    for (let k = 0; k < 3; k++) {            // трещинки в камне
+      let i = Math.floor(r() * N), j = Math.floor(r() * N);
+      for (let s = 0; s < 4; s++) { set(i, j, "#5F646A"); i += r() < 0.5 ? 1 : -1; j += 1; }
+    }
+    const ore = PK_ORE[type];
+    if (ore) {                                // кристаллы руды: тёмная обводка, цвет, блик
+      [[2, 2], [9, 1], [5, 6], [11, 8], [1, 11], [8, 12]].forEach(([bx, by]) => {
+        if (r() < 0.12) return;
+        const ox = bx + Math.floor(r() * 2), oy = by + Math.floor(r() * 2);
+        const shape = [[0, 0], [1, 0], [0, 1], [1, 1], [2, 1], [1, 2]].filter((_, i) => i < 4 || r() < 0.7);
+        shape.forEach(([dx, dy]) => [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([ex, ey]) => set(ox + dx + ex, oy + dy + ey, ore[3])));
+        shape.forEach(([dx, dy]) => set(ox + dx, oy + dy, (dx + dy) % 2 ? ore[1] : ore[0]));
+        set(ox, oy, ore[2]);
+      });
+    }
+  }
+  if (type === "cave") {
+    for (let i = 0; i < grid.length; i++) grid[i] = pkShade(grid[i].startsWith("#") ? grid[i] : "#6E7379", -0.68);
+  } else {                                    // фаска: светлый верх-лево, тёмный низ-право — блоки читаются как кубы
+    for (let i = 0; i < N; i++) {
+      const lt = (col) => (col.startsWith("#") ? pkShade(col, 0.2) : col);
+      const dk = (col) => (col.startsWith("#") ? pkShade(col, -0.32) : col);
+      grid[i] = lt(grid[i]); grid[i * N] = lt(grid[i * N]);
+      grid[(N - 1) * N + i] = dk(grid[(N - 1) * N + i]); grid[i * N + N - 1] = dk(grid[i * N + N - 1]);
+    }
+  }
+  pk.tex[key] = pkCanvas(grid, N);
+  return pk.tex[key];
+}
+
+// Кирка — пиксель-арт 16×16 в стиле Minecraft: o — контур, H/M/D — светлый/основной/тёмный цвет головки, S/s — рукоять
+const PK_PICK_ART = [
+  "................",
+  "...oooooo.......",
+  "..oHHHHHMoo.....",
+  "..oMMMMMMMDo....",
+  "...ooooDMMMDo...",
+  ".......oSDMMDo..",
+  "......oSsooMMDo.",
+  ".....oSso..oMDo.",
+  "....oSso...oMDo.",
+  "...oSso....oMDo.",
+  "..oSso.....oMDo.",
+  ".oSso......oDDo.",
+  "oSso........oo..",
+  "oso.............",
+  ".o..............",
+  "................",
+];
+const PK_GRIP = [1.5, 13.5];      // где кирку держат
+const PK_REACH = 11.5;            // от хвата до середины головки
+function pkPickSprite(level) {
+  const key = `pick:${level}`;
+  if (pk.tex[key]) return pk.tex[key];
+  const [hi, mid, low, out] = PK_PICK[level];
+  const cols = { o: out, H: hi, M: mid, D: low, S: "#9C7637", s: "#6B511F" };
+  const grid = PK_PICK_ART.join("").split("").map((ch) => cols[ch] || null);
+  pk.tex[key] = pkCanvas(grid, 16);
+  return pk.tex[key];
+}
+
+function pkDeco(x, y) {     // блоки вокруг шахты — просто пейзаж
+  if (y === 0) return "grass";
+  const v = pkHash(x, y);
+  if (y < 3) return v < 0.72 ? "dirt" : "stone";
+  if (v < 0.045) return "gold";
+  if (v < 0.07) return "redstone";
+  if (v < 0.075 && y > 8) return "diamond";
+  return v < 0.16 && y < 6 ? "dirt" : "stone";
+}
+
+// Раскладываем удары сервера по клеткам: кирка идёт в основном вниз, иногда вбок, не возвращаясь в выкопанное
+function pkWorld(hits) {
+  const rnd = pkRand(pk.seed * 7 + 3);
+  const cells = new Map();
+  const path = [];
+  let cx = 3, cy = -1;
+  const free = (x, y) => x >= 0 && x < PK_COLS && y >= 0 && !cells.has(pkKey(x, y));
+  for (const h of hits) {
+    const opts = [[cx, cy + 1, 7], [cx - 1, cy, 2], [cx + 1, cy, 2]].filter(([x, y]) => free(x, y));
+    let nx = cx, ny = cy + 1;
+    if (opts.length) {
+      let s = opts.reduce((a, o) => a + o[2], 0) * rnd();
+      [nx, ny] = opts.find((q) => (s -= q[2]) <= 0) || opts[opts.length - 1];
+    } else {
+      while (cells.has(pkKey(nx, ny))) ny += 1;
+    }
+    cells.set(pkKey(nx, ny), h.t);
+    const step = { x: nx, y: ny, t: h.t, m: h.m, hp: h.hp, boom: [] };
+    if (h.boom) {
+      const around = [[0, 1], [-1, 0], [1, 0], [-1, 1], [1, 1], [0, 2], [-1, -1], [1, -1], [-2, 0], [2, 0], [0, -1]]
+        .map(([dx, dy]) => [nx + dx, ny + dy]).filter(([x, y]) => free(x, y));
+      h.boom.forEach((b, i) => {
+        const c = around[i];
+        if (c) cells.set(pkKey(c[0], c[1]), b.t);
+        step.boom.push({ x: c ? c[0] : nx, y: c ? c[1] : ny, t: b.t, m: b.m, cell: !!c });
+      });
+    }
+    path.push(step);
+    cx = nx; cy = ny;
+  }
+  return { cells, path, mined: new Set() };
+}
+
+function pkAmount(mult) {
+  const v = pk.bet * mult;
+  if (pk.cur === "ton") return `${tonNum(Math.floor(v))} TON`;
+  return `${(Math.floor(v * 100) / 100).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ★`;
+}
+
+function pkHud() {
+  const max = (state.config && state.config.pickaxe && state.config.pickaxe.hp) || 100;
+  const hp = pk.hp === null ? max : pk.hp;
+  $("#pk-hp").textContent = `${hp}/${max}`;
+  $("#pk-hpbar").style.width = `${Math.max(0, Math.min(100, hp / max * 100))}%`;
+  $("#pk-hpbar").classList.toggle("low", hp <= max * 0.25);
+  $("#pk-sum").textContent = pk.sum === null ? "—" : pkAmount(pk.sum);
+}
+
+// ----- частицы: обломки, дым, кольцо взрыва, искры -----
+function pkBits(x, y, cols, n, power = 1) {
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * Math.PI * 2, v = (0.004 + Math.random() * 0.009) * power;
+    pk.parts.push({ kind: "bit", x: x + (Math.random() - 0.5) * 0.7, y: y + (Math.random() - 0.5) * 0.7,
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v - 0.006 * power, s: 0.07 + Math.random() * 0.1, rot: Math.random() * 6,
+      vr: (Math.random() - 0.5) * 0.02, c: cols[k % cols.length], life: 1, decay: 0.0011 + Math.random() * 0.0006 });
+  }
+}
+function pkSparks(x, y, color, n) {
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * Math.PI * 2, v = 0.003 + Math.random() * 0.006;
+    pk.parts.push({ kind: "spark", x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, c: color, life: 1, decay: 0.0016 });
+  }
+}
+function pkExplode(x, y) {
+  pk.parts.push({ kind: "ring", x, y, r: 0.2, life: 1, decay: 0.0022 });
+  for (let k = 0; k < 10; k++) {
+    const a = Math.random() * Math.PI * 2, v = 0.0015 + Math.random() * 0.002;
+    pk.parts.push({ kind: "puff", x: x + Math.cos(a) * 0.4, y: y + Math.sin(a) * 0.4, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 0.001,
+      s: 0.35 + Math.random() * 0.3, life: 1, decay: 0.0009 + Math.random() * 0.0004 });
+  }
+  pkBits(x, y, PK_BITS.tnt, 26, 1.8);
+  pkSparks(x, y, "#FFD45C", 18);
+}
+
+function pkBreak(r, idx) {
+  const s = pk.world.path[idx];
+  const text = (x, y, txt, color, big) => pk.texts.push({ x: x + 0.5, y: y + 0.35, txt, color, big, life: 1, age: 0 });
+  const bits = (t) => PK_BITS[t] || (PK_ORE[t] ? [PK_ORE[t][0], "#888D93", PK_ORE[t][1], "#6E7379"] : PK_BITS.stone);
+  pk.world.mined.add(pkKey(s.x, s.y));
+  pk.hp = s.hp;
+  pk.sum += s.m;
+  pkBits(s.x + 0.5, s.y + 0.5, bits(s.t), 14);
+  if (PK_ORE[s.t]) pkSparks(s.x + 0.5, s.y + 0.5, PK_ORE[s.t][2], 8);
+  if (s.m > 0) {
+    text(s.x, s.y, `+${pkAmount(s.m)}`, PK_ORE[s.t] ? PK_ORE[s.t][0] : "#fff", s.m >= 1);
+    haptic();
+    if (PK_BANNER[s.t]) pk.banner = { txt: PK_BANNER[s.t], sub: `+${pkAmount(s.m)}`, color: PK_ORE[s.t][0], age: 0 };
+  }
+  if (s.t === "repair") { text(s.x, s.y, "+30 ❤", "#5CFF8F", false); pkSparks(s.x + 0.5, s.y + 0.5, "#9CFFB0", 14); }
+  if (s.t === "tnt") {
+    r.flash = 1;
+    haptic("win");
+    pkExplode(s.x + 0.5, s.y + 0.5);
+    s.boom.forEach((b) => {
+      if (b.cell) { pk.world.mined.add(pkKey(b.x, b.y)); pkBits(b.x + 0.5, b.y + 0.5, bits(b.t), 8, 1.4); }
+      pk.sum += b.m;
+      if (b.m > 0) text(b.x, b.y, `+${pkAmount(b.m)}`, PK_ORE[b.t] ? PK_ORE[b.t][0] : "#fff", b.m >= 1);
+      if (PK_BANNER[b.t]) pk.banner = { txt: PK_BANNER[b.t], sub: `+${pkAmount(b.m)}`, color: PK_ORE[b.t][0], age: 0 };
+    });
+  }
+  pkHud();
+}
+
+// Поза кирки: голова подлетает к блоку, замах, удар, блок ломается — кирка заходит в выкопанную клетку
+function pkPose(r) {
+  const start = { x: 3.5, y: -0.55 };
+  const t = performance.now();
+  if (!r) return { x: start.x, y: start.y + Math.sin(t / 420) * 0.06, dx: 0.45, dy: 0.9, swing: Math.sin(t / 650) * 0.08, crack: 0 };
+  const path = pk.world.path, n = path.length;
+  const i = Math.min(Math.floor(r.t / r.step), n - 1);
+  const p = Math.min(1, (r.t - i * r.step) / r.step);
+  const prev = i === 0 ? start : { x: path[i - 1].x + 0.5, y: path[i - 1].y + 0.5 };
+  const to = { x: path[i].x + 0.5, y: path[i].y + 0.5 };
+  let dx = to.x - prev.x, dy = to.y - prev.y;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+  const edge = { x: prev.x + (to.x - prev.x) * 0.5, y: prev.y + (to.y - prev.y) * 0.5 };
+  const lerp = (a, b, k) => a + (b - a) * k;
+  const ease = (k) => k * k * (3 - 2 * k);
+  let x, y, swing, strike = false;
+  if (p < 0.4) { const k = ease(p / 0.4); x = lerp(prev.x, edge.x, k); y = lerp(prev.y, edge.y, k); swing = -1.1 * k; }
+  else if (p < 0.62) { const k = (p - 0.4) / 0.22; x = edge.x; y = edge.y; swing = -1.1 + 1.45 * k * k; strike = true; }
+  else { const k = ease((p - 0.62) / 0.38); x = lerp(edge.x, to.x, k); y = lerp(edge.y, to.y, k); swing = 0.35 * (1 - k); }
+  return { x, y, dx, dy, swing, strike, crack: p >= 0.3 && p < 0.7 ? Math.min(1, (p - 0.3) / 0.32) : 0,
+    target: p < 0.7 ? path[i] : null };
+}
+
+function pkDrawPick(ctx, hx, hy, size, dx, dy, swing, alpha) {
+  // (hx, hy) — куда смотрит головка без замаха; вращаем вокруг хвата
+  const reach = PK_REACH / 16 * size;
+  const gx = hx - dx * reach, gy = hy - dy * reach;
+  const k = size / 16;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(gx, gy);
+  ctx.rotate(Math.atan2(dx, -dy) + swing - Math.PI / 4);   // спрайт смотрит головкой вверх-вправо
+  ctx.drawImage(pkPickSprite(pk.level), -PK_GRIP[0] * k, -PK_GRIP[1] * k, 16 * k, 16 * k);
+  ctx.restore();
+}
+
+function pkSky(ctx, W, cell, sy) {
+  const horizon = sy(0);
+  if (horizon <= 0) return;
+  const g = ctx.createLinearGradient(0, horizon - cell * 4, 0, horizon);
+  g.addColorStop(0, "#4FA6E6"); g.addColorStop(1, "#CDEFFF");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, horizon);
+  const px = cell / 8;                        // «пиксель» пейзажа
+  ctx.fillStyle = "#FFF4B8"; ctx.fillRect(W - cell * 1.6, horizon - cell * 3.3, cell * 0.75, cell * 0.75);   // солнце
+  ctx.fillStyle = "rgba(255, 244, 184, .35)"; ctx.fillRect(W - cell * 1.6 - px, horizon - cell * 3.3 - px, cell * 0.75 + 2 * px, cell * 0.75 + 2 * px);
+  if (!pk.clouds) {
+    const r = pkRand(42);
+    pk.clouds = Array.from({ length: 5 }, () => ({ x: r(), y: 2.2 + r() * 1.6, w: 1.2 + r() * 1.6, v: 0.000004 + r() * 0.000006 }));
+  }
+  const now = performance.now();
+  ctx.fillStyle = "rgba(255, 255, 255, .92)";
+  for (const c of pk.clouds) {
+    const cx = (((c.x + now * c.v) % 1.4) - 0.2) * W, cy = horizon - c.y * cell;
+    ctx.fillRect(cx, cy, c.w * cell, px * 2);
+    ctx.fillRect(cx + px * 2, cy - px * 2, c.w * cell - px * 5, px * 2);
+    ctx.fillRect(cx + px * 5, cy - px * 3.5, c.w * cell * 0.35, px * 2);
+  }
+  const ridge = (color, amp, base, f, ph) => {   // ступенчатые пиксельные горы
+    ctx.fillStyle = color;
+    for (let x = 0; x < W; x += px * 2) {
+      const h = base + amp * (0.5 + 0.5 * Math.sin(x / W * f + ph)) * (0.7 + 0.3 * Math.sin(x / W * f * 3.1 + ph * 2));
+      const hh = Math.round(h / px) * px;
+      ctx.fillRect(x, horizon - hh, px * 2 + 1, hh);
+    }
+  };
+  ridge("#A9CBE6", cell * 1.3, cell * 0.4, 7, 1);
+  ridge("#7FB2D6", cell * 0.8, cell * 0.25, 11, 4);
+  ridge("#5E9E5A", cell * 0.3, cell * 0.12, 23, 2);     // лес у горизонта
+}
+
+function pkDraw() {
+  const c = $("#pk-canvas");
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 320;
+  const W = Math.round(w * dpr), H = Math.round(w * 1.15 * dpr);
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H; c.style.height = `${Math.round(w * 1.15)}px`; }
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  // клетка — целое кратное 16, чтобы пиксели текстур были одинаковыми; поле по центру, по бокам — та же порода
+  const cell = Math.max(PK_N, Math.floor(W / PK_COLS / PK_N) * PK_N);
+  const ox = Math.round((W - cell * PK_COLS) / 2);
+  const r = pk.run;
+  const shake = r && r.flash > 0 ? r.flash * cell * 0.12 : 0;
+  const shx = (Math.random() - 0.5) * shake, shy = (Math.random() - 0.5) * shake;
+  const top = pk.camY;
+  const sx = (x) => ox + x * cell + shx;
+  const sy = (y) => (y - top) * cell + shy;
+  ctx.fillStyle = "#0B0D14"; ctx.fillRect(0, 0, W, H);
+  pkSky(ctx, W, cell, sy);
+  const world = pk.world;
+  const mined = (x, y) => !!world && world.mined.has(pkKey(x, y));
+  const now = performance.now();
+  const y0 = Math.max(0, Math.floor(top)), y1 = Math.ceil(top + H / cell) + 1;
+  const xs = Math.ceil(ox / cell) + 1;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = -xs; x < PK_COLS + xs; x++) {
+      if (mined(x, y)) {
+        if (y === 0) continue;
+        ctx.drawImage(pkTexture("cave", Math.floor(pkHash(x, y, 5) * 3)), sx(x), sy(y), cell, cell);
+        // тени от соседних блоков внутрь туннеля
+        const sh = (x0, y0_, x1, y1_) => {
+          const g = ctx.createLinearGradient(x0, y0_, x1, y1_);
+          g.addColorStop(0, "rgba(0, 0, 0, .6)"); g.addColorStop(1, "rgba(0, 0, 0, 0)");
+          ctx.fillStyle = g; ctx.fillRect(Math.min(x0, x1), Math.min(y0_, y1_), Math.abs(x1 - x0) || cell, Math.abs(y1_ - y0_) || cell);
+        };
+        const X = sx(x), Y = sy(y), d = cell * 0.32;
+        if (!mined(x, y - 1) && y > 0) sh(X, Y, X, Y + d);
+        if (!mined(x - 1, y)) sh(X, Y, X + d, Y);
+        if (!mined(x + 1, y)) sh(X + cell, Y, X + cell - d, Y);
+        continue;
+      }
+      const t = (world && world.cells.get(pkKey(x, y))) || pkDeco(x, y);
+      const v = ["stone", "dirt", "gold", "redstone", "diamond", "emerald"].includes(t) ? Math.floor(pkHash(x, y, 9) * 3) : 0;
+      ctx.drawImage(pkTexture(t, v), sx(x), sy(y), cell, cell);
+      if (PK_ORE[t] && t !== "redstone") {      // мерцание руды
+        const ph = (now / 1300 + pkHash(x, y, 3)) % 1;
+        if (ph < 0.2) {
+          const k = Math.sin(ph / 0.2 * Math.PI), s = cell * 0.13 * k;
+          const px = sx(x) + cell * (0.2 + pkHash(x, y, 4) * 0.6), py = sy(y) + cell * (0.2 + pkHash(x, y, 6) * 0.6);
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * k})`;
+          ctx.fillRect(px - s, py - cell * 0.02, s * 2, cell * 0.04);
+          ctx.fillRect(px - cell * 0.02, py - s, cell * 0.04, s * 2);
+        }
+      }
+    }
+  }
+  const pose = pkPose(r);
+  if (pose.target && pose.crack > 0) {        // трещины на блоке, по которому бьём
+    const t = pose.target, cx = sx(t.x + 0.5), cy = sy(t.y + 0.5);
+    const rr = pkRand(t.x * 31 + t.y * 17 + pk.seed);
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + pose.crack * 0.45})`;
+    const q = cell / PK_N;
+    for (let i = 0; i < 2 + Math.floor(pose.crack * 5); i++) {
+      let a = rr() * Math.PI * 2, px = cx, py = cy;
+      for (let j = 0; j < 4; j++) {
+        a += (rr() - 0.5) * 1.3;
+        px += Math.cos(a) * q * 1.6; py += Math.sin(a) * q * 1.6;
+        ctx.fillRect(Math.round((px - ox) / q) * q + ox, Math.round(py / q) * q, q, q);
+      }
+    }
+  }
+  // темнота на глубине: светло только вокруг кирки
+  const light = pk.hidden && pk.lastPos ? pk.lastPos : pose;
+  const depth = Math.max(0, Math.min(0.6, (light.y - 1.5) / 10));
+  if (depth > 0) {
+    const lx = sx(light.x), ly = sy(light.y);
+    const g = ctx.createRadialGradient(lx, ly, cell * 1.3, lx, ly, cell * 5.2);
+    g.addColorStop(0, "rgba(255, 200, 120, 0)"); g.addColorStop(1, `rgba(4, 5, 10, ${depth})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  const size = cell * 1.45;
+  if (!pk.hidden) {
+    if (pose.strike) {                          // шлейф замаха
+      pkDrawPick(ctx, sx(pose.x), sy(pose.y), size, pose.dx, pose.dy, pose.swing - 0.35, 0.18);
+      pkDrawPick(ctx, sx(pose.x), sy(pose.y), size, pose.dx, pose.dy, pose.swing - 0.18, 0.32);
+    }
+    pkDrawPick(ctx, sx(pose.x), sy(pose.y), size, pose.dx, pose.dy, pose.swing, 1);
+  }
+  for (const q of pk.parts) {
+    const a = Math.max(0, Math.min(1, q.life));
+    if (q.kind === "bit") {
+      ctx.save(); ctx.globalAlpha = a; ctx.translate(sx(q.x), sy(q.y)); ctx.rotate(q.rot);
+      ctx.fillStyle = q.c; const s = q.s * cell; ctx.fillRect(-s / 2, -s / 2, s, s); ctx.restore();
+    } else if (q.kind === "spark") {
+      ctx.globalAlpha = a; ctx.fillStyle = q.c; const s = cell * 0.06; ctx.fillRect(sx(q.x) - s / 2, sy(q.y) - s / 2, s, s);
+    } else if (q.kind === "puff") {
+      ctx.globalAlpha = a * 0.55; ctx.fillStyle = "#5A5A60";
+      ctx.beginPath(); ctx.arc(sx(q.x), sy(q.y), q.s * cell * (1.6 - q.life * 0.6), 0, Math.PI * 2); ctx.fill();
+    } else if (q.kind === "ring") {
+      ctx.globalAlpha = a; ctx.strokeStyle = "#FFB13B"; ctx.lineWidth = cell * 0.18 * a;
+      ctx.beginPath(); ctx.arc(sx(q.x), sy(q.y), q.r * cell, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  const font = getComputedStyle(document.body).fontFamily;
+  ctx.textAlign = "center"; ctx.lineJoin = "round";
+  for (const t of pk.texts) {
+    const pop = 1 + 0.5 * Math.max(0, 1 - t.age / 160);
+    const fs = Math.round(cell * (t.big ? 0.42 : 0.3) * pop);
+    ctx.font = `900 ${fs}px ${font}`;
+    ctx.globalAlpha = Math.max(0, Math.min(1, t.life * 1.8));
+    const tx = Math.min(W - cell, Math.max(cell, sx(t.x))), ty = sy(t.y);
+    if (t.big) { ctx.shadowColor = t.color; ctx.shadowBlur = cell * 0.35; }
+    ctx.lineWidth = fs * 0.28; ctx.strokeStyle = "rgba(0, 0, 0, .85)"; ctx.strokeText(t.txt, tx, ty);
+    ctx.fillStyle = t.color; ctx.fillText(t.txt, tx, ty);
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1;
+  if (pk.banner) {                              // «АЛМАЗ!» по центру
+    const b = pk.banner, k = Math.min(1, b.age / 180), fade = Math.min(1, (1500 - b.age) / 300);
+    ctx.globalAlpha = Math.max(0, fade);
+    const fs = Math.round(cell * 0.75 * (0.6 + 0.4 * k + 0.12 * Math.sin(b.age / 90)));
+    ctx.font = `900 ${fs}px ${font}`;
+    ctx.shadowColor = b.color; ctx.shadowBlur = cell * 0.6;
+    ctx.lineWidth = fs * 0.22; ctx.strokeStyle = "#000"; ctx.strokeText(b.txt, W / 2, H * 0.42);
+    ctx.fillStyle = b.color; ctx.fillText(b.txt, W / 2, H * 0.42);
+    ctx.font = `900 ${Math.round(fs * 0.5)}px ${font}`;
+    ctx.strokeText(b.sub, W / 2, H * 0.42 + fs * 0.75); ctx.fillStyle = "#fff"; ctx.fillText(b.sub, W / 2, H * 0.42 + fs * 0.75);
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+  if (r && r.flash > 0) { ctx.fillStyle = `rgba(255, 236, 190, ${r.flash * 0.5})`; ctx.fillRect(0, 0, W, H); }
+  const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);   // виньетка
+  vg.addColorStop(0, "rgba(0, 0, 0, 0)"); vg.addColorStop(1, "rgba(0, 0, 0, .35)");
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+}
+
+function pkFrame(now) {
+  const dt = Math.min(50, now - (pk.last || now));
+  pk.last = now;
+  const r = pk.run;
+  if (r) {
+    if (state.screen !== "pickaxe") r.t = Infinity;          // ушли с экрана — досчитываем мгновенно
+    r.t += dt * (pk.fast ? 6 : 1);
+    const path = pk.world.path, n = path.length;
+    while (r.broken < n && r.t >= (r.broken + 0.62) * r.step) pkBreak(r, r.broken++);
+    if (r.flash > 0) r.flash = Math.max(0, r.flash - dt / 380);
+    if (r.t >= n * r.step) {                   // прочность кончилась — кирка разлетается
+      const last = path[n - 1];
+      pk.lastPos = { x: last.x + 0.5, y: last.y + 0.5 };
+      pkBits(last.x + 0.5, last.y + 0.3, [...PK_PICK[pk.level].slice(0, 3), "#9C7637", "#6B511F"], 22, 1.3);
+      pk.hidden = true;
+      pk.run = null;
+      r.done();
+    }
+  }
+  for (const q of pk.parts) {
+    q.life -= dt * (q.decay || 0.001);
+    if (q.kind === "ring") { q.r += dt * 0.006; continue; }
+    q.x += (q.vx || 0) * dt; q.y += (q.vy || 0) * dt;
+    if (q.kind === "bit") { q.vy += 0.000045 * dt; q.rot += q.vr * dt; }
+    if (q.kind === "spark") { q.vx *= 0.97; q.vy = q.vy * 0.97 + 0.00002 * dt; }
+  }
+  pk.parts = pk.parts.filter((q) => q.life > 0);
+  for (const t of pk.texts) { t.age += dt; t.y -= dt * 0.0008; t.life -= dt / 1400; }
+  pk.texts = pk.texts.filter((t) => t.life > 0);
+  if (pk.banner && (pk.banner.age += dt) > 1500) pk.banner = null;
+  if (pk.run || !pk.hidden) {
+    const pose = pkPose(pk.run);
+    const target = Math.max(-2.3, pose.y - 2.6);           // камера держит кирку в верхней трети
+    pk.camY += (target - pk.camY) * Math.min(1, dt * 0.005);
+  }
+  pkDraw();
+  pk.raf = state.screen === "pickaxe" ? requestAnimationFrame(pkFrame) : 0;
+}
+
+function pkKick() {
+  if (!pk.raf) { pk.last = performance.now(); pk.raf = requestAnimationFrame(pkFrame); }
+}
+
+function pkOres() {
+  const t = state.config && state.config.pickaxe && state.config.pickaxe.tables[pk.level];
+  if (!t) return;
+  const img = (type) => `<img src="${pkTexture(type).toDataURL()}" alt="">`;
+  $("#pk-ores").innerHTML = Object.keys(PK_ORE_NAMES).map((o) =>
+    `<div>${img(o)}<b>×${fmtX(t[o]).replace(/^×/, "")}</b><span>${PK_ORE_NAMES[o]}</span></div>`).join("")
+    + `<div>${img("tnt")}<b>взрыв</b><span>TNT</span></div><div>${img("repair")}<b>+30 ❤</b><span>починка</span></div>`;
+}
+
+function pickaxeEnter() {
+  if (!pk.run) Object.assign(pk, { world: null, hidden: false, camY: -2.3, hp: null, sum: null, banner: null });
+  pkOres();
+  pkHud();
+  pkKick();
+}
+
+async function pickaxePlay() {
+  if (pk.run) { pk.fast = true; $("#pk-btn").textContent = "Ускорено ⏩"; return; }
+  let bet;
+  try { bet = getBet("pickaxe"); } catch (e) { toast(e.message, true); return; }
+  const btn = $("#pk-btn");
+  btn.disabled = true;
+  $$("#pk-level button").forEach((b) => { b.disabled = true; });
+  try {
+    const r = await api("/api/pickaxe", { bet, level: pk.level, cur: state.cur }, { deferBalance: true });
+    showBetTaken(bet);
+    haptic();
+    pk.seed = Math.floor(Math.random() * 1e9);
+    Object.assign(pk, { fast: false, parts: [], texts: [], bet, cur: r.cur, hp: r.hp, sum: 0, hidden: false, banner: null,
+      camY: -2.3, world: pkWorld(r.hits) });
+    const res = $("#pk-result");
+    res.className = "result";
+    res.textContent = "Копаем…";
+    btn.disabled = false;
+    btn.textContent = "Быстрее ⏩";
+    const n = r.hits.length;
+    await new Promise((resolve) => {
+      pk.run = { t: 0, step: Math.max(110, Math.min(300, 9000 / n)), broken: 0, flash: 0, done: resolve };
+      pkHud();
+      pkKick();
+    });
+    pk.sum = r.multiplier;      // итог с сервера (с учётом потолка выигрыша)
+    pkHud();
+    setBalance(r.balance, r.cur);
+    res.className = "result reveal " + (r.win > bet ? "win" : r.win > 0 ? "" : "lose");
+    res.textContent = `Кирка сломалась · ${fmtX(r.multiplier)} · ${r.win > 0 ? "+" : ""}${money(r.win, r.cur)}`;
+    if (r.win > bet) haptic("win");
+    celebrate(bet, r.win, $("#pk-canvas"));
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Копать";
+    $$("#pk-level button").forEach((b) => { b.disabled = false; });
+  }
+}
+
 // ---------- мины ----------
 
 let minesGame = null;
@@ -2966,6 +3535,13 @@ function bind() {
   $("#chk-activate").addEventListener("click", () => activateCheck("#chk-code"));
   $("#slots-spin").addEventListener("click", slotsSpin);
   $("#plinko-btn").addEventListener("click", plinkoDrop);
+  $("#pk-btn").addEventListener("click", pickaxePlay);
+  $$("#pk-level button").forEach((b) => b.addEventListener("click", () => {
+    pk.level = b.dataset.level;
+    $$("#pk-level button").forEach((x) => x.classList.toggle("sel", x === b));
+    haptic();
+    pkOres();
+  }));
   $("#bonus-btn").addEventListener("click", claimBonus);
   $("#rake-btn").addEventListener("click", claimRakeback);
   $$("#plinko-risk button").forEach((b) => b.addEventListener("click", () => {

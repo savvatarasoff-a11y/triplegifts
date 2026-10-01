@@ -38,6 +38,24 @@ def test_plinko_tables():
     assert len(path) == 12 and bucket == sum(path) and mult == g.PLINKO_TABLES[(12, "medium")][bucket]
 
 
+def test_pickaxe_rtp_and_dig():
+    import random
+    for lv in g.PICKAXES:
+        assert 0.92 < g.pickaxe_rtp(lv) <= g.PICKAXE_RTP                       # точный расчёт, не выше 93%
+        rng = random.Random(3)
+        n = 30_000
+        mean = sum(g.pickaxe_dig(lv, rng)[1] for _ in range(n)) / n
+        assert abs(mean - g.pickaxe_rtp(lv)) < 0.08, lv                        # симуляция сходится с расчётом
+    # дороже кирка — крупнее самая ценная руда
+    tops = [g.PICKAXE_TABLES[lv]["emerald"] for lv in g.PICKAXES]
+    assert tops == sorted(tops)
+    hits, mult = g.pickaxe_dig("gold", random.Random(1))
+    assert hits[-1]["hp"] == 0 and all(h["hp"] > 0 for h in hits[:-1])
+    total = sum(h["m"] + sum(b["m"] for b in h.get("boom", [])) for h in hits)
+    assert mult == round(min(total, g.PICKAXE_MAX_X), 2)
+    assert all(len(h["boom"]) == g.PICKAXE_TNT_BLAST for h in hits if h["t"] == "tnt")
+
+
 def test_mines_multiplier_expected_value():
     # EV любого стоп-правила = 0.90: вероятность пройти k клеток × множитель
     for mines in (3, 10, 24):
@@ -160,6 +178,7 @@ def test_house_edge_everywhere_even_with_max_rakeback():
     rtp = {
         "slots": g.slots_rtp(),                                   # 777 оценён ровно ×40 — NFT не дороже
         "plinko": max(g.plinko_rtp(r, k) for r, k in g.PLINKO_TABLES),
+        "pickaxe": max(g.pickaxe_rtp(lv) for lv in g.PICKAXES),
         "mines": 1 - g.MINES_EDGE,                                # любая стратегия вывода
         "crash": 0.95,                                            # P(x ≥ m) = 0.95 / m
         "cases": g.CASE_MAX_RTP,                                  # выше — кейс выключается
