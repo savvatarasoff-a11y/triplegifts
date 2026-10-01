@@ -104,15 +104,15 @@ async def test_plinko(casino):
             await casino.plinko(1, 10, rows, risk)
 
 
-async def test_pickaxe(casino):
+async def test_pickaxe(casino, monkeypatch):
     await fund(casino, 1, 1000)
-    r = await casino.pickaxe(1, 100, "diamond")
-    assert r["events"] and r["events"][-1]["hp"] == 0 and r["world"] and r["win"] == g.payout(100, r["multiplier"])
-    assert r["balance"] == 900 + r["win"]
-    with pytest.raises(GameError):
-        await casino.pickaxe(1, 10, "wood")
-    with pytest.raises(GameError):
-        await casino.mines_start(1, 10, 1)
+    monkeypatch.setattr(g, "pickaxe_spin", lambda rng=None: "iron")
+    r = await casino.pickaxe(1, 100)
+    assert r["tier"] == "iron" and r["hp"] == g.PICK_TIERS["iron"] and r["events"][-1]["hp"] == 0 and r["world"]
+    assert r["win"] == g.payout(100, r["multiplier"]) and r["balance"] == 900 + r["win"]
+    monkeypatch.setattr(g, "pickaxe_spin", lambda rng=None: "none")      # кирка не выпала — ставка сгорает
+    r = await casino.pickaxe(1, 100, )
+    assert r["tier"] == "none" and r["win"] == 0 and "events" not in r
 
 
 async def test_checks(casino):

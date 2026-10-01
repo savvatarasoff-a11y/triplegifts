@@ -653,20 +653,21 @@ class Casino:
 
     # ---------- Кирка ----------
 
-    async def pickaxe(self, user_id: int, bet: Any, level: Any = "iron", cur: Any = money.STARS) -> dict:
+    async def pickaxe(self, user_id: int, bet: Any, cur: Any = money.STARS) -> dict:
+        """Колесо выбирает кирку (или никакую), дальше она сама копает шахту — всё считается здесь."""
         cur = self._cur(cur)
         bet = self._check_bet(bet, cur)
-        if level not in g.PICKAXES:
-            raise GameError("Кирка — железная, золотая или алмазная")
-        run = g.pickaxe_run(level)
-        mult = run["mult"]
+        game = g.pickaxe_play()
+        mult = game["mult"]
         win = g.payout(bet, mult)
         async with self.db.tx() as c:
             await self._take(c, user_id, bet, "pickaxe", cur)
             balance = await self._settle(c, user_id, "pickaxe", bet, win,
-                                         {"level": level, "hits": len(run["events"]), "multiplier": mult}, cur)
-        return {"world": run["world"], "start": run["start"], "events": run["events"], "multiplier": mult, "win": win,
-                "level": level, "hp": g.PICKAXE_HP, "balance": balance, "cur": cur}
+                                         {"tier": game["tier"], "multiplier": mult}, cur)
+        out = {"tier": game["tier"], "multiplier": mult, "win": win, "balance": balance, "cur": cur}
+        if game["tier"] != "none":
+            out.update(world=game["world"], start=game["start"], events=game["events"], hp=game["hp"])
+        return out
 
     # ---------- кейсы ----------
 

@@ -40,42 +40,41 @@ def test_plinko_tables():
 
 def test_pickaxe_physics_and_rtp():
     import random
-    for lv in g.PICKAXES:
-        assert 0.92 < g.pickaxe_rtp(lv) <= g.PICKAXE_RTP                       # по откалиброванным счётчикам
-    # руды одной прочности ведут себя одинаково → E[выигрыш] раскладывается по классам; сверяем со «сырой» симуляцией
+    assert 0.86 < g.pickaxe_rtp() <= g.PICKAXE_RTP                             # с учётом «кирка не выпала»
+    assert abs(sum(p for _, p in g.PICK_WHEEL) - 1) < 1e-9 and dict(g.PICK_WHEEL)["none"] > 0
     rng = random.Random(11)
-    counts = g.pickaxe_class_counts("iron", 1500, rng)
-    for k, v in counts.items():
-        assert abs(v - g.PICKAXE_CLASS_COUNTS["iron"][k]) < 0.15 * g.PICKAXE_CLASS_COUNTS["iron"][k] + 0.05, k
-    # дороже кирка — крупнее самая ценная руда
-    tops = [g.PICKAXE_TABLES[lv]["emerald"] for lv in g.PICKAXES]
-    assert tops == sorted(tops)
-    run = g.pickaxe_run("gold", rng=random.Random(1))
+    run = g.pickaxe_run(g.PICK_TIERS["gold"], rng=rng)
     ev = run["events"]
-    assert ev and ev[-1]["hp"] == 0 and all(e["t"] > 0 for e in ev)
-    assert all(a["t"] <= b["t"] for a, b in zip(ev, ev[1:]))
-    assert len(run["world"][0]) == g.PICK_COLS and set(run["world"][0]) == {"g"}       # сверху трава
-    # прочность кирки падает ровно на 1 за касание блока (стены бесплатны, починка добавляет)
-    hp = g.PICKAXE_HP
+    assert ev and ev[-1]["hp"] == 0 and all(a["t"] <= b["t"] for a, b in zip(ev, ev[1:]))
+    assert all(len(row) == g.PICK_COLS for row in run["world"])
+    codes = {v: k for k, v in g.PICK_CODES.items()}
+    # прочность: −1 за каждое касание блока, стены и выталкивания бесплатны, верстак добавляет
+    hp = g.PICK_TIERS["gold"]
     for e in ev:
-        if e["c"] is not None:
+        if e["k"] == 1:
             hp -= 1
-        rep = sum(1 for bx, by, _ in e["br"] if run["world"][by][bx] == "h")
-        hp = min(g.PICKAXE_HP, hp + rep * g.PICKAXE_REPAIR)
+        hp += g.PICKAXE_HEAL * sum(1 for bx, by, _ in e["br"] if run["world"][by][bx] == "b")
         assert e["hp"] == max(0, hp)
-    # каждый сломанный блок получил ровно столько ударов, сколько у него HP (или снесён взрывом TNT)
+        assert (e["c"] is not None) == (e["k"] == 1) and (e["k"] == 1 or not e["br"])
+    # блок ломается не раньше, чем получит столько ударов, сколько у него HP (или от взрыва TNT)
     hits, broke = {}, {}
     for e in ev:
         if e["c"]:
-            k = tuple(e["c"]); hits[k] = hits.get(k, 0) + 1
+            hits[tuple(e["c"])] = hits.get(tuple(e["c"]), 0) + 1
+            if any((bx, by) == tuple(e["c"]) for bx, by, _ in e["br"]):
+                assert hits[tuple(e["c"])] == g.PICK_HARD[codes[run["world"][e["c"][1]][e["c"][0]]]]
         for bx, by, m in e["br"]:
             broke[(bx, by)] = m
-    codes = {v: k for k, v in g.PICK_CODES.items()}
-    for (bx, by) in broke:
-        t = codes[run["world"][by][bx]]
-        assert hits.get((bx, by), 0) <= g.PICK_HARD[t]
-    total = sum(m for m in broke.values())
-    assert run["mult"] == round(min(total, g.PICKAXE_MAX_X), 2)
+    assert run["mult"] == round(min(sum(broke.values()), g.PICKAXE_MAX_X), 2)
+    # траектория не зависит от прочности: короткая партия — начало длинной (на этом стоит калибровка)
+    short = g.pickaxe_run(25, rng=random.Random(5))
+    long_ = g.pickaxe_run(120, rng=random.Random(5), checkpoints=(25,))
+    assert short["events"] == [dict(e, hp=e["hp"] - 95) for e in long_["events"][:len(short["events"])]]
+    assert long_["snaps"][25] == short["counts"]
+    # колесо выдаёт кирки примерно с заявленными шансами
+    spins = [g.pickaxe_spin(rng) for _ in range(20000)]
+    for tier, p in g.PICK_WHEEL:
+        assert abs(spins.count(tier) / len(spins) - p) < 0.02, tier
 
 
 def test_mines_multiplier_expected_value():
@@ -200,7 +199,7 @@ def test_house_edge_everywhere_even_with_max_rakeback():
     rtp = {
         "slots": g.slots_rtp(),                                   # 777 оценён ровно ×40 — NFT не дороже
         "plinko": max(g.plinko_rtp(r, k) for r, k in g.PLINKO_TABLES),
-        "pickaxe": max(g.pickaxe_rtp(lv) for lv in g.PICKAXES),
+        "pickaxe": g.pickaxe_rtp(),
         "mines": 1 - g.MINES_EDGE,                                # любая стратегия вывода
         "crash": 0.95,                                            # P(x ≥ m) = 0.95 / m
         "cases": g.CASE_MAX_RTP,                                  # выше — кейс выключается
