@@ -53,6 +53,11 @@ async def main() -> None:
                 continue
             if odds:
                 priced[source] += 1
+                if priced[source] <= 3:
+                    names = {c.get("homeAway"): ((c.get("team") or {}).get("displayName") or "?")
+                             for c in comp.get("competitors") or []}
+                    print(f"   {names.get('home')} — {names.get('away')}: П1 {odds[0]}  Х {odds[1]}  П2 {odds[2]}"
+                          f"  ({source}; линия {sp.book_odds(comp)})")
             else:
                 reasons["нет линии и нет данных о командах"] += 1
         print(f"{name} ({code}): матчей {len(events)}, статусы {dict(states)}, с ценой {dict(priced)}, "

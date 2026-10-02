@@ -184,3 +184,13 @@ def test_league_logo_prefers_dark():
     c._take_logo("uefa.nations", {"leagues": [{"logos": [None, {"href": "https://x/l.png", "rel": ["full", "default"]},
                                                          {"href": "https://x/d.png", "rel": ["full", "dark"]}]}]})
     assert c.logos["uefa.nations"] == "https://x/d.png"
+
+
+def test_favourite_never_priced_above_model():
+    book = sp.Sportsbook.__new__(sp.Sportsbook)
+    book.power = {"359": {"att": 1.8, "def": 0.5}, "363": {"att": 0.6, "def": 1.6}}
+    comp = espn_event("f", ml=(110, 250, 240))["competitions"][0]          # линия считает матч равным
+    odds, source = book.price(comp)
+    model = sp.model_odds(book.power["359"], book.power["363"])
+    assert source == "book" and odds[0] == model[0] < sp.book_odds(comp)[0]
+    assert sp.book_odds(espn_event("g", ml=(-400, 450, 900))["competitions"][0])[0] < 1.2   # рынок 1.25

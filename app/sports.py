@@ -45,6 +45,7 @@ MARGIN_BOOK = 0.08          # маржа поверх линии букмеке�
 MARGIN_MODEL = 0.12         # маржа поверх своей модели (она грубее — запас больше)
 MIN_ODDS, MAX_ODDS, MAX_ODDS_MODEL = 1.03, 8.0, 6.0
 LONGSHOT_P = 0.25           # исходы слабее этой вероятности режем сильнее (аутсайдеры)
+FAV_CUT = 0.12              # явный фаворит: до −12% к цене (при 100% шансе; при 75% — −6%)
 MODEL_STAKE_SHARE = 0.2     # по модели на один матч — не больше 20% максимальной ставки
 CLOSE_BEFORE = 60           # приём ставок закрывается за минуту до начала
 ODDS_MAX_AGE = 3 * 3600     # коэффициенты старше — ставки не принимаем
@@ -114,6 +115,8 @@ def with_margin(probs: tuple[float, float, float], margin: float, max_odds: floa
     for p in probs:
         q = p / total
         shade = 1 - (LONGSHOT_P - q) if q < LONGSHOT_P else 1.0       # p=0.10 → ещё −15% к цене
+        if q > 0.5:
+            shade = 1 - FAV_CUT * (q - 0.5) / 0.5                     # фаворит: чем очевиднее, тем ниже цена
         odds = math.floor(100 * shade / (q * (1 + margin))) / 100     # вниз — маржа не меньше заявленной
         out.append(min(max_odds, max(MIN_ODDS, odds)))
     return out[0], out[1], out[2]
@@ -321,12 +324,15 @@ class Sportsbook:
         return len(self.power)
 
     def price(self, comp: dict[str, Any], neutral: bool = False) -> tuple[tuple[float, float, float] | None, str]:
-        odds = book_odds(comp)
-        if odds:
-            return odds, "book"
         sides = {c.get("homeAway"): c for c in comp.get("competitors") or []}
         tid = lambda side: str(((sides.get(side) or {}).get("team") or {}).get("id") or "")
-        return model_odds(self.power.get(tid("home")), self.power.get(tid("away")), neutral), "model"
+        model = model_odds(self.power.get(tid("home")), self.power.get(tid("away")), neutral)
+        odds = book_odds(comp)
+        if odds:
+            if model:       # линия и модель расходятся — берём меньшую цену (фаворит не бывает «дорогим»)
+                odds = (min(odds[0], model[0]), min(odds[1], model[1]), min(odds[2], model[2]))
+            return odds, "book"
+        return model, "model"
 
     async def refresh_odds(self, force: bool = False) -> int:
         """Расписание и коэффициенты на AHEAD_DAYS вперёд по всем лигам. Возвращает число матчей с ценой."""
