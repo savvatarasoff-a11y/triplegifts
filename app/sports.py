@@ -233,9 +233,20 @@ class EspnClient:
                 return await r.json(content_type=None)
 
     async def scoreboard(self, code: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
-        data = await self._get(f"{ESPN}/site/v2/sports/soccer/{code}/scoreboard",
-                               dates=f"{start:%Y%m%d}-{end:%Y%m%d}", limit=300)
-        return data.get("events") or []
+        """Матчи за период: ESPN отвечает 400 на диапазон с limit, поэтому — по одному дню (dates=YYYYMMDD)."""
+        events: dict[str, dict[str, Any]] = {}
+        day, errors = start, []
+        while day.date() <= end.date():
+            try:
+                data = await self._get(f"{ESPN}/site/v2/sports/soccer/{code}/scoreboard", dates=f"{day:%Y%m%d}")
+                for ev in data.get("events") or []:
+                    events[str(ev.get("id"))] = ev
+            except Exception as e:
+                errors.append(e)
+            day += timedelta(days=1)
+        if errors and not events:
+            raise errors[0]
+        return list(events.values())
 
     async def standings(self, code: str) -> dict[str, Any]:
         return await self._get(f"{ESPN}/v2/sports/soccer/{code}/standings")
