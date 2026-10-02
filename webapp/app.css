@@ -539,10 +539,9 @@ button { -webkit-user-select: none; user-select: none; }
 /* ---------- Кирка ---------- */
 .pk-box { position: relative; margin-top: 14px; border-radius: 24px; overflow: hidden; border: 1px solid var(--line); background: #0d0f16; }
 #pk-canvas { width: 100%; display: block; image-rendering: pixelated; }
-.pk-hud { position: absolute; left: 10px; right: 10px; top: 10px; z-index: 1; display: flex; gap: 8px; pointer-events: none; }
+.pk-hud { position: absolute; right: 10px; top: 10px; z-index: 1; display: flex; gap: 8px; pointer-events: none; }
 .pk-pill { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 12px; font-size: 12px; font-weight: 800;
   color: #fff; background: rgba(8, 9, 14, .62); border: 1px solid rgba(255, 255, 255, .12); backdrop-filter: blur(6px); }
-.pk-pill:first-child { flex: 1; }
 .pk-pill b { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pk-pill.gold span { color: rgba(255, 255, 255, .6); font-weight: 700; }
 .pk-pill.gold b { color: #FFE066; }

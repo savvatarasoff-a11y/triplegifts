@@ -117,7 +117,7 @@ def plinko_drop(rows: int, risk: str, rng: random.Random = RNG) -> tuple[list[in
 PICKAXE_RTP = 0.87
 PICKAXE_MAX_X = 5000          # потолок выигрыша за игру, в ставках
 PICK_TOUCH = 4                # сколько прочности отнимает одно касание блока
-PICKAXE_HEAL = 48             # сколько прочности возвращает верстак (12 касаний)
+# верстак полностью восстанавливает прочность кирки
 # колесо: (кирка, шанс); прочность кирок
 PICK_WHEEL = (("none", 0.25), ("wood", 0.35), ("iron", 0.22), ("gold", 0.12), ("diamond", 0.06))
 PICK_TIERS = {"wood": 100, "iron": 200, "gold": 300, "diamond": 400}
@@ -128,8 +128,8 @@ PICK_START = (3.5, -3.5)      # отсюда — из барабана с кир
 PICK_DIRT_ROWS = 3            # у поверхности больше земли (доля руд среди остального не меняется)
 PICK_G = 22.0                 # гравитация, клеток/с²
 PICK_DT = 1 / 180             # шаг физики, с
-PICK_REST = 0.78              # упругость отскока
-PICK_VMIN, PICK_VMAX = 6.0, 12.0
+PICK_REST = 0.5               # упругость отскока
+PICK_VMIN, PICK_VMAX = 3.5, 8.0
 PICK_MAX_T = 300.0            # страховка по времени
 PICK_SIZE = 1.1               # размер спрайта кирки в клетках
 # форма кирки — тот же спрайт 16×16, что рисует приложение; любой непрозрачный пиксель сталкивается с блоками
@@ -155,10 +155,10 @@ ORES = tuple(_PICK_VALUES)
 # пересчитать: pickaxe_class_counts). Тип блока внутри класса на физику не влияет, поэтому
 # E[выигрыш] = Σ по классам E[N_класса] × средняя ценность руды класса — без шума от редких изумрудов.
 PICKAXE_CLASS_COUNTS: dict[str, dict[int, float]] = {
-    "wood": {2: 4.4736, 3: 0.8472, 5: 0.0213},
-    "iron": {2: 12.8333, 3: 2.7024, 5: 0.0875},
-    "gold": {2: 21.4981, 3: 4.6597, 5: 0.1611},
-    "diamond": {2: 30.1893, 3: 6.6247, 5: 0.2356},
+    "wood": {2: 5.7894, 3: 1.1737, 5: 0.0387},
+    "iron": {2: 16.8391, 3: 3.5813, 5: 0.1363},
+    "gold": {2: 31.4957, 3: 6.7995, 5: 0.2639},
+    "diamond": {2: 51.0527, 3: 11.0695, 5: 0.4356},
 }
 
 
@@ -205,7 +205,7 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
     vx, vy = round(rng.uniform(-3, 3), 4), 0.0
     th, om = 0.0, round(rng.choice((-1, 1)) * rng.uniform(5, 10), 4)     # стартует ровно как стоит в барабане
     start = {"t": 0, "x": x, "y": y, "vx": vx, "vy": vy, "a": th, "w": om}
-    touches = heals = 0
+    touches = 0                                 # касаний с последнего верстака (верстак чинит полностью)
     t, total = 0.0, 0.0
     events: list[dict[str, Any]] = []
     counts = {k: 0 for k in _PAY_CLASSES}
@@ -213,7 +213,7 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
     pending = sorted(set(checkpoints))
     dt, g = PICK_DT, PICK_G
     def hp_left(h: int) -> int:
-        return h - touches * PICK_TOUCH + heals * PICKAXE_HEAL
+        return h - touches * PICK_TOUCH
 
     while hp_left(hp0) > 0 and t < PICK_MAX_T:
         nx, ny = x + vx * dt, y + vy * dt + 0.5 * g * dt * dt
@@ -272,7 +272,7 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
                     smash(cx, cy, broken)
                     for _, _, bt in broken:
                         if bt == "bench":
-                            heals += 1
+                            touches = 0
                         if PICK_HARD[bt] in counts:
                             counts[PICK_HARD[bt]] += 1
                         total += pays.get(bt, 0)

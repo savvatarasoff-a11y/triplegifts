@@ -49,12 +49,13 @@ def test_pickaxe_physics_and_rtp():
     assert all(len(row) == g.PICK_COLS for row in run["world"]) and set(run["world"][0]) == {"g"}   # сверху трава
     assert run["start"]["a"] == 0 and (run["start"]["x"], run["start"]["y"]) == g.PICK_START       # из барабана
     codes = {v: k for k, v in g.PICK_CODES.items()}
-    # прочность: −1 за каждое касание блока, стены и выталкивания бесплатны, верстак добавляет
+    # прочность: −PICK_TOUCH за касание блока, стены и выталкивания бесплатны, верстак чинит полностью
     hp = g.PICK_TIERS["gold"]
     for e in ev:
         if e["k"] == 1:
             hp -= g.PICK_TOUCH
-        hp += g.PICKAXE_HEAL * sum(1 for bx, by, _ in e["br"] if run["world"][by][bx] == "b")
+        if any(run["world"][by][bx] == "b" for bx, by, _ in e["br"]):
+            hp = g.PICK_TIERS["gold"]                                          # верстак чинит полностью
         assert e["hp"] == max(0, hp)
         assert (e["c"] is not None) == (e["k"] == 1) and (e["k"] == 1 or not e["br"])
     # блок ломается не раньше, чем получит столько ударов, сколько у него HP (или от взрыва TNT)

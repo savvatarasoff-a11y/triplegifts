@@ -1942,7 +1942,7 @@ function pkCanvas(grid, n) {
 const PK_ATLAS = ["stone", "coal", "iron", "copper", "gold", "redstone", "emerald", "lapis", "diamond"];
 const PK_DEEP = 12;               // с этой глубины порода — глубинный сланец
 const pkAtlas = new Image();
-pkAtlas.onload = () => { pk.tex = {}; if (state.screen === "pickaxe") pkOres(); };
+pkAtlas.onload = () => { pk.tex = {}; };
 pkAtlas.src = "static/mc/ores.png";
 
 function pkAtlasTile(type, deep) {
@@ -2100,11 +2100,6 @@ function pkAmount(mult) {
 }
 
 function pkHud() {
-  const max = pk.max || 0;
-  const hp = pk.hp === null ? max : pk.hp;
-  $("#pk-hp").textContent = max ? `${hp}/${max}` : "—";
-  $("#pk-hpbar").style.width = `${max ? Math.max(0, Math.min(100, hp / max * 100)) : 100}%`;
-  $("#pk-hpbar").classList.toggle("low", !!max && hp <= max * 0.25);
   $("#pk-sum").textContent = pk.sum === null ? "—" : pkAmount(pk.sum);
 }
 
@@ -2157,7 +2152,7 @@ function pkApply(ev) {
     pkBits(bx + 0.5, by + 0.5, pkBitCols(t), 14);
     if (PK_ORE[t]) pkSparks(bx + 0.5, by + 0.5, PK_ORE[t][2], 8);
     if (t === "tnt") { r.flash = 1; haptic("win"); pkExplode(bx + 0.5, by + 0.5); }
-    if (t === "bench") { text(bx, by, `+${pkCfg().heal || 12} ❤`, "#5CFF8F", false); pkSparks(bx + 0.5, by + 0.5, "#9CFFB0", 14); }
+    if (t === "bench") { text(bx, by, "❤ MAX", "#5CFF8F", false); pkSparks(bx + 0.5, by + 0.5, "#9CFFB0", 14); }
     if (m > 0) { pk.sum += m; text(bx, by, `+${pkAmount(m)}`, PK_ORE[t] ? PK_ORE[t][0] : "#fff", m >= 1); }
   }
   pk.hp = ev.hp;
@@ -2366,20 +2361,9 @@ function pkKick() {
   if (!pk.raf) { pk.last = performance.now(); pk.raf = requestAnimationFrame(pkFrame); }
 }
 
-function pkOres() {
-  const t = pkCfg().table;
-  if (!t) return;
-  const img = (type) => `<img src="${pkTexture(type).toDataURL()}" alt="">`;
-  $("#pk-ores").innerHTML = PK_ORE_ORDER.map((o) =>
-    `<div>${img(o)}<b>×${fmtX(t[o]).replace(/^×/, "")}</b><span>${PK_ORE_NAMES[o]}</span></div>`).join("")
-    + `<div>${img("tnt")}<b>взрыв</b><span>TNT</span></div>`
-    + `<div>${img("bench")}<b>+${pkCfg().heal || 12} ❤</b><span>верстак</span></div>`;
-}
-
 function pickaxeEnter() {
   if (!pk.run && !pk.spinning) Object.assign(pk, { world: null, hidden: false, camY: -6.2, hp: null, sum: null, trail: [],
     tier: "iron", max: null, reel: null, lastPos: null });
-  pkOres();
   pkHud();
   pkKick();
 }
