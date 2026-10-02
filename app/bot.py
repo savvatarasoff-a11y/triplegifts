@@ -223,6 +223,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/channel_post — ещё раз опубликовать приветственный пост\n"
             "/channel_wins <code>on|off</code> — выигрыши в канал\n"
             "/league_icons — значки лиг в футболе (из премиум-эмодзи)\n"
+            "/sports_refresh — обновить матчи футбола сейчас\n"
             "/user <code>@username или ID</code> — баланс игрока"
         )
 
@@ -592,6 +593,23 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             await message.answer("✅ Приветственный пост опубликован")
         except Exception as e:
             await message.answer(f"⚠️ {html.escape(str(getattr(e, 'message', e)))}")
+
+    @admin.message(Command("sports_refresh"))
+    async def sports_refresh_cmd(message: Message) -> None:
+        """Футбол: сразу обновить матчи и коэффициенты всех лиг и показать, сколько записано."""
+        from . import sports as sp
+        book = sp.Sportsbook(casino)
+        await book.init()
+        await message.answer("Обновляю матчи с ESPN…")
+        try:
+            n = await book.refresh_odds(force=True)
+        except Exception as e:
+            await message.answer(f"Ошибка: {html.escape(repr(e))}")
+            return
+        lines = [f"{sp.LEAGUES[k][1]}: {v}" for k, v in book.last_counts.items()]
+        shown = len(await book.events())
+        await message.answer(f"⚽ Записано матчей с коэффициентами: <b>{n}</b>\n" + "\n".join(lines)
+                             + f"\n\nСейчас открыто для ставок в приложении: <b>{shown}</b>")
 
     @admin.message(Command("league_icons"))
     async def league_icons_cmd(message: Message, command: CommandObject) -> None:

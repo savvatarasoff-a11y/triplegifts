@@ -265,6 +265,7 @@ class Sportsbook:
         self.casino, self.db = casino, casino.db
         self.client = client or EspnClient()
         self.power: dict[str, dict[str, float]] = {}     # сила клубов: id команды ESPN → att/def
+        self.last_counts: dict[str, Any] = {}             # итог последнего обновления по лигам (для /sports_refresh)
 
     async def init(self) -> None:
         await self.db.conn.executescript(SCHEMA)
@@ -305,12 +306,15 @@ class Sportsbook:
         now = time.time()
         today = datetime.now(timezone.utc)
         n = 0
+        per_league: dict[str, Any] = {}
         for league, (code, _, _) in LEAGUES.items():
             try:
                 events = await self.client.scoreboard(code, today, today + timedelta(days=AHEAD_DAYS))
             except Exception as e:
                 log.warning("Матчи %s не получены: %s", league, e)
+                per_league[league] = f"ошибка: {e}"
                 continue
+            per_league[league] = 0
             async with self.db.tx() as c:
                 for ev in events:
                     comp = (ev.get("competitions") or [{}])[0]
@@ -337,8 +341,11 @@ class Sportsbook:
                          team("away").get("displayName") or "?", kickoff, *odds, now, source,
                          team("home").get("logo"), team("away").get("logo")))
                     n += 1
-        await self.db.kv_set("sports:fixtures_at", str(now))
-        log.info("Футбол: %s матчей с коэффициентами", n)
+                    per_league[league] += 1
+        if n:                                   # пусто (ESPN недоступен) — попробуем снова в следующем цикле
+            await self.db.kv_set("sports:fixtures_at", str(now))
+        self.last_counts = per_league
+        log.info("Футбол: %s матчей с коэффициентами %s", n, per_league)
         return n
 
     async def settle_pending(self, notify: Notify | None = None) -> int:
