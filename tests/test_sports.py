@@ -58,7 +58,10 @@ def test_pricing():
     assert sp.american(-200) == pytest.approx(1.5) and sp.american("+150") == pytest.approx(2.5)
     assert sp.american(50) is None and sp.american("x") is None
     h, d, a = sp.book_odds(espn_event("x")["competitions"][0])
-    assert sum(1 / o for o in (h, d, a)) == pytest.approx(1 + sp.MARGIN_BOOK, abs=0.01) and h < a
+    assert 1 + sp.MARGIN_BOOK - 0.01 <= sum(1 / o for o in (h, d, a)) <= 1.15 and h < a
+    # аутсайдер: цену режем сильнее и ограничиваем сверху
+    h, d, a = sp.book_odds(espn_event("z", ml=(-2000, 1200, 4000))["competitions"][0])
+    assert h < 1.1 and a == d == sp.MAX_ODDS
     # своя модель: сильная команда дома — фаворит, маржа больше, цены в пределах
     strong, weak = {"att": 1.6, "def": 0.6}, {"att": 0.7, "def": 1.4}
     h, d, a = sp.model_odds(strong, weak)

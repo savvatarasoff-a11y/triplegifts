@@ -43,7 +43,8 @@ STRENGTH_LEAGUES = {"eng.1": 1.0, "esp.1": 0.97, "ger.1": 0.95, "ita.1": 0.95, "
 PICKS = ("home", "draw", "away")
 MARGIN_BOOK = 0.08          # маржа поверх линии букмекера
 MARGIN_MODEL = 0.12         # маржа поверх своей модели (она грубее — запас больше)
-MIN_ODDS, MAX_ODDS, MAX_ODDS_MODEL = 1.03, 25.0, 12.0
+MIN_ODDS, MAX_ODDS, MAX_ODDS_MODEL = 1.03, 8.0, 6.0
+LONGSHOT_P = 0.25           # исходы слабее этой вероятности режем сильнее (аутсайдеры)
 MODEL_STAKE_SHARE = 0.2     # по модели на один матч — не больше 20% максимальной ставки
 CLOSE_BEFORE = 60           # приём ставок закрывается за минуту до начала
 ODDS_MAX_AGE = 3 * 3600     # коэффициенты старше — ставки не принимаем
@@ -111,7 +112,9 @@ def with_margin(probs: tuple[float, float, float], margin: float, max_odds: floa
     total = sum(probs)
     out = []
     for p in probs:
-        odds = math.floor(100 / (p / total * (1 + margin))) / 100     # вниз — маржа не меньше заявленной
+        q = p / total
+        shade = 1 - (LONGSHOT_P - q) if q < LONGSHOT_P else 1.0       # p=0.10 → ещё −15% к цене
+        odds = math.floor(100 * shade / (q * (1 + margin))) / 100     # вниз — маржа не меньше заявленной
         out.append(min(max_odds, max(MIN_ODDS, odds)))
     return out[0], out[1], out[2]
 

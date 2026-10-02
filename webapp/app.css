@@ -734,3 +734,9 @@ button { -webkit-user-select: none; user-select: none; }
 .case-rollers.multi .roller { height: 84px; }
 .case-rollers.multi .roller-track .it { height: 72px; gap: 2px; padding: 3px 2px 5px; }
 .case-rollers.multi .roller-track .it .em.nft-ic { width: 34px; height: 34px; }
+.game img.gi.px { right: 14px; top: 14px; width: 44px; height: 44px; image-rendering: pixelated;
+  filter: drop-shadow(0 0 10px var(--accent-glow)); }
+.game img.gi.ball { right: 16px; top: 50%; width: 56px; height: 56px; transform: translateY(-50%);
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, .5)); }
+.game .gi .f { fill: var(--accent-soft); stroke: none; }
+.game.accent .gi .f { fill: var(--on-accent); }
