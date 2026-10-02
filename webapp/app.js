@@ -2210,6 +2210,7 @@ function pkDraw() {
   ctx.imageSmoothingEnabled = false;
   // клетка — целое кратное 16, чтобы пиксели текстур были одинаковыми; поле по центру, по бокам — та же порода
   const cell = Math.max(PK_N, Math.floor(W / PK_COLS / PK_N) * PK_N);
+  pk.viewRows = H / cell;
   const ox = Math.round((W - cell * PK_COLS) / 2);
   const r = pk.run;
   const shake = r && r.flash > 0 ? r.flash * cell * 0.12 : 0;
@@ -2228,7 +2229,6 @@ function pkDraw() {
     const deep = y >= PK_DEEP ? 1 : 0;
     for (let x = -xs; x < PK_COLS + xs; x++) {
       if (mined(x, y)) {
-        if (y === 0) continue;                     // над выкопанной травой — небо
         ctx.drawImage(pkTexture("cave", 0, deep), sx(x), sy(y), cell, cell);
         const sh = (x0, y0_, x1, y1_) => {       // тени от соседних блоков внутрь выработки
           const g = ctx.createLinearGradient(x0, y0_, x1, y1_);
@@ -2237,6 +2237,11 @@ function pkDraw() {
         };
         const X = sx(x), Y = sy(y), d = cell * 0.3;
         if (!mined(x, y - 1) && y > 0) sh(X, Y, X, Y + d);
+        if (y === 0) {                             // выкопанная трава — край пещеры, сверху лёгкая тень
+          const g = ctx.createLinearGradient(0, Y, 0, Y + cell * 0.25);
+          g.addColorStop(0, "rgba(0, 0, 0, .5)"); g.addColorStop(1, "rgba(0, 0, 0, 0)");
+          ctx.fillStyle = g; ctx.fillRect(X, Y, cell, cell * 0.25);
+        }
         if (!mined(x - 1, y)) sh(X, Y, X + d, Y);
         if (!mined(x + 1, y)) sh(X + cell, Y, X + cell - d, Y);
         continue;
@@ -2350,7 +2355,7 @@ function pkFrame(tf) {
   pk.texts = pk.texts.filter((t) => t.life > 0);
   if (pk.run) {
     const p = pkPos(pk.run);
-    const target = Math.max(-6.2, p.y - 2.6);           // камера идёт за киркой вниз; барабан уезжает вверх
+    const target = Math.max(-6.2, p.y - (pk.viewRows || 8) / 2);   // кирка — в середине экрана; барабан уезжает вверх
     pk.camY += (target - pk.camY) * Math.min(1, dt * 0.007);
   }
   pkDraw();
@@ -2450,7 +2455,6 @@ function pkHpLabel(ctx, x, y, cell) {
 // Пиксельный пейзаж над шахтой: небо, горы, летающий остров с ёлками, облака
 function pkSky(ctx, W, H, cell, sx, sy) {
   const hz = sy(0);
-  ctx.fillStyle = "#CDEFFC"; ctx.fillRect(0, Math.max(0, hz), W, cell);   // небо видно и в выкопанной траве
   if (hz <= 0) return;
   const g = ctx.createLinearGradient(0, hz - cell * 7, 0, hz);
   g.addColorStop(0, "#8FD0F2"); g.addColorStop(1, "#CDEFFC");
