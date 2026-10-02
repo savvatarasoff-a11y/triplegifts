@@ -354,7 +354,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         return web.json_response({
             "enabled": sports.client.enabled,
             "leagues": [{"id": k, "name": n, "icon": i,
-                         "img": f"sporticon?league={k}&v={icons[k][-8:]}" if icons.get(k) else None}
+                         "img": f"sporticon?league={k}&v={icons[k][-8:]}" if icons.get(k)
+                         else await casino.db.kv_get(f"sports:logo:{k}")}         # нет эмодзи — логотип турнира
                         for k, (_, n, i) in sp.LEAGUES.items()],
             "events": await sports.events(league),
         })

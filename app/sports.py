@@ -229,6 +229,9 @@ class EspnClient:
 
     enabled = True
 
+    def __init__(self) -> None:
+        self.logos: dict[str, str] = {}      # код лиги ESPN → ссылка на официальный логотип турнира
+
     async def _get(self, url: str, **params: Any) -> dict[str, Any]:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20),
                                          headers={"User-Agent": "Mozilla/5.0"}) as s:
@@ -244,6 +247,11 @@ class EspnClient:
         while day.date() <= end.date():
             try:
                 data = await self._get(f"{ESPN}/site/v2/sports/soccer/{code}/scoreboard", dates=f"{day:%Y%m%d}")
+                for lg in data.get("leagues") or []:
+                    for logo in lg.get("logos") or []:
+                        href = logo.get("href") if isinstance(logo, dict) else None
+                        if isinstance(href, str) and href.startswith("https://") and code not in self.logos:
+                            self.logos[code] = href
                 for ev in data.get("events") or []:
                     events[str(ev.get("id"))] = ev
             except Exception as e:
@@ -342,6 +350,10 @@ class Sportsbook:
                          team("home").get("logo"), team("away").get("logo")))
                     n += 1
                     per_league[league] += 1
+        for league, (code, _, _) in LEAGUES.items():     # логотипы турниров — запасной значок лиги
+            href = getattr(self.client, "logos", {}).get(code)
+            if href:
+                await self.db.kv_set(f"sports:logo:{league}", href)
         if n:                                   # пусто (ESPN недоступен) — попробуем снова в следующем цикле
             await self.db.kv_set("sports:fixtures_at", str(now))
         self.last_counts = per_league
@@ -497,7 +509,7 @@ ICON_SET = "europeHDSofascout"
 ICON_KEY = "sports:icons"            # {лига: custom_emoji_id}, назначенные вручную (/league_icons epl 5)
 # подсказки для автоподбора по «базовому» эмодзи стикера, если вручную не назначено
 ICON_HINTS = {"epl": ["🏴\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f", "🇬🇧", "🦁"],
-              "laliga": ["🇪🇸"], "ligue1": ["🇫🇷"], "ucl": ["⭐", "🌟", "🏆", "✨"], "unl": ["🌍", "🇪🇺", "🌐"]}
+              "laliga": ["🇪🇸"], "ligue1": ["🇫🇷"], "ucl": ["⭐", "🌟", "🏆", "✨"]}   # Лига наций — официальный логотип с ESPN
 
 
 class LeagueIcons:

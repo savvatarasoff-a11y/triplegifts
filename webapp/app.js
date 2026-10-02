@@ -2617,7 +2617,7 @@ async function fbLoad() {
     const r = await api(`/api/sports${fb.league ? `?league=${fb.league}` : ""}`);
     const leagues = Object.fromEntries(r.leagues.map((l) => [l.id, l]));
     // значок лиги — премиум-эмодзи с сервера, без него — обычный эмодзи
-    const ico = (l) => (l.img ? `<img class="fb-ico" src="${API_BASE}/${escH(l.img)}" alt="">` : l.icon);
+    const ico = (l) => (!l.img ? l.icon : `<img class="fb-ico" src="${/^https:\/\//.test(l.img) ? "" : `${API_BASE}/`}${escH(l.img)}" alt="">`);
     $("#fb-leagues").innerHTML = [`<button data-l="" class="${fb.league ? "" : "sel"}">Все</button>`]
       .concat(r.leagues.map((l) => `<button data-l="${l.id}" class="${fb.league === l.id ? "sel" : ""}">${ico(l)} ${escH(l.name)}</button>`)).join("");
     if (!r.enabled) { list.innerHTML = '<div class="empty">Ставки на футбол скоро откроются</div>'; return; }

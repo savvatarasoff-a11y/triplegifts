@@ -168,7 +168,7 @@ async def test_league_icons(casino):  # noqa: F811
     icons = sp.LeagueIcons(casino.db)
     bot = Bot()
     m = await icons.mapping(bot)
-    assert m == {"epl": "e4", "laliga": "e1", "ligue1": "e2", "ucl": "e3"}         # Лиге наций подсказки не нашлось
+    assert m == {"epl": "e4", "laliga": "e1", "ligue1": "e2", "ucl": "e3"}         # Лига наций — логотип турнира
     assert await icons.assign(bot, "unl", 1) == "e0" and (await icons.mapping(bot))["unl"] == "e0"
     with pytest.raises(ValueError):
         await icons.assign(bot, "unl", 99)
