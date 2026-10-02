@@ -1893,12 +1893,12 @@ async function plinkoDrop() {
 
 const PK_COLS = 7;
 const PK_N = 16;                        // размер текстуры блока в пикселях
-const PK_ORE = { chest: ["#F2C14E", "#8A5520", "#FFE7A3", "#2B1D0E"], coal: ["#B8B8B8", "#2A2A2A", "#DADADA", "#111111"], copper: ["#E8875A", "#3FA88C", "#F5B898", "#5E3420"],
+const PK_ORE = { coal: ["#B8B8B8", "#2A2A2A", "#DADADA", "#111111"], copper: ["#E8875A", "#3FA88C", "#F5B898", "#5E3420"],
   iron: ["#E2BBA0", "#AF8E77", "#F5DCCB", "#5E4535"], lapis: ["#4C7DF0", "#173A9C", "#9AB8FF", "#0D1F57"], gold: ["#FFE45C", "#E8A317", "#FFF8C9", "#7A5205"], redstone: ["#FF3B2F", "#B0140C", "#FFB3AA", "#5E0704"],
   diamond: ["#7DF9FF", "#1CB8C9", "#E8FFFF", "#0A5E66"], emerald: ["#4CFF84", "#14A84A", "#D2FFE0", "#085A25"] };
-const PK_ORE_NAMES = { coal: "Уголь", chest: "Сундук", copper: "Медь", iron: "Железо", gold: "Золото", redstone: "Редстоун",
+const PK_ORE_NAMES = { coal: "Уголь", copper: "Медь", iron: "Железо", gold: "Золото", redstone: "Редстоун",
   lapis: "Лазурит", diamond: "Алмаз", emerald: "Изумруд" };
-const PK_ORE_ORDER = ["coal", "copper", "iron", "gold", "redstone", "lapis", "chest", "diamond", "emerald"];
+const PK_ORE_ORDER = ["coal", "copper", "iron", "gold", "redstone", "lapis", "diamond", "emerald"];
 // цвета головки по уровням кирки (контур, основной, светлый, блик-серый, яркий блик)
 const PK_PICK = {
   wood: { O: "#2E2414", M: "#6B5428", L: "#8C6A34", Q: "#7A6030", H: "#A8803F" },
@@ -1999,12 +1999,6 @@ function pkTexture(type, v = 0, deep = 0) {
     T.forEach(([a, b]) => set(1 + a, 5 + b, "#1A1A1A"));
     NN.forEach(([a, b]) => set(6 + a - 0, 5 + b, "#1A1A1A"));
     T.forEach(([a, b]) => set(12 + a, 5 + b, "#1A1A1A"));
-  } else if (type === "chest") {           // сундук в стиле Minecraft
-    const C = { D: "#2B1D0E", B: "#A0682A", b: "#7E4F1E", d: "#5C3A14", L: "#D9D9D9", l: "#7A7A7A" };
-    ["DDDDDDDDDDDDDDDD", "DBBBBBBBBBBBBBBD", "DBbBBBBBBBBBBbBD", "DBBBBBBBBBBBBBBD", "DBBBBBBBBBBBBBBD",
-      "DddddddLLddddddD", "DddddddLlddddddD", "DBBBBBDllDBBBBBD", "DBBBBBBDDBBBBBBD", "DBbBBBBBBBBBBbBD",
-      "DBBBBBBBBBBBBBBD", "DBBBBBBBBBBBBBBD", "DBbBBBBBBBBBBbBD", "DBBBBBBBBBBBBBBD", "DbbbbbbbbbbbbbbD",
-      "DDDDDDDDDDDDDDDD"].forEach((row, j) => [...row].forEach((ch, i) => set(i, j, C[ch])));
   } else if (type === "bench") {           // верстак в стиле Minecraft: столешница, доски, инструменты
     const C = { D: "#3E2C14", T: "#C29D63", L: "#D9B57A", P: "#9C7A45", p: "#7A5C31", G: "#B9B9B9", g: "#6E6E6E", h: "#5A3E1C" };
     ["DDDDDDDDDDDDDDDD", "DTTLTTTDTTLTTTTD", "DTLTTLTDTTTTLTTD", "DDDDDDDDDDDDDDDD", "DPpPGGGPPpPPhPPD",
@@ -2084,10 +2078,10 @@ function pkDeco(x, y) {     // блоки вокруг шахты — прост
 }
 
 // Мир партии приходит с сервера строками кодов; у каждой клетки — тип и оставшиеся HP
-const PK_CODE = { g: "grass", h: "chest", d: "dirt", s: "stone", c: "coal", u: "copper", i: "iron", o: "gold", r: "redstone",
+const PK_CODE = { g: "grass", d: "dirt", s: "stone", c: "coal", u: "copper", i: "iron", o: "gold", r: "redstone",
   l: "lapis", a: "diamond", e: "emerald", t: "tnt", b: "bench" };
 const now = () => performance.now();
-const PK_HARD = { grass: 1, chest: 3, dirt: 1, tnt: 1, bench: 1, stone: 2, coal: 2, copper: 2, iron: 3, gold: 3, redstone: 3,
+const PK_HARD = { grass: 1, dirt: 1, tnt: 1, bench: 1, stone: 2, coal: 2, copper: 2, iron: 3, gold: 3, redstone: 3,
   lapis: 3, diamond: 5, emerald: 5 };
 
 function pkWorld(rows) {

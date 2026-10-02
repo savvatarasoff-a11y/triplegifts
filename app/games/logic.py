@@ -142,23 +142,23 @@ _PICK_PTS = tuple((((i + 0.5) / 16 - 0.5) * PICK_SIZE, ((j + 0.5) / 16 - 0.5) * 
 _PICK_BR = max(math.hypot(x, y) for x, y in _PICK_PTS) + 0.02
 # HP блоков по ценности; руды одной прочности в физике неотличимы — на этом держится точный расчёт RTP ниже
 PICK_HARD = {"grass": 1, "dirt": 1, "tnt": 1, "bench": 1, "stone": 2, "coal": 2, "copper": 2,
-             "iron": 3, "gold": 3, "redstone": 3, "lapis": 3, "chest": 3, "diamond": 5, "emerald": 5}
+             "iron": 3, "gold": 3, "redstone": 3, "lapis": 3, "diamond": 5, "emerald": 5}
 PICK_CODES = {"grass": "g", "dirt": "d", "stone": "s", "coal": "c", "copper": "u", "iron": "i", "gold": "o",
-              "redstone": "r", "lapis": "l", "chest": "h", "diamond": "a", "emerald": "e", "tnt": "t", "bench": "b"}
+              "redstone": "r", "lapis": "l", "diamond": "a", "emerald": "e", "tnt": "t", "bench": "b"}
 _PAY_CLASSES = (2, 3, 5)
 PICK_WEIGHTS = {"dirt": 28, "stone": 38, "coal": 8, "copper": 5, "iron": 4, "gold": 4, "redstone": 3, "lapis": 2,
-                "chest": 1.2, "diamond": 0.6, "emerald": 0.05, "tnt": 2, "bench": 1.6}
-_PICK_VALUES = {"coal": 0.5, "copper": 0.8, "iron": 1, "gold": 3, "redstone": 5, "lapis": 6, "chest": 8,
-                "diamond": 40, "emerald": 400}
+                "diamond": 0.6, "emerald": 0.05, "tnt": 2, "bench": 1.6}
+_PICK_VALUES = {"coal": 0.5, "copper": 0.8, "iron": 1, "gold": 3, "redstone": 5, "lapis": 6, "diamond": 40,
+                "emerald": 400}
 ORES = tuple(_PICK_VALUES)
 # Среднее число сломанных блоков каждого класса прочности за игру каждой киркой (Монте-Карло, 50000 игр;
 # пересчитать: pickaxe_class_counts). Тип блока внутри класса на физику не влияет, поэтому
 # E[выигрыш] = Σ по классам E[N_класса] × средняя ценность руды класса — без шума от редких изумрудов.
 PICKAXE_CLASS_COUNTS: dict[str, dict[int, float]] = {
-    "wood": {2: 4.3971, 3: 0.9146, 5: 0.0225},
-    "iron": {2: 12.5309, 3: 2.8865, 5: 0.089},
-    "gold": {2: 20.9976, 3: 4.9832, 5: 0.1611},
-    "diamond": {2: 29.4733, 3: 7.0739, 5: 0.2331},
+    "wood": {2: 4.4736, 3: 0.8472, 5: 0.0213},
+    "iron": {2: 12.8333, 3: 2.7024, 5: 0.0875},
+    "gold": {2: 21.4981, 3: 4.6597, 5: 0.1611},
+    "diamond": {2: 30.1893, 3: 6.6247, 5: 0.2356},
 }
 
 
