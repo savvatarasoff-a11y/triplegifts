@@ -47,7 +47,10 @@ def test_pickaxe_physics_and_rtp():
     ev = run["events"]
     assert ev and ev[-1]["hp"] == 0 and all(a["t"] <= b["t"] for a, b in zip(ev, ev[1:]))
     assert all(len(row) == g.PICK_COLS for row in run["world"]) and set(run["world"][0]) == {"g"}   # сверху трава
-    assert run["start"]["a"] == 0 and (run["start"]["x"], run["start"]["y"]) == g.PICK_START       # из барабана
+    # из барабана: центр спрайта — в центре барабана, физика ведёт центр тяжести (он ближе к наконечнику)
+    com = [(g.PICK_COM[i] - 8) / 16 * g.PICK_SIZE for i in (0, 1)]
+    assert run["start"]["a"] == 0 and run["start"]["x"] == pytest.approx(g.PICK_START[0] + com[0])
+    assert run["start"]["y"] == pytest.approx(g.PICK_START[1] + com[1]) and com[0] > 0 and com[1] < 0
     codes = {v: k for k, v in g.PICK_CODES.items()}
     # прочность: −PICK_TOUCH за касание блока, стены и выталкивания бесплатны, верстак чинит полностью
     lv = 0
