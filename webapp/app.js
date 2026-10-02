@@ -2598,6 +2598,7 @@ const FB_STATUS = { open: "В игре", won: "Выигрыш", lost: "Прои�
 const fb = { league: "", view: "matches", events: {}, sel: null };
 const escH = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fbOdds = (o) => Number(o).toFixed(2);
+const fbLogo = (url) => (/^https:\/\//.test(url || "") ? `<img class="fb-logo" src="${escH(url)}" alt="" loading="lazy">` : "");
 
 function footballEnter() { fbLoad(); }
 
@@ -2625,7 +2626,7 @@ async function fbLoad() {
       const w = fbWhen(e.kickoff), l = leagues[e.league] || { icon: "⚽", name: "" };
       if (w.day !== day) { day = w.day; html += `<div class="fb-day">${escH(day)}</div>`; }
       html += `<div class="fb-match"><div class="fb-meta"><span>${l.icon} ${escH(l.name)}</span><span>${w.time}</span></div>`
-        + `<div class="fb-teams"><span>${escH(e.home)}</span><span>${escH(e.away)}</span></div><div class="fb-odds">`
+        + `<div class="fb-teams"><span>${fbLogo(e.home_logo)}${escH(e.home)}</span><span>${fbLogo(e.away_logo)}${escH(e.away)}</span></div><div class="fb-odds">`
         + ["home", "draw", "away"].map((p) => `<button data-e="${escH(e.id)}" data-p="${p}"><span>${FB_PICK[p]}</span>${fbOdds(e.odds[p])}</button>`).join("")
         + "</div></div>";
     }

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -23,7 +22,7 @@ from .gifts import notify_deposits, scan as gifts_scan
 from .nftimg import NftImages
 from .nft import deliver_waiting, reprice_demo, sync as sync_nfts
 from .relayer import Relayer
-from .sports import OddsClient, Sportsbook
+from .sports import Sportsbook
 from . import ton as ton_mod
 from .web import build_app
 from .withdraw import approve_waiting
@@ -262,7 +261,7 @@ async def run() -> None:
     if await relayer.start():
         relayer.on_private_message(on_relayer_message)
 
-    sports = Sportsbook(casino, OddsClient(os.getenv("ODDS_API_KEY")))
+    sports = Sportsbook(casino)
     runner = web.AppRunner(build_app(cfg, casino, bot, relayer, images, sports), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", cfg.port).start()

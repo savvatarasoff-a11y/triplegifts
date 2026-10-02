@@ -131,7 +131,7 @@ SUB_OK_STATUSES = {"member", "administrator", "creator", "restricted"}
 
 def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = None,
               images: NftImages | None = None, sports: "sp.Sportsbook | None" = None) -> web.Application:
-    sports = sports or sp.Sportsbook(casino, sp.OddsClient(os.getenv("ODDS_API_KEY")))
+    sports = sports or sp.Sportsbook(casino)
     sub_cache: dict[int, tuple[float, bool]] = {}
 
     async def subscribed(user_id: int, fresh: bool = False) -> bool:

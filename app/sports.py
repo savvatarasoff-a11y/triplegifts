@@ -1,16 +1,22 @@
-"""Ставки на футбол: матчи и коэффициенты букмекеров — The Odds API, наша маржа поверх, расчёт по итоговому счёту.
+"""Ставки на футбол без платных API: матчи, счета и линии — из открытого JSON ESPN.
 
-Игрок ставит на исход основного времени (П1 / Х / П2) до начала матча; коэффициент фиксируется в момент ставки.
-После матча фоновый цикл берёт счёт и рассчитывает ставки. Матч без результата через 3 дня после начала — возврат.
+Коэффициенты:
+  1) если ESPN отдаёт линию букмекера (американские moneyline) — переводим в вероятности, убираем маржу
+     букмекера и добавляем нашу (MARGIN_BOOK);
+  2) иначе — своя модель Пуассона по турнирным таблицам (атака/оборона команд, преимущество поля),
+     с маржой выше (MARGIN_MODEL) и меньшим лимитом на матч;
+  3) нет ни линии, ни данных о командах — матч не показываем (лучше пропустить, чем ошибиться в цене).
+
+Ставка — на исход основного времени (П1 / Х / П2), коэффициент фиксируется в момент ставки. Если матч дошёл
+до дополнительного времени или пенальти, основное время закончилось вничью — ставки рассчитываются как «Х».
+Перенос/отмена или нет результата 3 дня — возврат.
 """
 from __future__ import annotations
 
-import json
 import logging
 import math
-import os
-import statistics
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 import aiohttp
@@ -20,24 +26,36 @@ from .casino import Casino, GameError
 
 log = logging.getLogger(__name__)
 
-API = "https://api.the-odds-api.com/v4"
-# ключ лиги: (ключ The Odds API, название, значок)
+ESPN = "https://site.api.espn.com/apis"
+# ключ лиги: (код ESPN, название, значок)
 LEAGUES: dict[str, tuple[str, str, str]] = {
-    "epl": ("soccer_epl", "АПЛ", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"),
-    "laliga": ("soccer_spain_la_liga", "Ла Лига", "🇪🇸"),
-    "ligue1": ("soccer_france_ligue_one", "Лига 1", "🇫🇷"),
-    "ucl": ("soccer_uefa_champs_league", "Лига чемпионов", "🏆"),
-    "unl": ("soccer_uefa_nations_league", "Лига наций", "🌍"),
+    "epl": ("eng.1", "АПЛ", "🏴󠁧󠁢󠁥󠁮󠁧󠁿"),
+    "laliga": ("esp.1", "Ла Лига", "🇪🇸"),
+    "ligue1": ("fra.1", "Лига 1", "🇫🇷"),
+    "ucl": ("uefa.champions", "Лига чемпионов", "🏆"),
+    "unl": ("uefa.nations", "Лига наций", "🌍"),
 }
+# таблицы, из которых модель берёт силу клубов (и для еврокубков), и поправка на уровень лиги
+STRENGTH_LEAGUES = {"eng.1": 1.0, "esp.1": 0.97, "ger.1": 0.95, "ita.1": 0.95, "fra.1": 0.9, "por.1": 0.82,
+                    "ned.1": 0.8}
 PICKS = ("home", "draw", "away")
-MARGIN = 0.08               # наша маржа: сумма обратных коэффициентов = 1.08
-MIN_ODDS, MAX_ODDS = 1.03, 25.0
+MARGIN_BOOK = 0.08          # маржа поверх линии букмекера
+MARGIN_MODEL = 0.12         # маржа поверх своей модели (она грубее — запас больше)
+MIN_ODDS, MAX_ODDS, MAX_ODDS_MODEL = 1.03, 25.0, 12.0
+MODEL_STAKE_SHARE = 0.2     # по модели на один матч — не больше 20% максимальной ставки
 CLOSE_BEFORE = 60           # приём ставок закрывается за минуту до начала
-ODDS_MAX_AGE = 24 * 3600    # по устаревшим коэффициентам не принимаем
-ODDS_EVERY = float(os.getenv("ODDS_REFRESH_HOURS", "8")) * 3600   # бесплатный тариф — 500 запросов в месяц
-SCORES_EVERY = 3 * 3600     # счёт по лиге запрашиваем не чаще, пока есть нерассчитанные ставки
+ODDS_MAX_AGE = 3 * 3600     # коэффициенты старше — ставки не принимаем
+FIXTURES_EVERY = 30 * 60    # расписание и линии
+STANDINGS_EVERY = 6 * 3600  # таблицы для модели
+SCORES_EVERY = 15 * 60      # счёт по лиге, пока есть нерассчитанные ставки
 SETTLE_AFTER = 110 * 60     # матч идёт ~2 часа — раньше счёт не спрашиваем
 VOID_AFTER = 3 * 24 * 3600  # результата нет через 3 дня после начала — ставки возвращаем
+AHEAD_DAYS = 8              # сколько дней вперёд показываем матчи
+HOME_GOALS, AWAY_GOALS = 1.5, 1.15     # средние голы хозяев и гостей в топ-лигах
+SHRINK = 6                  # «виртуальных» средних матчей в оценке силы — меньше шума в начале сезона
+MIN_GAMES = 3               # меньше сыгранных матчей — модель не верит таблице
+EXTRA_TIME = ("AET", "PEN", "EXTRA", "SHOOTOUT")   # статусы ESPN: доп. время / пенальти
+VOID_STATUS = ("POSTPONED", "CANCELED", "CANCELLED", "ABANDONED", "SUSPENDED", "FORFEIT")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sport_events (
@@ -69,171 +87,301 @@ CREATE TABLE IF NOT EXISTS sport_bets (
 CREATE INDEX IF NOT EXISTS sport_bets_open ON sport_bets(status, event_id);
 CREATE INDEX IF NOT EXISTS sport_events_league ON sport_events(league, kickoff);
 """
+EXTRA_COLUMNS = {"source": "TEXT NOT NULL DEFAULT 'book'", "home_logo": "TEXT", "away_logo": "TEXT"}
 
 
-def price(event: dict[str, Any]) -> tuple[float, float, float] | None:
-    """Наши коэффициенты П1/Х/П2: медиана по букмекерам → вероятности без их маржи → наша маржа."""
-    home, away = event.get("home_team"), event.get("away_team")
-    seen: dict[str, list[float]] = {"home": [], "draw": [], "away": []}
-    for bm in event.get("bookmakers") or []:
-        for market in bm.get("markets") or []:
-            if market.get("key") != "h2h":
-                continue
-            for o in market.get("outcomes") or []:
-                key = "home" if o.get("name") == home else "away" if o.get("name") == away else \
-                    "draw" if o.get("name") == "Draw" else None
-                p = o.get("price")
-                if key and isinstance(p, (int, float)) and p > 1:
-                    seen[key].append(float(p))
-    if not all(seen.values()):
+# ---------- коэффициенты ----------
+
+def american(ml: Any) -> float | None:
+    """Американская линия (+150 / -200 / "+150") → десятичный коэффициент."""
+    try:
+        v = float(str(ml).replace("+", "").strip())
+    except (TypeError, ValueError):
         return None
-    implied = {k: 1 / statistics.median(v) for k, v in seen.items()}
-    total = sum(implied.values())
+    if v >= 100:
+        return 1 + v / 100
+    if v <= -100:
+        return 1 + 100 / -v
+    return None
+
+
+def with_margin(probs: tuple[float, float, float], margin: float, max_odds: float) -> tuple[float, float, float]:
+    total = sum(probs)
     out = []
-    for k in PICKS:
-        fair = implied[k] / total
-        odds = math.floor(100 / (fair * (1 + MARGIN))) / 100       # вниз — маржа не меньше заявленной
-        out.append(min(MAX_ODDS, max(MIN_ODDS, odds)))
+    for p in probs:
+        odds = math.floor(100 / (p / total * (1 + margin))) / 100     # вниз — маржа не меньше заявленной
+        out.append(min(max_odds, max(MIN_ODDS, odds)))
     return out[0], out[1], out[2]
+
+
+def book_odds(comp: dict[str, Any]) -> tuple[float, float, float] | None:
+    """Линия букмекера из события ESPN (разные форматы ответа), с нашей маржой."""
+    for o in comp.get("odds") or []:
+        h = american((o.get("homeTeamOdds") or {}).get("moneyLine"))
+        a = american((o.get("awayTeamOdds") or {}).get("moneyLine"))
+        d = american((o.get("drawOdds") or {}).get("moneyLine"))
+        if not (h and a and d):
+            ml = o.get("moneyline") or {}
+            pick = lambda side: american(((ml.get(side) or {}).get("close") or (ml.get(side) or {}).get("open") or {})
+                                         .get("odds"))
+            h, a, d = pick("home"), pick("away"), pick("draw")
+        if h and a and d:
+            return with_margin((1 / h, 1 / d, 1 / a), MARGIN_BOOK, MAX_ODDS)
+    return None
+
+
+def poisson_probs(lh: float, la: float, up_to: int = 10) -> tuple[float, float, float]:
+    ph = [math.exp(-lh) * lh ** k / math.factorial(k) for k in range(up_to + 1)]
+    pa = [math.exp(-la) * la ** k / math.factorial(k) for k in range(up_to + 1)]
+    home = sum(ph[i] * pa[j] for i in range(up_to + 1) for j in range(up_to + 1) if i > j)
+    draw = sum(ph[i] * pa[i] for i in range(up_to + 1))
+    return home, draw, max(0.0, 1 - home - draw)
+
+
+def model_odds(home: dict[str, float] | None, away: dict[str, float] | None,
+               neutral: bool = False) -> tuple[float, float, float] | None:
+    """Своя цена по силе команд (атака/оборона относительно лиги, с поправкой на уровень лиги)."""
+    if not home or not away:
+        return None
+    hg, ag = (HOME_GOALS, AWAY_GOALS) if not neutral else ((HOME_GOALS + AWAY_GOALS) / 2,) * 2
+    lh = hg * home["att"] * away["def"]
+    la = ag * away["att"] * home["def"]
+    return with_margin(poisson_probs(lh, la), MARGIN_MODEL, MAX_ODDS_MODEL)
+
+
+def strengths(standings: dict[str, Any], level: float) -> dict[str, dict[str, float]]:
+    """Сила клубов из таблицы ESPN: атака и оборона относительно среднего по лиге, со сжатием к среднему."""
+    rows = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for e in (node.get("standings") or {}).get("entries") or []:
+                rows.append(e)
+            for v in node.values():
+                if isinstance(v, (dict, list)):
+                    walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk(standings)
+    teams = {}
+    for e in rows:
+        st = {s.get("name"): s.get("value") for s in e.get("stats") or []}
+        gp = st.get("gamesPlayed")
+        gf = st.get("pointsFor", st.get("goalsFor"))
+        ga = st.get("pointsAgainst", st.get("goalsAgainst"))
+        tid = str((e.get("team") or {}).get("id") or "")
+        if tid and gp and gf is not None and ga is not None:
+            teams[tid] = (float(gp), float(gf), float(ga))
+    total_gp = sum(v[0] for v in teams.values())
+    if not total_gp:
+        return {}
+    avg = sum(v[1] for v in teams.values()) / total_gp            # голов за матч на команду
+    out = {}
+    for tid, (gp, gf, ga) in teams.items():
+        if gp < MIN_GAMES or avg <= 0:
+            continue
+        att = (gf + SHRINK * avg) / (gp + SHRINK) / avg
+        dfn = (ga + SHRINK * avg) / (gp + SHRINK) / avg
+        out[tid] = {"att": att * level, "def": dfn / level}
+    return out
+
+
+def main_time_result(comp: dict[str, Any]) -> str | None:
+    """Исход основного времени завершённого матча ESPN; None — ещё не сыгран; 'void' — перенос/отмена."""
+    st = ((comp.get("status") or {}).get("type") or {})
+    name = str(st.get("name") or "").upper()
+    if any(v in name for v in VOID_STATUS):
+        return "void"
+    if not st.get("completed") or st.get("state") != "post":
+        return None
+    if any(v in name for v in EXTRA_TIME):
+        return "draw"                  # дошли до доп. времени — значит основное закончилось вничью
+    sides = {c.get("homeAway"): c for c in comp.get("competitors") or []}
+    try:
+        hs, as_ = int(sides["home"]["score"]), int(sides["away"]["score"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return result_of(hs, as_)
 
 
 def result_of(home_score: int, away_score: int) -> str:
     return "home" if home_score > away_score else "away" if away_score > home_score else "draw"
 
 
-class OddsClient:
-    """The Odds API. Без ключа (ODDS_API_KEY) раздел футбола выключен."""
+def scores_of(comp: dict[str, Any]) -> tuple[int | None, int | None]:
+    sides = {c.get("homeAway"): c for c in comp.get("competitors") or []}
+    try:
+        return int(sides["home"]["score"]), int(sides["away"]["score"])
+    except (KeyError, TypeError, ValueError):
+        return None, None
 
-    def __init__(self, api_key: str | None):
-        self.api_key = (api_key or "").strip()
-        self.remaining: str | None = None
 
-    @property
-    def enabled(self) -> bool:
-        return bool(self.api_key)
+class EspnClient:
+    """Открытый JSON ESPN — без ключа и лимитов."""
 
-    async def _get(self, path: str, **params: Any) -> list[dict[str, Any]]:
-        params = {"apiKey": self.api_key, "dateFormat": "unix", **params}
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
-            async with s.get(f"{API}{path}", params=params) as r:
-                self.remaining = r.headers.get("x-requests-remaining", self.remaining)
+    enabled = True
+
+    async def _get(self, url: str, **params: Any) -> dict[str, Any]:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20),
+                                         headers={"User-Agent": "Mozilla/5.0"}) as s:
+            async with s.get(url, params=params) as r:
                 if r.status != 200:
-                    raise RuntimeError(f"The Odds API: HTTP {r.status}")
-                return await r.json()
+                    raise RuntimeError(f"ESPN: HTTP {r.status}")
+                return await r.json(content_type=None)
 
-    async def odds(self, sport: str) -> list[dict[str, Any]]:
-        return await self._get(f"/sports/{sport}/odds", regions="eu", markets="h2h", oddsFormat="decimal")
+    async def scoreboard(self, code: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        data = await self._get(f"{ESPN}/site/v2/sports/soccer/{code}/scoreboard",
+                               dates=f"{start:%Y%m%d}-{end:%Y%m%d}", limit=300)
+        return data.get("events") or []
 
-    async def scores(self, sport: str) -> list[dict[str, Any]]:
-        return await self._get(f"/sports/{sport}/scores", daysFrom=3)
+    async def standings(self, code: str) -> dict[str, Any]:
+        return await self._get(f"{ESPN}/v2/sports/soccer/{code}/standings")
 
 
 Notify = Callable[[int, str], Awaitable[None]]
 
 
 class Sportsbook:
-    def __init__(self, casino: Casino, client: OddsClient):
-        self.casino, self.db, self.client = casino, casino.db, client
+    def __init__(self, casino: Casino, client: Any = None):
+        self.casino, self.db = casino, casino.db
+        self.client = client or EspnClient()
+        self.power: dict[str, dict[str, float]] = {}     # сила клубов: id команды ESPN → att/def
 
     async def init(self) -> None:
         await self.db.conn.executescript(SCHEMA)
-
-    # ---------- данные с The Odds API ----------
+        await self.db._add_columns("sport_events", EXTRA_COLUMNS)
 
     async def _due(self, key: str, every: float) -> bool:
-        last = float(await self.db.kv_get(key) or 0)
-        return time.time() - last >= every
+        return time.time() - float(await self.db.kv_get(key) or 0) >= every
+
+    # ---------- данные ESPN ----------
+
+    async def refresh_strength(self, force: bool = False) -> int:
+        if not force and self.power and not await self._due("sports:standings_at", STANDINGS_EVERY):
+            return len(self.power)
+        power: dict[str, dict[str, float]] = {}
+        for code, level in STRENGTH_LEAGUES.items():
+            try:
+                power.update(strengths(await self.client.standings(code), level))
+            except Exception as e:
+                log.warning("Таблица %s не получена: %s", code, e)
+        if power:
+            self.power = power
+            await self.db.kv_set("sports:standings_at", str(time.time()))
+        return len(self.power)
+
+    def price(self, comp: dict[str, Any], neutral: bool = False) -> tuple[tuple[float, float, float] | None, str]:
+        odds = book_odds(comp)
+        if odds:
+            return odds, "book"
+        sides = {c.get("homeAway"): c for c in comp.get("competitors") or []}
+        tid = lambda side: str(((sides.get(side) or {}).get("team") or {}).get("id") or "")
+        return model_odds(self.power.get(tid("home")), self.power.get(tid("away")), neutral), "model"
 
     async def refresh_odds(self, force: bool = False) -> int:
-        """Матчи и коэффициенты по всем лигам (не чаще ODDS_EVERY на лигу). Возвращает число обновлённых матчей."""
-        if not self.client.enabled:
+        """Расписание и коэффициенты на AHEAD_DAYS вперёд по всем лигам. Возвращает число матчей с ценой."""
+        if not force and not await self._due("sports:fixtures_at", FIXTURES_EVERY):
             return 0
+        await self.refresh_strength()
+        now = time.time()
+        today = datetime.now(timezone.utc)
         n = 0
-        for league, (sport, _, _) in LEAGUES.items():
-            key = f"sports:odds_at:{league}"
-            if not force and not await self._due(key, ODDS_EVERY):
-                continue
+        for league, (code, _, _) in LEAGUES.items():
             try:
-                events = await self.client.odds(sport)
+                events = await self.client.scoreboard(code, today, today + timedelta(days=AHEAD_DAYS))
             except Exception as e:
-                log.warning("Коэффициенты %s не получены: %s", league, e)
+                log.warning("Матчи %s не получены: %s", league, e)
                 continue
-            await self.db.kv_set(key, str(time.time()))
-            now = time.time()
             async with self.db.tx() as c:
                 for ev in events:
-                    kickoff = float(ev.get("commence_time") or 0)
-                    odds = price(ev)
-                    if not ev.get("id") or kickoff <= now or odds is None:
+                    comp = (ev.get("competitions") or [{}])[0]
+                    state = ((comp.get("status") or {}).get("type") or {}).get("state")
+                    kickoff = _ts(comp.get("date") or ev.get("date"))
+                    sides = {x.get("homeAway"): x for x in comp.get("competitors") or []}
+                    if state != "pre" or not kickoff or kickoff <= now or "home" not in sides or "away" not in sides:
                         continue
+                    odds, source = self.price(comp, bool(comp.get("neutralSite")))
+                    if odds is None:
+                        continue
+                    team = lambda s: sides[s].get("team") or {}
                     await c.execute(
-                        "INSERT INTO sport_events(id, league, home, away, kickoff, odds_home, odds_draw, odds_away, odds_at)"
-                        " VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kickoff=excluded.kickoff,"
-                        " odds_home=excluded.odds_home, odds_draw=excluded.odds_draw, odds_away=excluded.odds_away,"
-                        " odds_at=excluded.odds_at WHERE status='open'",
-                        (ev["id"], league, ev["home_team"], ev["away_team"], kickoff, *odds, now),
-                    )
+                        "INSERT INTO sport_events(id, league, home, away, kickoff, odds_home, odds_draw, odds_away, "
+                        "odds_at, source, home_logo, away_logo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET kickoff=excluded.kickoff, odds_home=excluded.odds_home, "
+                        "odds_draw=excluded.odds_draw, odds_away=excluded.odds_away, odds_at=excluded.odds_at, "
+                        "source=excluded.source WHERE status='open'",
+                        (f"espn:{ev['id']}", league, team("home").get("displayName") or "?",
+                         team("away").get("displayName") or "?", kickoff, *odds, now, source,
+                         team("home").get("logo"), team("away").get("logo")))
                     n += 1
-            log.info("Футбол %s: %s матчей, запросов к API осталось %s", league, len(events), self.client.remaining)
+        await self.db.kv_set("sports:fixtures_at", str(now))
+        log.info("Футбол: %s матчей с коэффициентами", n)
         return n
 
     async def settle_pending(self, notify: Notify | None = None) -> int:
-        """Рассчитывает ставки на сыгранные матчи и возвращает ставки на матчи без результата. Число рассчитанных."""
+        """Рассчитывает ставки на сыгранные матчи, возвращает ставки на перенесённые/отменённые. Число рассчитанных."""
         now = time.time()
-        pending = await self.db.all(
-            "SELECT DISTINCT e.league FROM sport_bets b JOIN sport_events e ON e.id=b.event_id "
-            "WHERE b.status='open' AND b.kickoff < ?", now - SETTLE_AFTER)
+        rows = await self.db.all(
+            "SELECT e.league, MIN(b.kickoff) k0, MAX(b.kickoff) k1 FROM sport_bets b JOIN sport_events e "
+            "ON e.id=b.event_id WHERE b.status='open' AND b.kickoff < ? GROUP BY e.league", now - SETTLE_AFTER)
         done = 0
-        if self.client.enabled:
-            for row in pending:
-                league = row["league"]
-                key = f"sports:scores_at:{league}"
-                if league not in LEAGUES or not await self._due(key, SCORES_EVERY):
+        for row in rows:
+            league = row["league"]
+            key = f"sports:scores_at:{league}"
+            if league not in LEAGUES or not await self._due(key, SCORES_EVERY):
+                continue
+            start = datetime.fromtimestamp(row["k0"], timezone.utc) - timedelta(days=1)
+            end = datetime.fromtimestamp(row["k1"], timezone.utc) + timedelta(days=1)
+            try:
+                events = await self.client.scoreboard(LEAGUES[league][0], start, end)
+            except Exception as e:
+                log.warning("Счёт %s не получен: %s", league, e)
+                continue
+            await self.db.kv_set(key, str(now))
+            for ev in events:
+                comp = (ev.get("competitions") or [{}])[0]
+                res = main_time_result(comp)
+                if res is None:
                     continue
-                try:
-                    games = await self.client.scores(LEAGUES[league][0])
-                except Exception as e:
-                    log.warning("Счёт %s не получен: %s", league, e)
+                eid = f"espn:{ev['id']}"
+                if res == "void":
+                    for bet in await self.db.all("SELECT * FROM sport_bets WHERE event_id=? AND status='open'", eid):
+                        await self._void(bet, notify)
+                        done += 1
                     continue
-                await self.db.kv_set(key, str(now))
-                for game in games:
-                    if not game.get("completed") or not game.get("scores"):
-                        continue
-                    sc = {s.get("name"): s.get("score") for s in game["scores"]}
-                    try:
-                        hs, as_ = int(sc[game["home_team"]]), int(sc[game["away_team"]])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    done += await self.settle_event(game["id"], hs, as_, notify)
-        # без результата слишком долго (перенос, отмена) — возврат
+                hs, as_ = scores_of(comp)
+                done += await self.settle_event(eid, hs, as_, notify, result=res)
+        # без результата слишком долго — возврат
         for bet in await self.db.all("SELECT * FROM sport_bets WHERE status='open' AND kickoff < ?", now - VOID_AFTER):
             await self._void(bet, notify)
             done += 1
         return done
 
-    async def settle_event(self, event_id: str, home_score: int, away_score: int, notify: Notify | None = None) -> int:
+    async def settle_event(self, event_id: str, home_score: int | None, away_score: int | None,
+                           notify: Notify | None = None, result: str | None = None) -> int:
         ev = await self.db.one("SELECT * FROM sport_events WHERE id=?", event_id)
         if not ev:
             return 0
-        res = result_of(home_score, away_score)
+        res = result or result_of(home_score or 0, away_score or 0)
         bets = await self.db.all("SELECT * FROM sport_bets WHERE event_id=? AND status='open'", event_id)
         now = time.time()
         msgs = []
+        score = f"{home_score}:{away_score}" if home_score is not None else ""
         async with self.db.tx() as c:
             await c.execute("UPDATE sport_events SET status='done', home_score=?, away_score=?, settled_at=? WHERE id=?",
                             (home_score, away_score, now, event_id))
             for b in bets:
                 won = b["pick"] == res
                 payout = math.floor(b["amount"] * b["odds"]) if won else 0
-                cur = b["cur"]
                 detail = {"match": f"{ev['home']} — {ev['away']}", "pick": b["pick"], "odds": b["odds"],
-                          "score": f"{home_score}:{away_score}", "league": ev["league"]}
-                await self.casino._settle(c, b["user_id"], "football", b["amount"], payout, detail, cur)
+                          "score": score, "result": res, "league": ev["league"]}
+                await self.casino._settle(c, b["user_id"], "football", b["amount"], payout, detail, b["cur"])
                 await c.execute("UPDATE sport_bets SET status=?, payout=?, settled_at=? WHERE id=?",
                                 ("won" if won else "lost", payout, now, b["id"]))
-                score = f"{ev['home']} {home_score}:{away_score} {ev['away']}"
-                msgs.append((b["user_id"], f"✅ Ставка сыграла: {score}\nВыигрыш {money.fmt(payout, cur)}" if won
-                             else f"❌ Ставка не сыграла: {score}"))
+                line = f"{ev['home']} {score} {ev['away']}".replace("  ", " — ")
+                msgs.append((b["user_id"], f"✅ Ставка сыграла: {line}\nВыигрыш {money.fmt(payout, b['cur'])}" if won
+                             else f"❌ Ставка не сыграла: {line}"))
         if notify:
             for uid, text in msgs:
                 try:
@@ -244,9 +392,12 @@ class Sportsbook:
 
     async def _void(self, bet: dict[str, Any], notify: Notify | None) -> None:
         async with self.db.tx() as c:
+            res = await c.execute("UPDATE sport_bets SET status='void', payout=?, settled_at=? WHERE id=? AND status='open'",
+                                  (bet["amount"], time.time(), bet["id"]))
+            if res.rowcount != 1:
+                return
             await self.db.change_balance(c, bet["user_id"], bet["amount"], "refund", "football", bet["cur"])
-            await c.execute("UPDATE sport_bets SET status='void', payout=?, settled_at=? WHERE id=?",
-                            (bet["amount"], time.time(), bet["id"]))
+            await c.execute("UPDATE sport_events SET status='void' WHERE id=? AND status='open'", (bet["event_id"],))
         if notify:
             try:
                 await notify(bet["user_id"], f"↩️ Матч не состоялся — ставка {money.fmt(bet['amount'], bet['cur'])} возвращена")
@@ -261,6 +412,7 @@ class Sportsbook:
                + ("AND league=? " if league else "") + "ORDER BY kickoff LIMIT 80")
         args = (now + CLOSE_BEFORE, now - ODDS_MAX_AGE) + ((league,) if league else ())
         return [{"id": e["id"], "league": e["league"], "home": e["home"], "away": e["away"], "kickoff": e["kickoff"],
+                 "home_logo": e["home_logo"], "away_logo": e["away_logo"],
                  "odds": {"home": e["odds_home"], "draw": e["odds_draw"], "away": e["odds_away"]}}
                 for e in await self.db.all(sql, *args)]
 
@@ -283,8 +435,10 @@ class Sportsbook:
         if not ev["odds_at"] or now - ev["odds_at"] > ODDS_MAX_AGE:
             raise GameError("Коэффициенты обновляются — попробуйте чуть позже")
         odds = ev[f"odds_{pick}"]
-        # на один матч — не больше максимальной ставки суммарно (чтобы не обходили лимит дроблением)
+        # лимит на один матч суммарно (чтобы не обходили дроблением); по своей модели — меньше
         hi = self.casino.cfg.max_bet if cur == money.STARS else money.TON_MAX_BET
+        if ev["source"] == "model":
+            hi = max(self.casino.cfg.min_bet if cur == money.STARS else money.TON_MIN_BET, int(hi * MODEL_STAKE_SHARE))
         staked = (await self.db.one("SELECT COALESCE(SUM(amount), 0) s FROM sport_bets WHERE user_id=? AND event_id=? "
                                     "AND cur=? AND status='open'", user_id, ev["id"], cur))["s"]
         if staked + amount > hi:
@@ -299,5 +453,10 @@ class Sportsbook:
                         "home": ev["home"], "away": ev["away"], "possible": math.floor(amount * odds)},
                 "balance": balance, "cur": cur}
 
-    def summary(self) -> str:
-        return json.dumps({"enabled": self.client.enabled, "remaining": self.client.remaining})
+
+def _ts(iso: Any) -> float | None:
+    """Время ESPN «2026-10-03T14:00Z» → unix."""
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None

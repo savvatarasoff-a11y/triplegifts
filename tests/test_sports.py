@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -7,95 +8,132 @@ from app.casino import GameError
 from tests.test_casino import balance, casino, fund  # noqa: F401  (фикстура casino)
 
 
-def event(eid, home="Arsenal", away="Chelsea", kickoff=None, prices=((2.1, 3.4, 3.5), (2.0, 3.5, 3.6))):
-    return {"id": eid, "home_team": home, "away_team": away, "commence_time": kickoff or time.time() + 86400,
-            "bookmakers": [{"key": f"b{i}", "markets": [{"key": "h2h", "outcomes": [
-                {"name": home, "price": h}, {"name": "Draw", "price": d}, {"name": away, "price": a}]}]}
-                for i, (h, d, a) in enumerate(prices)]}
+def iso(ts):
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
 
 
-class FakeClient(sp.OddsClient):
+def espn_event(eid, home="Arsenal", away="Chelsea", hid="359", aid="363", kickoff=None, state="pre",
+               status="STATUS_SCHEDULED", score=(None, None), ml=(-150, 280, 420), neutral=False):
+    comp = {"date": iso(kickoff or time.time() + 86400), "neutralSite": neutral,
+            "status": {"type": {"state": state, "completed": state == "post", "name": status}},
+            "competitors": [
+                {"homeAway": "home", "score": score[0], "team": {"id": hid, "displayName": home, "logo": "h.png"}},
+                {"homeAway": "away", "score": score[1], "team": {"id": aid, "displayName": away, "logo": "a.png"}}]}
+    if ml:
+        comp["odds"] = [{"provider": {"name": "DraftKings"}, "homeTeamOdds": {"moneyLine": ml[0]},
+                         "drawOdds": {"moneyLine": ml[1]}, "awayTeamOdds": {"moneyLine": ml[2]}}]
+    return {"id": eid, "date": comp["date"], "competitions": [comp]}
+
+
+def table(*teams):
+    """Таблица ESPN: (id, сыграно, забито, пропущено)."""
+    return {"children": [{"standings": {"entries": [
+        {"team": {"id": tid}, "stats": [{"name": "gamesPlayed", "value": gp}, {"name": "pointsFor", "value": gf},
+                                        {"name": "pointsAgainst", "value": ga}]} for tid, gp, gf, ga in teams]}}]}
+
+
+class FakeEspn:
+    enabled = True
+
     def __init__(self):
-        super().__init__("key")
-        self.events, self.games, self.calls = {}, {}, []
+        self.boards, self.tables, self.calls = {}, {}, []
 
-    async def odds(self, sport):
-        self.calls.append(("odds", sport))
-        return self.events.get(sport, [])
+    async def scoreboard(self, code, start, end):
+        self.calls.append(("scoreboard", code))
+        return self.boards.get(code, [])
 
-    async def scores(self, sport):
-        self.calls.append(("scores", sport))
-        return self.games.get(sport, [])
+    async def standings(self, code):
+        self.calls.append(("standings", code))
+        return self.tables.get(code, {})
 
 
 @pytest.fixture
 async def book(casino):  # noqa: F811
-    client = FakeClient()
-    b = sp.Sportsbook(casino, client)
+    b = sp.Sportsbook(casino, FakeEspn())
     await b.init()
     return b
 
 
-def test_price_removes_bookmaker_margin_and_adds_ours():
-    h, d, a = sp.price(event("x"))
-    assert sum(1 / o for o in (h, d, a)) == pytest.approx(1 + sp.MARGIN, abs=0.01)
-    assert h < a and sp.MIN_ODDS <= min(h, d, a) and max(h, d, a) <= sp.MAX_ODDS
-    assert sp.price({"home_team": "A", "away_team": "B", "bookmakers": []}) is None
-    assert sp.result_of(2, 1) == "home" and sp.result_of(0, 0) == "draw" and sp.result_of(1, 3) == "away"
+def test_pricing():
+    assert sp.american(-200) == pytest.approx(1.5) and sp.american("+150") == pytest.approx(2.5)
+    assert sp.american(50) is None and sp.american("x") is None
+    h, d, a = sp.book_odds(espn_event("x")["competitions"][0])
+    assert sum(1 / o for o in (h, d, a)) == pytest.approx(1 + sp.MARGIN_BOOK, abs=0.01) and h < a
+    # своя модель: сильная команда дома — фаворит, маржа больше, цены в пределах
+    strong, weak = {"att": 1.6, "def": 0.6}, {"att": 0.7, "def": 1.4}
+    h, d, a = sp.model_odds(strong, weak)
+    assert h < 1.5 < a <= sp.MAX_ODDS_MODEL
+    assert sum(1 / o for o in (h, d, a)) >= 1 + sp.MARGIN_MODEL - 0.01
+    assert sp.model_odds(strong, None) is None
+    assert sum(sp.poisson_probs(1.4, 1.1)) == pytest.approx(1, abs=1e-6)
+    s = sp.strengths(table(("1", 10, 25, 8), ("2", 10, 8, 22), ("3", 2, 9, 0)), 1.0)
+    assert s["1"]["att"] > 1 > s["2"]["att"] and s["1"]["def"] < 1 < s["2"]["def"] and "3" not in s   # мало матчей
 
 
-async def test_bet_win_lose_and_void(book):
-    c = book.casino
+def test_main_time_result():
+    done = lambda st, sc: espn_event("x", state="post", status=st, score=sc)["competitions"][0]
+    assert sp.main_time_result(done("STATUS_FULL_TIME", ("2", "1"))) == "home"
+    assert sp.main_time_result(done("STATUS_FULL_TIME", ("0", "0"))) == "draw"
+    assert sp.main_time_result(done("STATUS_FINAL_AET", ("2", "1"))) == "draw"      # победа в доп. время — в основное ничья
+    assert sp.main_time_result(done("STATUS_FINAL_PEN", ("1", "1"))) == "draw"
+    assert sp.main_time_result(espn_event("x", status="STATUS_POSTPONED")["competitions"][0]) == "void"
+    assert sp.main_time_result(espn_event("x")["competitions"][0]) is None
+
+
+async def test_bet_win_lose_void(book):
+    c, espn = book.casino, book.client
     await fund(c, 1, 1000)
     await fund(c, 2, 1000)
-    book.client.events["soccer_epl"] = [event("m1"), event("m2", "Liverpool", "Everton")]
-    assert await book.refresh_odds(force=True) == 2
-    evs = await book.events("epl")
-    assert len(evs) == 2 and evs[0]["odds"]["home"] > 1
-    odds = evs[0]["odds"]
-    r = await book.place(1, "m1", "home", 100)
+    espn.boards["eng.1"] = [espn_event("1"), espn_event("2", "Liverpool", "Everton", "364", "368", ml=None)]
+    espn.tables["eng.1"] = table(("359", 8, 18, 6), ("363", 8, 12, 10), ("364", 8, 20, 5), ("368", 8, 6, 15))
+    assert await book.refresh_odds(force=True) == 2                    # второй матч — по своей модели
+    evs = {e["id"]: e for e in await book.events("epl")}
+    assert set(evs) == {"espn:1", "espn:2"} and evs["espn:2"]["odds"]["home"] < evs["espn:2"]["odds"]["away"]
+    odds = evs["espn:1"]["odds"]
+    r = await book.place(1, "espn:1", "home", 100)
     assert r["balance"] == 900 and r["bet"]["odds"] == odds["home"]
-    await book.place(2, "m1", "draw", 50)
+    await book.place(2, "espn:1", "draw", 50)
     with pytest.raises(GameError):
-        await book.place(1, "m1", "win", 10)
-    with pytest.raises(GameError):                                      # больше лимита на один матч
-        await book.place(1, "m1", "away", c.cfg.max_bet)
-    # коэффициенты обновились — уже сделанная ставка остаётся по старому
-    book.client.events["soccer_epl"] = [event("m1", prices=((1.5, 4.0, 6.0),))]
-    await book.refresh_odds(force=True)
-    assert (await book.my_bets(1))[0]["odds"] == odds["home"]
-    # матч сыгран 2:1 — П1 выигрывает
+        await book.place(1, "espn:1", "win", 10)
+    with pytest.raises(GameError):                                     # по модели лимит на матч меньше
+        await book.place(1, "espn:2", "home", int(c.cfg.max_bet * sp.MODEL_STAKE_SHARE) + 1)
+    # матч сыгран 2:1 — П1
     sent = []
 
     async def notify(uid, text):
         sent.append((uid, text))
-    await book.db.conn.execute("UPDATE sport_bets SET kickoff=? WHERE event_id='m1'", (time.time() - 3 * 3600,))
-    book.client.games["soccer_epl"] = [{"id": "m1", "completed": True, "home_team": "Arsenal", "away_team": "Chelsea",
-                                        "scores": [{"name": "Arsenal", "score": "2"}, {"name": "Chelsea", "score": "1"}]}]
+    await book.db.conn.execute("UPDATE sport_bets SET kickoff=? WHERE event_id='espn:1'", (time.time() - 3 * 3600,))
+    espn.boards["eng.1"] = [espn_event("1", state="post", status="STATUS_FULL_TIME", score=("2", "1"))]
     assert await book.settle_pending(notify) == 2
     win = int(100 * odds["home"])
     assert await balance(c, 1) == 900 + win and await balance(c, 2) == 950
-    assert {b["status"] for b in await book.my_bets(1)} == {"won"} and (await book.my_bets(2))[0]["status"] == "lost"
-    assert len(sent) == 2 and "сыграла" in sent[0][1]
-    hist = await c.db.recent_bets(1, 5)
-    assert hist[0]["game"] == "football" and hist[0]["win"] == win
-    # повторный расчёт ничего не меняет
-    assert await book.settle_pending(notify) == 0
-    # матч без результата 3 дня — возврат
-    await book.place(1, "m2", "away", 40)
-    await book.db.conn.execute("UPDATE sport_bets SET kickoff=? WHERE event_id='m2'", (time.time() - 4 * 86400,))
+    assert (await book.my_bets(1))[0]["status"] == "won" and (await book.my_bets(2))[0]["status"] == "lost"
+    assert len(sent) == 2 and "сыграла" in sent[0][1] and "2:1" in sent[0][1]
+    assert (await c.db.recent_bets(1, 5))[0]["game"] == "football"
+    assert await book.settle_pending(notify) == 0                      # повторно ничего не меняется
+    # перенос — возврат
+    await book.place(1, "espn:2", "away", 40)
     before = await balance(c, 1)
+    await book.db.conn.execute("UPDATE sport_bets SET kickoff=? WHERE event_id='espn:2'", (time.time() - 3 * 3600,))
+    await book.db.kv_set("sports:scores_at:epl", "0")
+    espn.boards["eng.1"] = [espn_event("2", status="STATUS_POSTPONED", ml=None)]
     await book.settle_pending(notify)
     assert await balance(c, 1) == before + 40 and (await book.my_bets(1))[0]["status"] == "void"
 
 
-async def test_closed_before_kickoff_and_disabled(book, casino):  # noqa: F811
+async def test_closed_unpriced_and_stale(book, casino):  # noqa: F811
     await fund(casino, 1, 500)
-    book.client.events["soccer_spain_la_liga"] = [event("s1", "Barcelona", "Real Madrid", kickoff=time.time() + 30)]
+    espn = book.client
+    espn.boards["esp.1"] = [espn_event("s1", "Barcelona", "Sevilla", kickoff=time.time() + 30),        # почти началось
+                            espn_event("s2", "Unknown", "Nobody", "1", "2", ml=None)]                # нет ни линии, ни данных
+    espn.boards["uefa.nations"] = [espn_event("n1", "Spain", "Malta", "s", "m", ml=None, neutral=True)]
     await book.refresh_odds(force=True)
-    assert await book.events("laliga") == []                            # до начала меньше минуты — не показываем
+    assert await book.events() == []
     with pytest.raises(GameError):
-        await book.place(1, "s1", "home", 10)
-    off = sp.Sportsbook(casino, sp.OddsClient(None))
-    await off.init()
-    assert not off.client.enabled and await off.refresh_odds() == 0
+        await book.place(1, "espn:s1", "home", 10)
+    # устаревшие коэффициенты — ставки не принимаем
+    espn.boards["esp.1"] = [espn_event("s3", "Barcelona", "Sevilla")]
+    await book.refresh_odds(force=True)
+    await book.db.conn.execute("UPDATE sport_events SET odds_at=? WHERE id='espn:s3'", (time.time() - sp.ODDS_MAX_AGE - 1,))
+    with pytest.raises(GameError):
+        await book.place(1, "espn:s3", "home", 10)
