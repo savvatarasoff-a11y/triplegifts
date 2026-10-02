@@ -1,3 +1,9 @@
+/* пиксельный шрифт игры «Кирка» — Pixelify Sans (SIL OFL), лежит у нас, чтобы грузился и без Google */
+@font-face { font-family: "Pixelify Sans"; font-weight: 400 700; font-display: swap;
+  src: url("fonts/pixelify-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Pixelify Sans"; font-weight: 400 700; font-display: swap;
+  src: url("fonts/pixelify-cyrillic.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
 /* Triple Gifts — два цвета: почти чёрный и фиолетовый.
    Всё остальное — оттенки этих двух цветов и белый текст. */
 :root {
@@ -542,7 +548,7 @@ button { -webkit-user-select: none; user-select: none; }
 .pk-hud { position: absolute; right: 10px; top: 10px; z-index: 1; display: flex; gap: 8px; pointer-events: none; }
 .pk-pill { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border-radius: 12px; font-size: 12px; font-weight: 800;
   color: #fff; background: rgba(8, 9, 14, .62); border: 1px solid rgba(255, 255, 255, .12); backdrop-filter: blur(6px); }
-.pk-pill b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pk-pill b { font-variant-numeric: tabular-nums; white-space: nowrap; font: 700 15px 'Pixelify Sans', monospace; }
 .pk-pill.gold span { color: rgba(255, 255, 255, .6); font-weight: 700; }
 .pk-pill.gold b { color: #FFE066; }
 .pk-heart { color: #ff4a5a; font-size: 14px; text-shadow: 0 0 8px rgba(255, 74, 90, .7); }
@@ -554,9 +560,10 @@ button { -webkit-user-select: none; user-select: none; }
   background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(0, 0, 0, .55) calc(10% - 2px) 10%); }
 @keyframes pkblink { 50% { opacity: .55; } }
 /* финальный экран, как в конце видео: небо с облаками и пиксельная табличка */
-.pk-speed { position: absolute; right: 10px; bottom: 10px; z-index: 1; padding: 8px 12px; border-radius: 12px;
-  font: 800 13px var(--font-head, sans-serif); color: #fff; background: rgba(8, 9, 14, .78); border: 1px solid rgba(255, 255, 255, .14);
-  backdrop-filter: blur(6px); box-shadow: 0 4px 14px rgba(0, 0, 0, .35); cursor: pointer; }
+.pk-speed { position: absolute; right: 12px; bottom: 12px; z-index: 1; width: 48px; height: 48px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; background: rgba(12, 14, 20, .82); border: 1px solid rgba(255, 255, 255, .08);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .4); cursor: pointer; }
+.pk-speed svg { width: 26px; height: 26px; fill: #565C6B; }
 .pk-speed:active { transform: scale(.95); }
 .pk-win { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; opacity: 0; pointer-events: none;
   transition: opacity .3s; background:
@@ -568,9 +575,9 @@ button { -webkit-user-select: none; user-select: none; }
     0 -6px 0 #4caf50, 0 10px 24px rgba(0, 0, 0, .35); image-rendering: pixelated; transform: scale(.8);
   transition: transform .35s cubic-bezier(.2, 1.6, .4, 1); }
 .pk-win.show .pk-win-plank { transform: scale(1); }
-.pk-win-plank span { font: 14px 'Press Start 2P', monospace; color: #fff; text-shadow: 2px 2px 0 #2d3540; }
-.pk-win-plank b { font: 22px 'Press Start 2P', monospace; color: #FFE14D; text-shadow: 3px 3px 0 #7a4b00; white-space: nowrap; }
-.pk-win-plank i { font: 10px 'Press Start 2P', monospace; font-style: normal; color: #e8f1ff; }
+.pk-win-plank span { font: 700 22px 'Pixelify Sans', monospace; color: #fff; text-shadow: 2px 2px 0 #2d3540; }
+.pk-win-plank b { font: 700 36px 'Pixelify Sans', monospace; color: #FFE14D; text-shadow: 3px 3px 0 #7a4b00; white-space: nowrap; }
+.pk-win-plank i { font: 500 15px 'Pixelify Sans', monospace; font-style: normal; color: #e8f1ff; }
 .pk-ores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 10px 0 0; }
 .pk-ores div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border-radius: 12px;
   background: var(--surface); border: 1px solid var(--line); font-size: 10px; color: var(--muted, #999); min-width: 0; }

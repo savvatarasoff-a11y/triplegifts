@@ -2093,14 +2093,13 @@ function pkWorld(rows) {
   return { cells, mined: new Set(), rows: rows.length };
 }
 
-function pkAmount(mult) {
-  const v = pk.bet * mult;
-  if (pk.cur === "ton") return `${tonNum(Math.floor(v))} TON`;
-  return `${(Math.floor(v * 100) / 100).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ★`;
+function pkAmount(mult) {      // сумма в валюте ставки, всегда с двумя знаками: «10.00»
+  const v = pk.cur === "ton" ? pk.bet * mult / NANO : pk.bet * mult;
+  return (Math.floor(v * 100) / 100).toFixed(2);
 }
 
 function pkHud() {
-  $("#pk-sum").textContent = pk.sum === null ? "—" : pkAmount(pk.sum);
+  $("#pk-sum").textContent = pk.sum === null ? "0.00" : pkAmount(pk.sum);
 }
 
 // ----- частицы: обломки, дым, кольцо взрыва, искры -----
@@ -2153,7 +2152,7 @@ function pkApply(ev) {
     if (PK_ORE[t]) pkSparks(bx + 0.5, by + 0.5, PK_ORE[t][2], 8);
     if (t === "tnt") { r.flash = 1; haptic("win"); pkExplode(bx + 0.5, by + 0.5); }
     if (t === "bench") pkSparks(bx + 0.5, by + 0.5, "#9CFFB0", 14);
-    if (m > 0) { pk.sum += m; text(bx, by, `+${pkAmount(m)}`, PK_ORE[t] ? PK_ORE[t][0] : "#fff", m >= 1); }
+    if (m > 0) { pk.sum += m; text(bx, by, pkAmount(m), "#fff", m >= 1); }
   }
   if (ev.lv) {                                   // верстак: кирка поднялась на уровень и починилась
     const up = ev.lv !== pk.tier;
@@ -2304,15 +2303,14 @@ function pkDraw() {
   const font = getComputedStyle(document.body).fontFamily;
   ctx.textAlign = "center"; ctx.lineJoin = "round";
   for (const t of pk.texts) {
-    const pop = 1 + 0.5 * Math.max(0, 1 - t.age / 160);
-    const fs = Math.round(cell * (t.big ? 0.42 : 0.3) * pop);
-    ctx.font = `900 ${fs}px ${font}`;
+    const pop = 1 + 0.3 * Math.max(0, 1 - t.age / 160);
+    const fs = Math.round(cell * (t.big ? 0.34 : 0.27) * pop);
+    ctx.font = `700 ${fs}px ${PK_FONT}`;
     ctx.globalAlpha = Math.max(0, Math.min(1, t.life * 1.8));
     const tx = Math.min(W - cell, Math.max(cell, sx(t.x))), ty = sy(t.y);
-    if (t.big) { ctx.shadowColor = t.color; ctx.shadowBlur = cell * 0.35; }
-    ctx.lineWidth = fs * 0.28; ctx.strokeStyle = "rgba(0, 0, 0, .85)"; ctx.strokeText(t.txt, tx, ty);
+    ctx.lineWidth = fs * 0.18; ctx.strokeStyle = "rgba(20, 22, 28, .55)"; ctx.strokeText(t.txt, tx, ty);
+    ctx.fillStyle = "rgba(150, 156, 170, .9)"; ctx.fillText(t.txt, tx + fs * 0.07, ty + fs * 0.07);   // тень
     ctx.fillStyle = t.color; ctx.fillText(t.txt, tx, ty);
-    ctx.shadowBlur = 0;
   }
   ctx.globalAlpha = 1;
   if (r && r.flash > 0) { ctx.fillStyle = `rgba(255, 236, 190, ${r.flash * 0.5})`; ctx.fillRect(0, 0, W, H); }
@@ -2371,6 +2369,7 @@ function pkKick() {
 }
 
 function pickaxeEnter() {
+  if (document.fonts) document.fonts.load(`700 16px ${PK_FONT}`).catch(() => {});   // canvas рисует цифры этим шрифтом
   if (!pk.run && !pk.spinning) Object.assign(pk, { world: null, hidden: false, camY: -6.2, hp: null, sum: null, trail: [],
     tier: "iron", max: null, reel: null, lastPos: null });
   pkHud();
@@ -2379,7 +2378,7 @@ function pickaxeEnter() {
 
 // Барабан с кирками, как на видео: круглая рамка, кольцо из сегментов, зелёные стрелки; кирки едут сверху вниз
 const PK_REEL_AT = [3.5, -3.5];            // центр барабана в клетках мира (оттуда кирка и падает)
-const PK_FONT = "'Press Start 2P', monospace";
+const PK_FONT = "'Pixelify Sans', monospace";
 
 function pkReelItem(ctx, tier, x, y, s) {
   if (tier === "none") {                    // «пусто» — красный крест
@@ -2433,16 +2432,24 @@ function pkReelDraw(ctx, cx, cy, R, cell) {
   ctx.restore();
 }
 
+const PK_HEART = [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."];
 function pkHpLabel(ctx, x, y, cell) {
-  const fs = Math.max(8, Math.round(cell * 0.2));
-  ctx.font = `${fs}px ${PK_FONT}`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  const fs = Math.max(10, Math.round(cell * 0.3));
+  ctx.font = `700 ${fs}px ${PK_FONT}`;
+  ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.lineJoin = "miter";
   const txt = `${pk.hp}/${pk.max}`;
-  const tw = ctx.measureText(txt).width;
-  ctx.lineWidth = fs * 0.45; ctx.strokeStyle = "rgba(0, 0, 0, .85)";
-  ctx.strokeText(txt, x + fs * 0.7, y); ctx.fillStyle = "#fff"; ctx.fillText(txt, x + fs * 0.7, y);
-  ctx.font = `${Math.round(fs * 1.2)}px sans-serif`; ctx.fillStyle = "#FF3B4A";
-  ctx.fillText("♥", x - tw / 2 - fs * 0.2, y);
+  const tw = ctx.measureText(txt).width, q = Math.max(1, Math.round(fs / 7)), hw = q * 7;
+  const x0 = x - (tw + hw + q * 3) / 2;
+  // сердце из пикселей с тёмной обводкой
+  ctx.fillStyle = "#2B1414";
+  PK_HEART.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === "#") ctx.fillRect(x0 + i * q - q * 0.5, y - q * 3 + j * q - q * 0.5, q * 2, q * 2); }));
+  PK_HEART.forEach((row, j) => [...row].forEach((ch, i) => {
+    if (ch === "#") { ctx.fillStyle = j === 1 && i === 1 ? "#FF9A9A" : "#E8202A"; ctx.fillRect(x0 + i * q, y - q * 3 + j * q, q, q); }
+  }));
+  const tx = x0 + hw + q * 3;
+  ctx.lineWidth = fs * 0.32; ctx.strokeStyle = "#23262E"; ctx.strokeText(txt, tx, y);
+  ctx.fillStyle = "#C9CED8"; ctx.fillText(txt, tx, y + fs * 0.06);           // нижняя грань цифр — серая, как на видео
+  ctx.fillStyle = "#FFFFFF"; ctx.fillText(txt, tx, y);
 }
 
 // Пиксельный пейзаж над шахтой: небо, горы, летающий остров с ёлками, облака
@@ -2510,7 +2517,7 @@ function pkSky(ctx, W, H, cell, sx, sy) {
 // Финальный экран, как в конце видео
 function pkWinShow(win, cur, mult) {
   const box = $("#pk-win");
-  $("#pk-win-sum").textContent = cur === "ton" ? `${tonNum(win)} TON` : `${fmt(win)} ★`;
+  $("#pk-win-sum").textContent = cur === "ton" ? `${(win / NANO).toFixed(2)} TON` : `${win.toFixed(2)} ★`;
   $("#pk-win-x").textContent = fmtX(mult);
   box.classList.add("show");
   clearTimeout(pk.winTimer);
@@ -2540,7 +2547,12 @@ async function pkReelSpin(result) {
 
 const PK_SPEEDS = [1, 2, 4];
 pk.mult = PK_SPEEDS.includes(Number(store("pk:speed"))) ? Number(store("pk:speed")) : 1;
-function pkSpeedLabel() { $("#pk-speed").textContent = `⏩ ×${pk.mult}`; }
+function pkSpeedLabel() {
+  const n = PK_SPEEDS.indexOf(pk.mult) + 1, w = 9;
+  const tri = Array.from({ length: n }, (_, i) => { const x = 12 - (n * w) / 2 + i * w; return `<path d="M${x} 7l${w} 5-${w} 5z"/>`; }).join("");
+  $("#pk-speed").innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${tri}</svg>`;
+  $("#pk-speed").setAttribute("aria-label", `Скорость ×${pk.mult}`);
+}
 function pkSpeedToggle() {
   pk.mult = PK_SPEEDS[(PK_SPEEDS.indexOf(pk.mult) + 1) % PK_SPEEDS.length];
   store("pk:speed", String(pk.mult));
