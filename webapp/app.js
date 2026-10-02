@@ -2161,8 +2161,7 @@ function pkApply(ev) {
     pk.max = ev.mx;
     pk.trail = [];
     pkSparks(ev.x, ev.y, PK_PICK[ev.lv].H, 26);
-    pk.texts.push({ x: ev.x, y: ev.y - 0.9, txt: up ? `⬆ ${PK_PICK_NAMES[ev.lv]}` : "❤ MAX", color: up ? PK_PICK[ev.lv].H : "#5CFF8F",
-      big: true, life: 1.3, age: 0 });
+    if (up) pkSparks(ev.x, ev.y, "#FFFFFF", 14);
     haptic("win");
   }
   pk.hp = ev.hp;
@@ -2546,7 +2545,6 @@ async function pickaxePlay() {
   try { bet = getBet("pickaxe"); } catch (e) { toast(e.message, true); return; }
   const btn = $("#pk-btn");
   btn.disabled = true;
-  const res = $("#pk-result");
   $("#pk-win").classList.remove("show");
   try {
     const r = await api("/api/pickaxe", { bet, cur: state.cur }, { deferBalance: true });
@@ -2557,26 +2555,20 @@ async function pickaxePlay() {
       hp: r.hp || 0, max: r.hp || 0, tier: r.tier === "none" ? pk.tier : r.tier });
     pk.seed = Math.floor(Math.random() * 1e9);
     if (r.world) pk.world = pkWorld(r.world);
-    res.className = "result";
-    res.textContent = "Крутим барабан…";
     pk.spinning = true;
     pkHud();
     await pkReelSpin(r.tier);
     pk.spinning = false;
     if (r.tier === "none") {
       setBalance(r.balance, r.cur);
-      res.className = "result reveal lose";
-      res.textContent = "Кирка не выпала · ставка сгорела";
       haptic("lose");
       return;
     }
     haptic("win");
-    res.textContent = `${PK_PICK_NAMES[r.tier]} · ${r.hp} прочности`;
     pkHud();
     await new Promise((ok) => setTimeout(ok, 650));         // показываем прочность, потом кирка падает
     pk.reel.taken = true;
     pk.sum = 0;
-    res.textContent = `${PK_PICK_NAMES[r.tier]} · копаем…`;
     btn.disabled = false;
     btn.textContent = "Быстрее ⏩";
     const end = r.events.length ? r.events[r.events.length - 1].t + 0.12 : 0.5;
@@ -2589,8 +2581,6 @@ async function pickaxePlay() {
     pk.sum = r.multiplier;      // итог с сервера (с учётом потолка выигрыша)
     pkHud();
     setBalance(r.balance, r.cur);
-    res.className = "result reveal " + (r.win > bet ? "win" : r.win > 0 ? "" : "lose");
-    res.textContent = `${PK_PICK_NAMES[pk.tier]} сломалась · ${fmtX(r.multiplier)} · ${r.win > 0 ? "+" : ""}${money(r.win, r.cur)}`;
     if (r.win > 0) pkWinShow(r.win, r.cur, r.multiplier);
     if (r.win > bet) haptic("win");
   } catch (e) {
