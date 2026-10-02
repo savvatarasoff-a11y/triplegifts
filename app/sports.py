@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import math
 import time
@@ -460,3 +462,92 @@ def _ts(iso: Any) -> float | None:
         return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
     except ValueError:
         return None
+
+
+# ---------- значки лиг: премиум-эмодзи из набора Telegram ----------
+
+ICON_SET = "europeHDSofascout"
+ICON_KEY = "sports:icons"            # {лига: custom_emoji_id}, назначенные вручную (/league_icons epl 5)
+# подсказки для автоподбора по «базовому» эмодзи стикера, если вручную не назначено
+ICON_HINTS = {"epl": ["🏴\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f", "🇬🇧", "🦁"],
+              "laliga": ["🇪🇸"], "ligue1": ["🇫🇷"], "ucl": ["⭐", "🌟", "🏆", "✨"], "unl": ["🌍", "🇪🇺", "🌐"]}
+
+
+class LeagueIcons:
+    def __init__(self, db: Any):
+        self.db = db
+        self._set: list[Any] | None = None
+
+    async def stickers(self, bot: Any) -> list[Any]:
+        if self._set is None:
+            self._set = list((await bot.get_sticker_set(ICON_SET)).stickers)
+        return self._set
+
+    async def mapping(self, bot: Any) -> dict[str, str]:
+        """Лига → custom_emoji_id: назначенные вручную, остальные — автоподбор по эмодзи-подсказке."""
+        manual = json.loads(await self.db.kv_get(ICON_KEY) or "{}")
+        out = dict(manual)
+        try:
+            stickers = await self.stickers(bot)
+        except Exception as e:
+            log.warning("Набор эмодзи %s не получен: %s", ICON_SET, e)
+            return out
+        used = set(out.values())
+        for league, hints in ICON_HINTS.items():
+            if league in out:
+                continue
+            for st in stickers:
+                if st.custom_emoji_id not in used and (st.emoji or "") in hints:
+                    out[league] = st.custom_emoji_id
+                    used.add(st.custom_emoji_id)
+                    break
+        return out
+
+    async def assign(self, bot: Any, league: str, number: int) -> str:
+        stickers = await self.stickers(bot)
+        if league not in LEAGUES:
+            raise ValueError("лиги: " + ", ".join(LEAGUES))
+        if not 1 <= number <= len(stickers):
+            raise ValueError(f"номер от 1 до {len(stickers)}")
+        manual = json.loads(await self.db.kv_get(ICON_KEY) or "{}")
+        manual[league] = stickers[number - 1].custom_emoji_id
+        await self.db.kv_set(ICON_KEY, json.dumps(manual))
+        return manual[league]
+
+    @staticmethod
+    async def image(bot: Any, sticker: Any) -> bytes | None:
+        """Картинка стикера: TGS — первый кадр, видео — превью, WebP — как есть."""
+        from .nftimg import render_tgs
+        file_id = sticker.file_id
+        if getattr(sticker, "is_video", False) and getattr(sticker, "thumbnail", None):
+            file_id = sticker.thumbnail.file_id
+        buf = await bot.download(file_id)
+        data = buf.read() if buf else None
+        if data and data[:2] == b"\x1f\x8b":
+            return await asyncio.to_thread(render_tgs, data)
+        return data
+
+    async def sheet(self, bot: Any) -> bytes:
+        """Весь набор сеткой с номерами — чтобы админ выбрал значки (/league_icons)."""
+        from io import BytesIO
+
+        from PIL import Image, ImageDraw
+        stickers = await self.stickers(bot)
+        cols, cell = 8, 128
+        rows = (len(stickers) + cols - 1) // cols
+        out = Image.new("RGB", (cols * cell, rows * cell), (24, 26, 33))
+        draw = ImageDraw.Draw(out)
+        for i, st in enumerate(stickers):
+            x, y = (i % cols) * cell, (i // cols) * cell
+            try:
+                data = await self.image(bot, st)
+                im = Image.open(BytesIO(data)).convert("RGBA")
+                im.thumbnail((cell - 24, cell - 24))
+                out.paste(im, (x + (cell - im.width) // 2, y + 18 + (cell - 24 - im.height) // 2), im)
+            except Exception:
+                pass
+            draw.rectangle((x, y, x + 30, y + 18), fill=(245, 185, 60))
+            draw.text((x + 4, y + 3), str(i + 1), fill=(0, 0, 0))
+        buf = BytesIO()
+        out.save(buf, "PNG")
+        return buf.getvalue()

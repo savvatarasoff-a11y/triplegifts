@@ -132,6 +132,7 @@ SUB_OK_STATUSES = {"member", "administrator", "creator", "restricted"}
 def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = None,
               images: NftImages | None = None, sports: "sp.Sportsbook | None" = None) -> web.Application:
     sports = sports or sp.Sportsbook(casino)
+    league_icons = sp.LeagueIcons(casino.db)
     sub_cache: dict[int, tuple[float, bool]] = {}
 
     async def subscribed(user_id: int, fresh: bool = False) -> bool:
@@ -346,9 +347,15 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         league = request.query.get("league") or None
         if league and league not in sp.LEAGUES:
             raise GameError("Нет такой лиги")
+        try:
+            icons = await league_icons.mapping(bot)
+        except Exception:
+            icons = {}
         return web.json_response({
             "enabled": sports.client.enabled,
-            "leagues": [{"id": k, "name": n, "icon": i} for k, (_, n, i) in sp.LEAGUES.items()],
+            "leagues": [{"id": k, "name": n, "icon": i,
+                         "img": f"sporticon?league={k}&v={icons[k][-8:]}" if icons.get(k) else None}
+                        for k, (_, n, i) in sp.LEAGUES.items()],
             "events": await sports.events(league),
         })
 
@@ -357,6 +364,24 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         data = await body(request)
         return web.json_response(await sports.place(request[USER_ID], data.get("event"), data.get("pick"),
                                                     data.get("amount"), data.get("cur")))
+
+    @routes.get("/sporticon")
+    async def sport_icon(request: web.Request) -> web.Response:
+        """Значок лиги — премиум-эмодзи из набора Telegram, отрисованный картинкой."""
+        league = request.query.get("league", "")
+        eid = (await league_icons.mapping(bot)).get(league)
+        if not eid:
+            raise web.HTTPNotFound()
+
+        async def from_bot() -> bytes | None:
+            st = await bot.get_custom_emoji_stickers([eid])
+            return await sp.LeagueIcons.image(bot, st[0]) if st else None
+
+        img = await images.get(f"si|{eid}", [("telegram", from_bot)])
+        if not img:
+            raise web.HTTPNotFound(headers={"Cache-Control": "no-store"})
+        return web.Response(body=img[0], content_type=img[1],
+                            headers={"Cache-Control": "public, max-age=2592000, immutable"})
 
     @routes.get("/api/sports/bets")
     async def sports_bets(request: web.Request) -> web.Response:

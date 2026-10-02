@@ -549,6 +549,8 @@ button { -webkit-user-select: none; user-select: none; }
 .fb-teams { display: grid; gap: 4px; margin: 8px 0 10px; font-weight: 800; font-size: 15px; }
 .fb-teams span { display: flex; align-items: center; gap: 8px; }
 .fb-logo { width: 20px; height: 20px; object-fit: contain; }
+.fb-ico { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; }
+.fb-meta span { display: inline-flex; align-items: center; gap: 6px; }
 .fb-odds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .fb-odds button { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 12px;
   background: var(--surface-3); color: var(--text); font-weight: 800; }

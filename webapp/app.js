@@ -2616,8 +2616,10 @@ async function fbLoad() {
   try {
     const r = await api(`/api/sports${fb.league ? `?league=${fb.league}` : ""}`);
     const leagues = Object.fromEntries(r.leagues.map((l) => [l.id, l]));
+    // значок лиги — премиум-эмодзи с сервера, без него — обычный эмодзи
+    const ico = (l) => (l.img ? `<img class="fb-ico" src="${API_BASE}/${escH(l.img)}" alt="">` : l.icon);
     $("#fb-leagues").innerHTML = [`<button data-l="" class="${fb.league ? "" : "sel"}">Все</button>`]
-      .concat(r.leagues.map((l) => `<button data-l="${l.id}" class="${fb.league === l.id ? "sel" : ""}">${l.icon} ${escH(l.name)}</button>`)).join("");
+      .concat(r.leagues.map((l) => `<button data-l="${l.id}" class="${fb.league === l.id ? "sel" : ""}">${ico(l)} ${escH(l.name)}</button>`)).join("");
     if (!r.enabled) { list.innerHTML = '<div class="empty">Ставки на футбол скоро откроются</div>'; return; }
     if (!r.events.length) { list.innerHTML = '<div class="empty">Ближайших матчей пока нет</div>'; return; }
     fb.events = Object.fromEntries(r.events.map((e) => [e.id, e]));
@@ -2625,7 +2627,7 @@ async function fbLoad() {
     for (const e of r.events) {
       const w = fbWhen(e.kickoff), l = leagues[e.league] || { icon: "⚽", name: "" };
       if (w.day !== day) { day = w.day; html += `<div class="fb-day">${escH(day)}</div>`; }
-      html += `<div class="fb-match"><div class="fb-meta"><span>${l.icon} ${escH(l.name)}</span><span>${w.time}</span></div>`
+      html += `<div class="fb-match"><div class="fb-meta"><span>${l.id ? ico(l) : l.icon} ${escH(l.name)}</span><span>${w.time}</span></div>`
         + `<div class="fb-teams"><span>${fbLogo(e.home_logo)}${escH(e.home)}</span><span>${fbLogo(e.away_logo)}${escH(e.away)}</span></div><div class="fb-odds">`
         + ["home", "draw", "away"].map((p) => `<button data-e="${escH(e.id)}" data-p="${p}"><span>${FB_PICK[p]}</span>${fbOdds(e.odds[p])}</button>`).join("")
         + "</div></div>";

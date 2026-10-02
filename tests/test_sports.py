@@ -137,3 +137,35 @@ async def test_closed_unpriced_and_stale(book, casino):  # noqa: F811
     await book.db.conn.execute("UPDATE sport_events SET odds_at=? WHERE id='espn:s3'", (time.time() - sp.ODDS_MAX_AGE - 1,))
     with pytest.raises(GameError):
         await book.place(1, "espn:s3", "home", 10)
+
+
+async def test_league_icons(casino):  # noqa: F811
+    from io import BytesIO
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    def png():
+        buf = BytesIO()
+        Image.new("RGBA", (64, 64), (200, 30, 30, 255)).save(buf, "PNG")
+        return buf.getvalue()
+
+    class Bot:
+        async def get_sticker_set(self, name):
+            assert name == sp.ICON_SET
+            return SimpleNamespace(stickers=[SimpleNamespace(custom_emoji_id=f"e{i}", emoji=em, file_id=f"f{i}",
+                                                             is_video=False, thumbnail=None)
+                                             for i, em in enumerate(["⚽", "🇪🇸", "🇫🇷", "⭐", "🇬🇧"])])
+
+        async def download(self, file_id):
+            return BytesIO(png())
+
+    icons = sp.LeagueIcons(casino.db)
+    bot = Bot()
+    m = await icons.mapping(bot)
+    assert m == {"epl": "e4", "laliga": "e1", "ligue1": "e2", "ucl": "e3"}         # Лиге наций подсказки не нашлось
+    assert await icons.assign(bot, "unl", 1) == "e0" and (await icons.mapping(bot))["unl"] == "e0"
+    with pytest.raises(ValueError):
+        await icons.assign(bot, "unl", 99)
+    sheet = await icons.sheet(bot)
+    assert sheet[:8] == b"\x89PNG\r\n\x1a\n"

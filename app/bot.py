@@ -222,6 +222,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/channel_setup — оформить канал и опубликовать приветственный пост\n"
             "/channel_post — ещё раз опубликовать приветственный пост\n"
             "/channel_wins <code>on|off</code> — выигрыши в канал\n"
+            "/league_icons — значки лиг в футболе (из премиум-эмодзи)\n"
             "/user <code>@username или ID</code> — баланс игрока"
         )
 
@@ -591,6 +592,30 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             await message.answer("✅ Приветственный пост опубликован")
         except Exception as e:
             await message.answer(f"⚠️ {html.escape(str(getattr(e, 'message', e)))}")
+
+    @admin.message(Command("league_icons"))
+    async def league_icons_cmd(message: Message, command: CommandObject) -> None:
+        """Значки лиг в футболе: без аргументов — набор сеткой с номерами, «/league_icons epl 5» — назначить."""
+        from aiogram.types import BufferedInputFile
+        from . import sports as sp
+        icons = sp.LeagueIcons(casino.db)
+        args = (command.args or "").split()
+        try:
+            if len(args) == 2:
+                await icons.assign(message.bot, args[0].lower(), int(args[1]))
+                await message.answer(f"Значок для «{sp.LEAGUES[args[0].lower()][1]}» назначен ✅")
+                return
+            sheet = await icons.sheet(message.bot)
+        except Exception as e:
+            await message.answer(f"Не вышло: {html.escape(str(e))}")
+            return
+        current = await icons.mapping(message.bot)
+        stickers = await icons.stickers(message.bot)
+        num = {st.custom_emoji_id: i + 1 for i, st in enumerate(stickers)}
+        lines = [f"{name}: <b>{num.get(current.get(k), '—')}</b>  (<code>{k}</code>)" for k, (_, name, _) in sp.LEAGUES.items()]
+        await message.answer_photo(BufferedInputFile(sheet, "icons.png"), caption=(
+            f"Набор <b>{sp.ICON_SET}</b>. Сейчас:\n" + "\n".join(lines)
+            + "\n\nНазначить: <code>/league_icons epl 5</code>"))
 
     @admin.message(Command("channel_wins"))
     async def channel_wins(message: Message, command: CommandObject) -> None:
