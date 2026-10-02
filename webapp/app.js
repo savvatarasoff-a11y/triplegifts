@@ -2301,14 +2301,9 @@ function pkDraw() {
   const font = getComputedStyle(document.body).fontFamily;
   ctx.textAlign = "center"; ctx.lineJoin = "round";
   for (const t of pk.texts) {
-    const pop = 1 + 0.3 * Math.max(0, 1 - t.age / 160);
-    const fs = Math.round(cell * (t.big ? 0.34 : 0.27) * pop);
-    ctx.font = `700 ${fs}px ${PK_FONT}`;
+    const pop = 1 + 0.25 * Math.max(0, 1 - t.age / 160);
     ctx.globalAlpha = Math.max(0, Math.min(1, t.life * 1.8));
-    const tx = Math.min(W - cell, Math.max(cell, sx(t.x))), ty = sy(t.y);
-    ctx.lineWidth = fs * 0.18; ctx.strokeStyle = "rgba(20, 22, 28, .55)"; ctx.strokeText(t.txt, tx, ty);
-    ctx.fillStyle = "rgba(150, 156, 170, .9)"; ctx.fillText(t.txt, tx + fs * 0.07, ty + fs * 0.07);   // тень
-    ctx.fillStyle = t.color; ctx.fillText(t.txt, tx, ty);
+    pkText(ctx, t.txt, Math.min(W - cell, Math.max(cell, sx(t.x))), sy(t.y), Math.round(cell * (t.big ? 0.3 : 0.25) * pop));
   }
   ctx.globalAlpha = 1;
   if (r && r.flash > 0) { ctx.fillStyle = `rgba(255, 236, 190, ${r.flash * 0.5})`; ctx.fillRect(0, 0, W, H); }
@@ -2367,7 +2362,6 @@ function pkKick() {
 }
 
 function pickaxeEnter() {
-  if (document.fonts) document.fonts.load(`700 16px ${PK_FONT}`).catch(() => {});   // canvas рисует цифры этим шрифтом
   if (!pk.run && !pk.spinning) Object.assign(pk, { world: null, hidden: false, camY: -6.2, hp: null, sum: null, trail: [],
     tier: "iron", max: null, reel: null, lastPos: null });
   pkHud();
@@ -2376,7 +2370,6 @@ function pickaxeEnter() {
 
 // Барабан с кирками, как на видео: круглая рамка, кольцо из сегментов, зелёные стрелки; кирки едут сверху вниз
 const PK_REEL_AT = [3.5, -3.5];            // центр барабана в клетках мира (оттуда кирка и падает)
-const PK_FONT = "'Pixelify Sans', monospace";
 
 function pkReelItem(ctx, tier, x, y, s) {
   if (tier === "none") {                    // «пусто» — красный крест
@@ -2430,24 +2423,17 @@ function pkReelDraw(ctx, cx, cy, R, cell) {
   ctx.restore();
 }
 
-const PK_HEART = [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."];
+// цифры на поле — просто белый шрифт приложения с мягкой тенью (без обводок и пиксельного стиля)
+function pkText(ctx, txt, x, y, fs, align = "center") {
+  ctx.font = `800 ${fs}px ${getComputedStyle(document.body).fontFamily}`;
+  ctx.textAlign = align; ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0, 0, 0, .55)"; ctx.shadowBlur = fs * 0.35; ctx.shadowOffsetY = fs * 0.06;
+  ctx.fillStyle = "#fff"; ctx.fillText(txt, x, y);
+  ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+}
+
 function pkHpLabel(ctx, x, y, cell) {
-  const fs = Math.max(10, Math.round(cell * 0.3));
-  ctx.font = `700 ${fs}px ${PK_FONT}`;
-  ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.lineJoin = "miter";
-  const txt = `${pk.hp}/${pk.max}`;
-  const tw = ctx.measureText(txt).width, q = Math.max(1, Math.round(fs / 7)), hw = q * 7;
-  const x0 = x - (tw + hw + q * 3) / 2;
-  // сердце из пикселей с тёмной обводкой
-  ctx.fillStyle = "#2B1414";
-  PK_HEART.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === "#") ctx.fillRect(x0 + i * q - q * 0.5, y - q * 3 + j * q - q * 0.5, q * 2, q * 2); }));
-  PK_HEART.forEach((row, j) => [...row].forEach((ch, i) => {
-    if (ch === "#") { ctx.fillStyle = j === 1 && i === 1 ? "#FF9A9A" : "#E8202A"; ctx.fillRect(x0 + i * q, y - q * 3 + j * q, q, q); }
-  }));
-  const tx = x0 + hw + q * 3;
-  ctx.lineWidth = fs * 0.32; ctx.strokeStyle = "#23262E"; ctx.strokeText(txt, tx, y);
-  ctx.fillStyle = "#C9CED8"; ctx.fillText(txt, tx, y + fs * 0.06);           // нижняя грань цифр — серая, как на видео
-  ctx.fillStyle = "#FFFFFF"; ctx.fillText(txt, tx, y);
+  pkText(ctx, `♥ ${pk.hp}/${pk.max}`, x, y, Math.max(10, Math.round(cell * 0.24)));
 }
 
 // Пиксельный пейзаж над шахтой: небо, горы, летающий остров с ёлками, облака
