@@ -342,6 +342,12 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
     # ---------- ставки на футбол ----------
 
+    def local_icon(league: str) -> str | None:
+        """Своя картинка лиги (важнее эмодзи); версия — по времени файла, чтобы Telegram не держал старую."""
+        path = sp.LOCAL_ICONS.get(league)
+        f = WEBAPP_DIR / path.removeprefix("static/") if path else None
+        return f"{path}?v={int(f.stat().st_mtime)}" if f and f.exists() else None
+
     @routes.get("/api/sports")
     async def sports_events(request: web.Request) -> web.Response:
         league = request.query.get("league") or None
@@ -355,8 +361,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             "enabled": sports.client.enabled,
             "leagues": [{"id": k, "name": n, "icon": i,
                          # эмодзи из набора, иначе логотип турнира — оба отдаём со своего домена
-                         "img": f"sporticon?league={k}&v={icons[k][-8:]}" if icons.get(k)
-                         else sp.LOCAL_ICONS.get(k) or f"sporticon?league={k}&v=logo2"}
+                         "img": local_icon(k) or (f"sporticon?league={k}&v={icons[k][-8:]}" if icons.get(k)
+                                                  else f"sporticon?league={k}&v=logo2")}
                         for k, (_, n, i) in sp.LEAGUES.items()],
             "events": await sports.events(league),
         })
@@ -373,6 +379,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         league = request.query.get("league", "")
         if league not in sp.LEAGUES:
             raise web.HTTPNotFound()
+        if local_icon(league):                      # старые ссылки тоже ведут на свою картинку
+            raise web.HTTPFound("/" + local_icon(league))
         try:
             eid = (await league_icons.mapping(bot)).get(league)
         except Exception:

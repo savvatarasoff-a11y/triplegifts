@@ -387,7 +387,12 @@ async def test_league_logo_served_from_own_domain(tmp_path):
     async with TestClient(TestServer(app)) as c:
         r = await (await c.get("/api/sports", headers=auth())).json()
         imgs = {lg["id"]: lg["img"] for lg in r["leagues"]}
-        assert imgs["unl"] == "static/mc/unl.png" and (await c.get("/" + imgs["unl"])).status == 200
+        assert imgs["unl"].startswith("static/mc/unl.png?v=") and (await c.get("/" + imgs["unl"])).status == 200
+        await db.kv_set(sp.ICON_KEY, '{"unl": "e1"}')                   # даже с назначенным эмодзи — свой флаг
+        r = await (await c.get("/api/sports", headers=auth())).json()
+        assert next(lg["img"] for lg in r["leagues"] if lg["id"] == "unl").startswith("static/mc/unl.png")
+        old = await c.get("/sporticon?league=unl&v=logo2")
+        assert old.status == 200 and (await old.read())[:4] == b"\x89PNG"
         assert imgs["ucl"].startswith("sporticon?league=ucl")
         resp = await c.get("/" + imgs["ucl"])
         assert resp.status == 200 and (await resp.read())[:4] in (b"\x89PNG", b"RIFF")
