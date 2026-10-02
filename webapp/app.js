@@ -2386,16 +2386,9 @@ function pkReelDraw(ctx, cx, cy, R, cell) {
   const reel = pk.reel;
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  // рамка: тёмный обод, кольцо из 10 сегментов (два — красные), внутренний круг
-  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fillStyle = "#0A1636"; ctx.fill();
-  const segs = 10;
-  for (let i = 0; i < segs; i++) {
-    const a0 = -Math.PI / 2 + i * Math.PI * 2 / segs + 0.04, a1 = a0 + Math.PI * 2 / segs - 0.08;
-    ctx.beginPath(); ctx.arc(cx, cy, R * 0.93, a0, a1); ctx.arc(cx, cy, R * 0.76, a1, a0, true); ctx.closePath();
-    ctx.fillStyle = i === 0 || i === 1 ? "#E3352B" : "#22356E"; ctx.fill();
-  }
-  ctx.beginPath(); ctx.arc(cx, cy, R * 0.72, 0, Math.PI * 2); ctx.fillStyle = "#0E1F4D"; ctx.fill();
-  ctx.lineWidth = R * 0.03; ctx.strokeStyle = "#071029"; ctx.stroke();
+  // рамка: просто тёмный круг с тонким ободом
+  ctx.beginPath(); ctx.arc(cx, cy, R * 0.74, 0, Math.PI * 2); ctx.fillStyle = "#0E1F4D"; ctx.fill();
+  ctx.lineWidth = R * 0.05; ctx.strokeStyle = "#071029"; ctx.stroke();
   // кирки на ленте — только внутри круга
   ctx.save();
   ctx.beginPath(); ctx.arc(cx, cy, R * 0.7, 0, Math.PI * 2); ctx.clip();
