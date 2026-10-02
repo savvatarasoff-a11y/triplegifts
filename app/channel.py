@@ -31,7 +31,7 @@ WINS_ON_KEY = "channel:wins"
 BIG_WIN_STARS = 1000     # выигрыш от 1000 ⭐ …
 BIG_WIN_X = 10           # … и от ×10 — в канал; NFT — всегда
 
-GAME_NAMES = {"slots": "🎰 Слоты", "crash": "🚀 Краш", "mines": "💣 Мины", "plinko": "🟣 Plinko", "pickaxe": "⛏ Кирка", "case": "📦 Кейс",
+GAME_NAMES = {"slots": "🎰 Слоты", "crash": "🚀 Краш", "mines": "💣 Мины", "plinko": "🟣 Plinko", "pickaxe": "⛏ Кирка", "football": "⚽ Футбол", "case": "📦 Кейс",
               "upgrade": "⬆️ Апгрейд", "pvp": "⚔️ PvP-рулетка", "hockey": "🏒 PvP-хоккей"}
 
 

@@ -8,10 +8,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const STAR = "★";
 const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null,
   cur: "stars", bal: { stars: 0, ton: 0 } };
-const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", pickaxe: "Кирка", mines: "Мины", crash: "Краш", case: "Кейс",
+const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
 const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
-const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка",
+const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол",
   cases: "Кейсы", case: "Кейс", free: "Кейс дня", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного золотого и белый: [фон, цвет текста]
 const PVP_COLORS = [["#F5B93C", "#1A1305"], ["#FFFFFF", "#0A0A0D"], ["#9A6508", "#FFFFFF"], ["#FFE3A3", "#0A0A0D"],
@@ -294,12 +294,13 @@ function go(screen) {
   window.scrollTo(0, 0);
   const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
     pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
-    upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, free: freeEnter };
+    upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, football: footballEnter, free: freeEnter };
   if (enter[screen]) enter[screen]();
 }
 
 function goBack() {
   if (!$("#sheet").classList.contains("hidden")) { $("#sheet").classList.add("hidden"); return; }
+  if (!$("#fb-sheet").classList.contains("hidden")) { $("#fb-sheet").classList.add("hidden"); return; }
   go(state.screen === "case" ? "cases" : (state.tab || "home"));
 }
 
@@ -2590,6 +2591,103 @@ async function pickaxePlay() {
   }
 }
 
+// ---------- футбол ----------
+// Матчи и коэффициенты — с сервера (The Odds API + наша маржа); ставка на исход основного времени
+const FB_PICK = { home: "П1", draw: "Х", away: "П2" };
+const FB_STATUS = { open: "В игре", won: "Выигрыш", lost: "Проигрыш", void: "Возврат" };
+const fb = { league: "", view: "matches", events: {}, sel: null };
+const escH = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fbOdds = (o) => Number(o).toFixed(2);
+
+function footballEnter() { fbLoad(); }
+
+function fbWhen(ts) {
+  const d = new Date(ts * 1000);
+  return { day: d.toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" }),
+    time: d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) };
+}
+
+async function fbLoad() {
+  const list = $("#fb-list");
+  $$("#fb-view button").forEach((b) => b.classList.toggle("sel", b.dataset.v === fb.view));
+  if (fb.view === "bets") return fbBets();
+  list.innerHTML = '<div class="empty">Загружаем матчи…</div>';
+  try {
+    const r = await api(`/api/sports${fb.league ? `?league=${fb.league}` : ""}`);
+    const leagues = Object.fromEntries(r.leagues.map((l) => [l.id, l]));
+    $("#fb-leagues").innerHTML = [`<button data-l="" class="${fb.league ? "" : "sel"}">Все</button>`]
+      .concat(r.leagues.map((l) => `<button data-l="${l.id}" class="${fb.league === l.id ? "sel" : ""}">${l.icon} ${escH(l.name)}</button>`)).join("");
+    if (!r.enabled) { list.innerHTML = '<div class="empty">Ставки на футбол скоро откроются</div>'; return; }
+    if (!r.events.length) { list.innerHTML = '<div class="empty">Ближайших матчей пока нет</div>'; return; }
+    fb.events = Object.fromEntries(r.events.map((e) => [e.id, e]));
+    let day = "", html = "";
+    for (const e of r.events) {
+      const w = fbWhen(e.kickoff), l = leagues[e.league] || { icon: "⚽", name: "" };
+      if (w.day !== day) { day = w.day; html += `<div class="fb-day">${escH(day)}</div>`; }
+      html += `<div class="fb-match"><div class="fb-meta"><span>${l.icon} ${escH(l.name)}</span><span>${w.time}</span></div>`
+        + `<div class="fb-teams"><span>${escH(e.home)}</span><span>${escH(e.away)}</span></div><div class="fb-odds">`
+        + ["home", "draw", "away"].map((p) => `<button data-e="${escH(e.id)}" data-p="${p}"><span>${FB_PICK[p]}</span>${fbOdds(e.odds[p])}</button>`).join("")
+        + "</div></div>";
+    }
+    list.innerHTML = html;
+  } catch (e) {
+    list.innerHTML = `<div class="empty">${escH(e.message)}</div>`;
+  }
+}
+
+async function fbBets() {
+  const list = $("#fb-list");
+  list.innerHTML = '<div class="empty">Загружаем ставки…</div>';
+  try {
+    const r = await api("/api/sports/bets");
+    if (!r.bets.length) { list.innerHTML = '<div class="empty">Ставок пока нет</div>'; return; }
+    list.innerHTML = r.bets.map((b) => {
+      const w = fbWhen(b.kickoff), team = b.pick === "home" ? b.home : b.pick === "away" ? b.away : "ничья";
+      const score = b.home_score !== null && b.home_score !== undefined ? ` · ${b.home_score}:${b.away_score}` : "";
+      const res = b.status === "won" ? ` +${money(b.payout, b.cur)}` : b.status === "void" ? ` ${money(b.payout, b.cur)}` : "";
+      return `<div class="fb-match fb-bet"><div class="fb-meta"><span>${escH(w.day)} · ${w.time}</span><span>${money(b.amount, b.cur)}</span></div>`
+        + `<div class="fb-teams"><span>${escH(b.home)} — ${escH(b.away)}${score}</span></div>`
+        + `<div class="fb-meta"><span>${FB_PICK[b.pick]} · ${escH(team)} @ ${fbOdds(b.odds)}</span></div>`
+        + `<span class="st ${b.status}">${FB_STATUS[b.status] || b.status}${res}</span></div>`;
+    }).join("");
+  } catch (e) {
+    list.innerHTML = `<div class="empty">${escH(e.message)}</div>`;
+  }
+}
+
+function fbOpen(eventId, pick) {
+  const e = fb.events[eventId];
+  if (!e) return;
+  fb.sel = { e, pick };
+  $("#fb-s-title").textContent = `${e.home} — ${e.away}`;
+  const team = pick === "home" ? e.home : pick === "away" ? e.away : "Ничья";
+  $("#fb-s-pick").innerHTML = `${FB_PICK[pick]} · ${escH(team)} <b>@ ${fbOdds(e.odds[pick])}</b>`;
+  fbWin();
+  $("#fb-sheet").classList.remove("hidden");
+  haptic();
+}
+
+function fbWin() {
+  if (!fb.sel) return;
+  let txt = "";
+  try {
+    const bet = getBet("football");
+    txt = `Возможный выигрыш: <b>${money(Math.floor(bet * fb.sel.e.odds[fb.sel.pick]), state.cur)}</b>`;
+  } catch (e) { txt = escH(e.message); }
+  $("#fb-s-win").innerHTML = txt;
+}
+
+async function fbPlace() {
+  if (!fb.sel) return;
+  await guard(async () => {
+    const amount = getBet("football");
+    const r = await api("/api/sports/bet", { event: fb.sel.e.id, pick: fb.sel.pick, amount, cur: state.cur });
+    $("#fb-sheet").classList.add("hidden");
+    haptic("win");
+    toast(`Ставка принята · возможный выигрыш ${money(r.bet.possible, r.cur)}`);
+  });
+}
+
 // ---------- мины ----------
 
 let minesGame = null;
@@ -3669,6 +3767,21 @@ function bind() {
   $("#slots-spin").addEventListener("click", slotsSpin);
   $("#plinko-btn").addEventListener("click", plinkoDrop);
   $("#pk-btn").addEventListener("click", pickaxePlay);
+  $("#fb-leagues").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-l]");
+    if (!b) return;
+    fb.league = b.dataset.l; fb.view = "matches"; haptic(); fbLoad();
+  });
+  $$("#fb-view button").forEach((b) => b.addEventListener("click", () => { fb.view = b.dataset.v; haptic(); fbLoad(); }));
+  $("#fb-list").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-e]");
+    if (b) fbOpen(b.dataset.e, b.dataset.p);
+  });
+  $("#fb-s-ok").addEventListener("click", fbPlace);
+  $("#fb-s-cancel").addEventListener("click", () => $("#fb-sheet").classList.add("hidden"));
+  $("#fb-sheet").addEventListener("click", (e) => { if (e.target.id === "fb-sheet") $("#fb-sheet").classList.add("hidden"); });
+  $("#fb-sheet").addEventListener("input", fbWin);
+  $("#fb-sheet").addEventListener("click", (e) => { if (e.target.closest(".betbox")) setTimeout(fbWin, 0); });
   $("#pk-speed").addEventListener("click", pkSpeedToggle);
   pkSpeedLabel();
   $("#bonus-btn").addEventListener("click", claimBonus);

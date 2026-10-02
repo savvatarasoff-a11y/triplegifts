@@ -26,6 +26,7 @@ from .gifts import withdraw as withdraw_gift
 from .nft import deliver as deliver_nft
 from .nftimg import NftImages, render_tgs
 from .relayer import Relayer
+from . import sports as sp
 from .withdraw import GiftCatalog, notify_admins, notify_admins_ton
 
 log = logging.getLogger(__name__)
@@ -123,13 +124,14 @@ async def cors(request: web.Request, handler: Handler) -> web.StreamResponse:
 # Игровые действия — только для подписчиков канала (вывод, пополнение и продажа подарков доступны всем)
 SUB_REQUIRED = frozenset({
     "/api/slots", "/api/plinko", "/api/pickaxe", "/api/case", "/api/mines/start", "/api/crash/bet", "/api/pvp/bet",
-    "/api/upgrade", "/api/bonus", "/api/free_case",
+    "/api/upgrade", "/api/bonus", "/api/free_case", "/api/sports/bet",
 })
 SUB_OK_STATUSES = {"member", "administrator", "creator", "restricted"}
 
 
 def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = None,
-              images: NftImages | None = None) -> web.Application:
+              images: NftImages | None = None, sports: "sp.Sportsbook | None" = None) -> web.Application:
+    sports = sports or sp.Sportsbook(casino, sp.OddsClient(os.getenv("ODDS_API_KEY")))
     sub_cache: dict[int, tuple[float, bool]] = {}
 
     async def subscribed(user_id: int, fresh: bool = False) -> bool:
@@ -336,6 +338,29 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "pvp_commission": g.PVP_COMMISSION,
             },
         })
+
+    # ---------- ставки на футбол ----------
+
+    @routes.get("/api/sports")
+    async def sports_events(request: web.Request) -> web.Response:
+        league = request.query.get("league") or None
+        if league and league not in sp.LEAGUES:
+            raise GameError("Нет такой лиги")
+        return web.json_response({
+            "enabled": sports.client.enabled,
+            "leagues": [{"id": k, "name": n, "icon": i} for k, (_, n, i) in sp.LEAGUES.items()],
+            "events": await sports.events(league),
+        })
+
+    @routes.post("/api/sports/bet")
+    async def sports_bet(request: web.Request) -> web.Response:
+        data = await body(request)
+        return web.json_response(await sports.place(request[USER_ID], data.get("event"), data.get("pick"),
+                                                    data.get("amount"), data.get("cur")))
+
+    @routes.get("/api/sports/bets")
+    async def sports_bets(request: web.Request) -> web.Response:
+        return web.json_response({"bets": await sports.my_bets(request[USER_ID])})
 
     @routes.get("/api/feed")
     async def feed(_: web.Request) -> web.Response:
@@ -597,5 +622,9 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def close_images(_: web.Application) -> None:
         await images.close()
 
+    async def init_sports(_: web.Application) -> None:
+        await sports.init()
+
+    app.on_startup.append(init_sports)
     app.on_cleanup.append(close_images)
     return app

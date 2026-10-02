@@ -536,6 +536,31 @@ button { -webkit-user-select: none; user-select: none; }
   background: radial-gradient(80% 60% at 50% 0%, rgba(245, 185, 60, .28), transparent 70%), var(--surface); }
 #plinko-canvas { width: 100%; display: block; }
 
+/* ---------- Футбол ---------- */
+.empty { padding: 28px 12px; text-align: center; color: var(--muted); font-weight: 700; background: var(--surface);
+  border: 1px dashed var(--line); border-radius: var(--radius); }
+.fb-leagues { display: flex; gap: 8px; overflow-x: auto; margin: 12px -16px 12px; padding: 0 16px; scrollbar-width: none; }
+.fb-leagues button { flex: none; padding: 8px 14px; border-radius: 999px; background: var(--surface-3); color: var(--muted);
+  font-weight: 800; font-size: 13px; white-space: nowrap; }
+.fb-leagues button.sel { background: var(--accent); color: var(--on-accent); }
+.fb-day { margin: 16px 2px 8px; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.fb-match { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+.fb-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-weight: 700; }
+.fb-teams { display: grid; gap: 2px; margin: 8px 0 10px; font-weight: 800; font-size: 15px; }
+.fb-odds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fb-odds button { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 12px;
+  background: var(--surface-3); color: var(--text); font-weight: 800; }
+.fb-odds button span { color: var(--muted); font-size: 12px; }
+.fb-odds button:active { transform: scale(.97); }
+.fb-bet { display: grid; gap: 4px; }
+.fb-bet .st { justify-self: start; padding: 3px 8px; border-radius: 8px; font-size: 11px; font-weight: 800; background: var(--surface-3); }
+.fb-bet .st.won { background: rgba(61, 220, 91, .18); color: #5be27a; }
+.fb-bet .st.lost { background: rgba(229, 72, 77, .16); color: #ff7b7f; }
+.fb-s-pick { margin: 6px 0 12px; font-weight: 800; }
+.fb-s-pick b { color: var(--accent); }
+.fb-s-win { margin-top: 10px; color: var(--muted); font-weight: 700; }
+.fb-s-win b { color: var(--text); }
+
 /* ---------- Кирка ---------- */
 .pk-box { position: relative; margin-top: 14px; border-radius: 24px; overflow: hidden; border: 1px solid var(--line); background: #0d0f16; }
 #pk-canvas { width: 100%; display: block; image-rendering: pixelated; }

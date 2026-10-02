@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from .gifts import notify_deposits, scan as gifts_scan
 from .nftimg import NftImages
 from .nft import deliver_waiting, reprice_demo, sync as sync_nfts
 from .relayer import Relayer
+from .sports import OddsClient, Sportsbook
 from . import ton as ton_mod
 from .web import build_app
 from .withdraw import approve_waiting
@@ -141,6 +143,20 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, imag
         await asyncio.sleep(600)
 
 
+async def sports_loop(bot: Bot, sports: Sportsbook) -> None:
+    """Раз в 10 минут: коэффициенты (сама модель решает, пора ли) и расчёт сыгранных матчей."""
+    async def notify(user_id: int, text: str) -> None:
+        await bot.send_message(user_id, text)
+
+    while True:
+        try:
+            await sports.refresh_odds()
+            await sports.settle_pending(notify)
+        except Exception:
+            log.exception("Ошибка раздела футбола")
+        await asyncio.sleep(600)
+
+
 async def channel_loop(bot: Bot, casino: Casino) -> None:
     """Раз в минуту постит в канал крупные выигрыши и NFT."""
     from .channel import post_wins
@@ -246,7 +262,8 @@ async def run() -> None:
     if await relayer.start():
         relayer.on_private_message(on_relayer_message)
 
-    runner = web.AppRunner(build_app(cfg, casino, bot, relayer, images), access_log=None)
+    sports = Sportsbook(casino, OddsClient(os.getenv("ODDS_API_KEY")))
+    runner = web.AppRunner(build_app(cfg, casino, bot, relayer, images, sports), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", cfg.port).start()
     dp = Dispatcher()
@@ -261,6 +278,7 @@ async def run() -> None:
     gifts_task = asyncio.create_task(gifts_loop(bot, cfg, casino, relayer))
     ton_task = asyncio.create_task(ton_loop(bot, casino))
     channel_task = asyncio.create_task(channel_loop(bot, casino))
+    sports_task = asyncio.create_task(sports_loop(bot, sports))
 
     try:
         me = await bot.get_me()
@@ -282,6 +300,7 @@ async def run() -> None:
         gifts_task.cancel()
         ton_task.cancel()
         channel_task.cancel()
+        sports_task.cancel()
         await relayer.stop()
         await runner.cleanup()
         await db.close()
