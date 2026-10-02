@@ -177,3 +177,10 @@ async def test_league_icons(casino):  # noqa: F811
         await icons.assign(bot, "unl", 99)
     sheet = await icons.sheet(bot)
     assert sheet[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_league_logo_prefers_dark():
+    c = sp.EspnClient()
+    c._take_logo("uefa.nations", {"leagues": [{"logos": [None, {"href": "https://x/l.png", "rel": ["full", "default"]},
+                                                         {"href": "https://x/d.png", "rel": ["full", "dark"]}]}]})
+    assert c.logos["uefa.nations"] == "https://x/d.png"

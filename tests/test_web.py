@@ -352,3 +352,45 @@ async def test_cors_for_pages_origin(client):
     r = await client.get("/api/me", headers={**auth(), "Origin": "https://evil.example"})
     assert "Access-Control-Allow-Origin" not in r.headers
     assert (await client.options("/api/me", headers={"Origin": "https://evil.example"})).status == 403
+
+
+async def test_league_logo_served_from_own_domain(tmp_path):
+    """Лига без эмодзи (Лига наций): логотип турнира ESPN скачивает сервер и отдаёт со своего адреса."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    from app import sports as sp
+    from app.nftimg import NftImages
+    buf = BytesIO()
+    Image.new("RGBA", (64, 64), (20, 120, 220, 255)).save(buf, "PNG")
+    fetched = []
+
+    async def fetch(url):
+        fetched.append(url)
+        return buf.getvalue()
+
+    class Espn:
+        enabled = True
+        logos = {}
+
+        async def league_logo(self, code):
+            return f"https://a.espncdn.com/{code}-dark.png"
+
+    cfg = Config(bot_token=TOKEN, admin_ids=frozenset(), webapp_url="https://x", db_path=str(tmp_path / "l.db"),
+                 port=0, min_bet=1, max_bet=1000, start_bonus=0, log_level="INFO")
+    db = Database(cfg.db_path)
+    await db.connect()
+    casino = Casino(db, cfg)
+    bot = FakeBot()                 # набора эмодзи нет — get_sticker_set отсутствует
+    app = build_app(cfg, casino, bot, images=NftImages(fetch=fetch), sports=sp.Sportsbook(casino, Espn()))
+    async with TestClient(TestServer(app)) as c:
+        r = await (await c.get("/api/sports", headers=auth())).json()
+        unl = next(lg for lg in r["leagues"] if lg["id"] == "unl")
+        assert unl["img"].startswith("sporticon?league=unl")
+        resp = await c.get("/" + unl["img"])
+        assert resp.status == 200 and (await resp.read())[:4] in (b"\x89PNG", b"RIFF")
+        assert fetched == ["https://a.espncdn.com/uefa.nations-dark.png"]
+        assert await db.kv_get("sports:logo:unl") == fetched[0]
+        assert (await c.get("/sporticon?league=nope")).status == 404
+    await db.close()

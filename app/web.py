@@ -354,8 +354,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         return web.json_response({
             "enabled": sports.client.enabled,
             "leagues": [{"id": k, "name": n, "icon": i,
-                         "img": f"sporticon?league={k}&v={icons[k][-8:]}" if icons.get(k)
-                         else await casino.db.kv_get(f"sports:logo:{k}")}         # нет эмодзи — логотип турнира
+                         # эмодзи из набора, иначе логотип турнира — оба отдаём со своего домена
+                         "img": f"sporticon?league={k}&v={icons[k][-8:] if icons.get(k) else 'logo2'}"}
                         for k, (_, n, i) in sp.LEAGUES.items()],
             "events": await sports.events(league),
         })
@@ -370,9 +370,25 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def sport_icon(request: web.Request) -> web.Response:
         """Значок лиги — премиум-эмодзи из набора Telegram, отрисованный картинкой."""
         league = request.query.get("league", "")
-        eid = (await league_icons.mapping(bot)).get(league)
-        if not eid:
+        if league not in sp.LEAGUES:
             raise web.HTTPNotFound()
+        try:
+            eid = (await league_icons.mapping(bot)).get(league)
+        except Exception:
+            eid = None
+        if not eid:                       # нет эмодзи — официальный логотип турнира (ESPN), через наш сервер
+            url = await casino.db.kv_get(f"sports:logo:{league}")
+            if not url:
+                try:
+                    url = await sports.client.league_logo(sp.LEAGUES[league][0])
+                except Exception:
+                    url = None
+                if url:
+                    await casino.db.kv_set(f"sports:logo:{league}", url)
+            img = await images.get(url) if url else None
+            if not img:
+                raise web.HTTPNotFound(headers={"Cache-Control": "no-store"})
+            return web.Response(body=img[0], content_type=img[1], headers={"Cache-Control": "public, max-age=86400"})
 
         async def from_bot() -> bytes | None:
             st = await bot.get_custom_emoji_stickers([eid])

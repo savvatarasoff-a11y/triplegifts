@@ -243,6 +243,29 @@ class EspnClient:
                     raise RuntimeError(f"ESPN: HTTP {r.status}")
                 return await r.json(content_type=None)
 
+    def _take_logo(self, code: str, data: dict[str, Any]) -> None:
+        """Логотип турнира из ответа ESPN; вариант для тёмного фона — если есть (у нас тёмная тема)."""
+        if code in self.logos:
+            return
+        best = None
+        for lg in data.get("leagues") or []:
+            for logo in (lg.get("logos") if isinstance(lg, dict) else None) or []:
+                href = logo.get("href") if isinstance(logo, dict) else None
+                if not (isinstance(href, str) and href.startswith("https://")):
+                    continue
+                if "dark" in (logo.get("rel") or []):
+                    best = href
+                    break
+                best = best or href
+        if best:
+            self.logos[code] = best
+
+    async def league_logo(self, code: str) -> str | None:
+        """Логотип турнира, если ещё не встречался в расписании, — одним запросом табло на сегодня."""
+        if code not in self.logos:
+            self._take_logo(code, await self._get(f"{ESPN}/site/v2/sports/soccer/{code}/scoreboard"))
+        return self.logos.get(code)
+
     async def scoreboard(self, code: str, start: datetime, end: datetime) -> list[dict[str, Any]]:
         """Матчи за период: ESPN отвечает 400 на диапазон с limit, поэтому — по одному дню (dates=YYYYMMDD)."""
         events: dict[str, dict[str, Any]] = {}
@@ -250,11 +273,7 @@ class EspnClient:
         while day.date() <= end.date():
             try:
                 data = await self._get(f"{ESPN}/site/v2/sports/soccer/{code}/scoreboard", dates=f"{day:%Y%m%d}")
-                for lg in data.get("leagues") or []:
-                    for logo in lg.get("logos") or []:
-                        href = logo.get("href") if isinstance(logo, dict) else None
-                        if isinstance(href, str) and href.startswith("https://") and code not in self.logos:
-                            self.logos[code] = href
+                self._take_logo(code, data)
                 for ev in data.get("events") or []:
                     events[str(ev.get("id"))] = ev
             except Exception as e:
