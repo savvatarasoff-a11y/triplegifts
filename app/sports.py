@@ -119,13 +119,18 @@ def with_margin(probs: tuple[float, float, float], margin: float, max_odds: floa
 def book_odds(comp: dict[str, Any]) -> tuple[float, float, float] | None:
     """Линия букмекера из события ESPN (разные форматы ответа), с нашей маржой."""
     for o in comp.get("odds") or []:
+        if not isinstance(o, dict):          # ESPN иногда кладёт в список линий null
+            continue
         h = american((o.get("homeTeamOdds") or {}).get("moneyLine"))
         a = american((o.get("awayTeamOdds") or {}).get("moneyLine"))
         d = american((o.get("drawOdds") or {}).get("moneyLine"))
         if not (h and a and d):
-            ml = o.get("moneyline") or {}
-            pick = lambda side: american(((ml.get(side) or {}).get("close") or (ml.get(side) or {}).get("open") or {})
-                                         .get("odds"))
+            ml = o.get("moneyline") if isinstance(o.get("moneyline"), dict) else {}
+
+            def pick(side: str) -> float | None:
+                line = ml.get(side) if isinstance(ml.get(side), dict) else {}
+                val = line.get("close") or line.get("open")
+                return american(val.get("odds")) if isinstance(val, dict) else None
             h, a, d = pick("home"), pick("away"), pick("draw")
         if h and a and d:
             return with_margin((1 / h, 1 / d, 1 / a), MARGIN_BOOK, MAX_ODDS)
@@ -314,7 +319,11 @@ class Sportsbook:
                     sides = {x.get("homeAway"): x for x in comp.get("competitors") or []}
                     if state != "pre" or not kickoff or kickoff <= now or "home" not in sides or "away" not in sides:
                         continue
-                    odds, source = self.price(comp, bool(comp.get("neutralSite")))
+                    try:
+                        odds, source = self.price(comp, bool(comp.get("neutralSite")))
+                    except Exception as e:               # неожиданный формат одного матча — пропускаем только его
+                        log.warning("Матч %s %s не разобран: %s", league, ev.get("id"), e)
+                        continue
                     if odds is None:
                         continue
                     team = lambda s: sides[s].get("team") or {}

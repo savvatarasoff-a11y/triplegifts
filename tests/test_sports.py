@@ -65,6 +65,11 @@ def test_pricing():
     assert h < 1.5 < a <= sp.MAX_ODDS_MODEL
     assert sum(1 / o for o in (h, d, a)) >= 1 + sp.MARGIN_MODEL - 0.01
     assert sp.model_odds(strong, None) is None
+    # ESPN кладёт в список линий null и линии без moneyline — разбор не падает
+    comp = espn_event("y")["competitions"][0]
+    comp["odds"] = [None, {"overUnder": 2.5}] + comp["odds"]
+    assert sp.book_odds(comp) is not None
+    assert sp.book_odds({"odds": [None, {"moneyline": None}]}) is None
     assert sum(sp.poisson_probs(1.4, 1.1)) == pytest.approx(1, abs=1e-6)
     s = sp.strengths(table(("1", 10, 25, 8), ("2", 10, 8, 22), ("3", 2, 9, 0)), 1.0)
     assert s["1"]["att"] > 1 > s["2"]["att"] and s["1"]["def"] < 1 < s["2"]["def"] and "3" not in s   # мало матчей

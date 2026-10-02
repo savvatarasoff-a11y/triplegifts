@@ -46,7 +46,11 @@ async def main() -> None:
             if not kickoff:
                 reasons["не разобрал дату: " + str(comp.get("date") or ev.get("date"))] += 1
                 continue
-            odds, source = book.price(comp, bool(comp.get("neutralSite")))
+            try:
+                odds, source = book.price(comp, bool(comp.get("neutralSite")))
+            except Exception as e:
+                reasons[f"ошибка разбора: {type(e).__name__}"] += 1
+                continue
             if odds:
                 priced[source] += 1
             else:
