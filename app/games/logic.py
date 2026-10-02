@@ -139,9 +139,17 @@ PICK_ART = ("................", "................", ".....OOOOO......", "....OHM
             ".........eLMO...", "........eibMLO..", ".......ekb.OMO..", "......eib..OQO..", ".....ekb...OLO..",
             "....eib....OHO..", "...ekb......O...", "..eib...........", "..kb............", "................",
             "................")
-_PICK_PTS = tuple((((i + 0.5) / 16 - 0.5) * PICK_SIZE, ((j + 0.5) / 16 - 0.5) * PICK_SIZE)
-                  for j in range(16) for i in range(16) if PICK_ART[j][i] != ".")
+# Масса: металлическая головка (O, H, M, Q, L) втрое тяжелее деревянной рукояти — центр тяжести у наконечника.
+_PICK_MASS = {ch: 3.0 if ch in "OHMQL" else 1.0 for row in PICK_ART for ch in row if ch != "."}
+_px = [(i + 0.5, j + 0.5, _PICK_MASS[PICK_ART[j][i]]) for j in range(16) for i in range(16) if PICK_ART[j][i] != "."]
+_m = sum(w for _, _, w in _px)
+PICK_COM = (sum(i * w for i, _, w in _px) / _m, sum(j * w for _, j, w in _px) / _m)   # в пикселях спрайта
+# точки контура относительно центра тяжести, в клетках; момент инерции — на единицу массы
+_PICK_PTS = tuple(((i - PICK_COM[0]) / 16 * PICK_SIZE, (j - PICK_COM[1]) / 16 * PICK_SIZE) for i, j, _ in _px)
+_PICK_I = sum(w * (((i - PICK_COM[0]) / 16 * PICK_SIZE) ** 2 + ((j - PICK_COM[1]) / 16 * PICK_SIZE) ** 2)
+              for i, j, w in _px) / _m
 _PICK_BR = max(math.hypot(x, y) for x, y in _PICK_PTS) + 0.02
+PICK_MU = 0.35                # трение при ударе (кулоново: касательный импульс не больше μ·нормального)
 # HP блоков по ценности; руды одной прочности в физике неотличимы — на этом держится точный расчёт RTP ниже
 PICK_HARD = {"grass": 1, "dirt": 1, "tnt": 1, "bench": 1, "stone": 2, "coal": 2, "copper": 2,
              "iron": 3, "gold": 3, "redstone": 3, "lapis": 3, "diamond": 5, "emerald": 5}
@@ -157,10 +165,10 @@ ORES = tuple(_PICK_VALUES)
 # пересчитать: pickaxe_class_counts). Тип блока внутри класса на физику не влияет, поэтому
 # E[выигрыш] = Σ по классам E[N_класса] × средняя ценность руды класса — без шума от редких изумрудов.
 PICKAXE_CLASS_COUNTS: dict[str, dict[int, float]] = {
-    "wood": {2: 9.7707, 3: 2.0122, 5: 0.0632},
-    "iron": {2: 26.4686, 3: 5.6276, 5: 0.1912},
-    "gold": {2: 41.6844, 3: 8.9144, 5: 0.3097},
-    "diamond": {2: 50.9183, 3: 10.9185, 5: 0.3799},
+    "wood": {2: 9.8261, 3: 2.0477, 5: 0.0718},
+    "iron": {2: 26.656, 3: 5.7011, 5: 0.2123},
+    "gold": {2: 42.0338, 3: 9.0446, 5: 0.3398},
+    "diamond": {2: 51.3534, 3: 11.0662, 5: 0.4173},
 }
 
 
@@ -203,9 +211,11 @@ def pickaxe_run(tier: str, pays: dict[str, float] | None = None, rng: random.Ran
                     if dx or dy:
                         smash(cx + dx, cy + dy, out)
 
-    x, y = PICK_START
+    # из барабана кирка выпадает центром спрайта в центре барабана; физика ведёт центр тяжести
+    x = PICK_START[0] + (PICK_COM[0] - 8) / 16 * PICK_SIZE
+    y = PICK_START[1] + (PICK_COM[1] - 8) / 16 * PICK_SIZE
     vx, vy = round(rng.uniform(-3, 3), 4), 0.0
-    th, om = 0.0, round(rng.choice((-1, 1)) * rng.uniform(5, 10), 4)     # стартует ровно как стоит в барабане
+    th, om = 0.0, round(rng.choice((-1, 1)) * rng.uniform(2, 5), 4)      # стартует ровно как стоит в барабане
     start = {"t": 0, "x": x, "y": y, "vx": vx, "vy": vy, "a": th, "w": om}
     touches = 0                                 # касаний с последнего верстака (верстак чинит полностью)
     benches = 0                                 # сломано верстаков — столько раз кирка поднялась на уровень
@@ -245,14 +255,16 @@ def pickaxe_run(tier: str, pays: dict[str, float] | None = None, rng: random.Ran
                            ((wy - cy) + 5 * ((cx, cy - 1) in solid), (0, -1)),
                            ((cy + 1 - wy) + 5 * ((cx, cy + 1) in solid), (0, 1)))
                 if best is None or d > best[0]:
-                    best = (d, n, cx, cy)
+                    best = (d, n, cx, cy, wx - nx, wy - ny)
         if best is None:
             x, y, vy, th = nx, ny, nvy, nth
             continue
-        d, (nxn, nyn), cx, cy = best
+        d, (nxn, nyn), cx, cy, rx, ry = best
         d = d % 5 + 0.002
         x, y, th = nx + nxn * d, ny + nyn * d, nth
-        dot = vx * nxn + nvy * nyn
+        # скорость точки касания: центр тяжести + вращение (ω × r)
+        vpx, vpy = vx - om * ry, nvy + om * rx
+        dot = vpx * nxn + vpy * nyn
         c = get(cx, cy)
         broken: list = []
         upgraded = False
@@ -260,20 +272,25 @@ def pickaxe_run(tier: str, pays: dict[str, float] | None = None, rng: random.Ran
             vy = nvy
             kind = 0
         else:
-            # отражение: нормальная составляющая гасится упругостью, касательная — трением
-            vn = dot
-            tx, ty = vx - vn * nxn, nvy - vn * nyn
-            rvx, rvy = tx * PICK_FRICTION - PICK_REST * vn * nxn, ty * PICK_FRICTION - PICK_REST * vn * nyn
-            ang = math.atan2(rvy, rvx) + rng.uniform(-0.12, 0.12)    # чуть-чуть случайности от неровностей
-            sp = min(PICK_VMAX, math.hypot(rvx, rvy))
+            # удар твёрдого тела: импульс в точке касания меняет и скорость центра тяжести, и вращение
+            rn = rx * nyn - ry * nxn                       # плечо удара относительно центра тяжести
+            j = -(1 + PICK_REST) * dot / (1 + rn * rn / _PICK_I)
+            vx, vy = vx + j * nxn, nvy + j * nyn
+            om += rn * j / _PICK_I
+            # трение о блок: гасит проскальзывание точки касания и закручивает кирку
+            tx_, ty_ = -nyn, nxn
+            vt = (vx - om * ry) * tx_ + (vy + om * rx) * ty_
+            rt = rx * ty_ - ry * tx_
+            jt = max(-PICK_MU * j, min(PICK_MU * j, -vt / (1 + rt * rt / _PICK_I)))
+            vx, vy = vx + jt * tx_, vy + jt * ty_
+            om += rt * jt / _PICK_I
+            ang = math.atan2(vy, vx) + rng.uniform(-0.06, 0.06)    # чуть-чуть случайности от неровностей
+            sp = min(PICK_VMAX, math.hypot(vx, vy))
             vx, vy = math.cos(ang) * sp, math.sin(ang) * sp
             out_n = vx * nxn + vy * nyn
             if out_n < PICK_VMIN:                    # слишком вяло — добавляем отскок от блока, чтобы кирка не залипала
                 vx, vy = vx + (PICK_VMIN - out_n) * nxn, vy + (PICK_VMIN - out_n) * nyn
-            # вращение: кирку закручивает трение о блок (касательная скорость) плюс немного прежнего вращения
-            tang = tx * -nyn + ty * nxn
-            om = om * 0.45 + tang * 1.6 + rng.uniform(-1.5, 1.5)
-            om = math.copysign(min(12.0, max(2.0, abs(om))), om)
+            om = max(-14.0, min(14.0, om))
             kind = 2
             if c != "wall":
                 kind = 1

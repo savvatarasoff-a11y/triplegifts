@@ -2178,7 +2178,8 @@ function pkDrawSpin(ctx, cx, cy, size, ang, alpha) {
   ctx.translate(cx, cy);
   ctx.rotate(ang);
   ctx.shadowColor = "rgba(0, 0, 0, .7)"; ctx.shadowBlur = size / 12;
-  ctx.drawImage(pkPickSprite(pk.tier), -size / 2, -size / 2, size, size);
+  const com = pkCfg().com || [8, 8], k = size / 16;         // вращаем вокруг центра тяжести (у наконечника)
+  ctx.drawImage(pkPickSprite(pk.tier), -com[0] * k, -com[1] * k, size, size);
   ctx.restore();
 }
 

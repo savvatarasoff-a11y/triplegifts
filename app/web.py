@@ -320,7 +320,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                 "plinko": {"rows": list(g.PLINKO_ROWS), "risks": list(g.PLINKO_RISKS),
                            "tables": {f"{r}:{k}": t for (r, k), t in g.PLINKO_TABLES.items()}},
                 "pickaxe": {"table": g.PICKAXE_TABLE, "wheel": [list(w) for w in g.PICK_WHEEL], "tiers": g.PICK_TIERS,
-                            "g": g.PICK_G, "size": g.PICK_SIZE, "top": g.PICK_TOP},
+                            "g": g.PICK_G, "size": g.PICK_SIZE, "com": list(g.PICK_COM), "top": g.PICK_TOP},
                 "cases": [
                     {**{k: c[k] for k in ("id", "name", "emoji", "price")},
                      **({"rtp": c["rtp"]} if is_admin else {}),
