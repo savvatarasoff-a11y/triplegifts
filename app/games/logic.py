@@ -117,11 +117,12 @@ def plinko_drop(rows: int, risk: str, rng: random.Random = RNG) -> tuple[list[in
 PICKAXE_RTP = 0.87
 PICKAXE_MAX_X = 5000          # потолок выигрыша за игру, в ставках
 PICK_TOUCH = 4                # сколько прочности отнимает одно касание блока
-# верстак полностью восстанавливает прочность кирки
+# верстак поднимает кирку на уровень (деревянная → железная → золотая → алмазная) и чинит её полностью
 # колесо: (кирка, шанс); прочность кирок
 PICK_WHEEL = (("none", 0.25), ("wood", 0.35), ("iron", 0.22), ("gold", 0.12), ("diamond", 0.06))
 PICK_TIERS = {"wood": 100, "iron": 200, "gold": 300, "diamond": 400}
 PICKAXES = tuple(PICK_TIERS)
+PICK_ORDER = PICKAXES         # порядок уровней: верстак поднимает кирку на следующий
 PICK_COLS = 7
 PICK_TOP = -8                 # выше кирка не улетает (невидимый потолок в небе)
 PICK_START = (3.5, -3.5)      # отсюда — из барабана с кирками — кирка падает в шахту
@@ -155,10 +156,10 @@ ORES = tuple(_PICK_VALUES)
 # пересчитать: pickaxe_class_counts). Тип блока внутри класса на физику не влияет, поэтому
 # E[выигрыш] = Σ по классам E[N_класса] × средняя ценность руды класса — без шума от редких изумрудов.
 PICKAXE_CLASS_COUNTS: dict[str, dict[int, float]] = {
-    "wood": {2: 5.7894, 3: 1.1737, 5: 0.0387},
-    "iron": {2: 16.8391, 3: 3.5813, 5: 0.1363},
-    "gold": {2: 31.4957, 3: 6.7995, 5: 0.2639},
-    "diamond": {2: 51.0527, 3: 11.0695, 5: 0.4356},
+    "wood": {2: 9.7316, 3: 2.0414, 5: 0.0744},
+    "iron": {2: 26.8123, 3: 5.7761, 5: 0.2247},
+    "gold": {2: 41.9416, 3: 9.0757, 5: 0.3559},
+    "diamond": {2: 51.0223, 3: 11.0479, 5: 0.4332},
 }
 
 
@@ -166,12 +167,12 @@ def pickaxe_spin(rng: random.Random = RNG) -> str:
     return rng.choices([k for k, _ in PICK_WHEEL], [p for _, p in PICK_WHEEL])[0]
 
 
-def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Random = RNG, record: bool = True,
-                checkpoints: tuple[int, ...] = ()) -> dict[str, Any]:
-    """Одна партия с киркой прочностью hp0: мир, столкновения, итог.
+def pickaxe_run(tier: str, pays: dict[str, float] | None = None, rng: random.Random = RNG, record: bool = True,
+                track: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Одна партия киркой tier: мир, столкновения, итог. Верстак повышает кирку на уровень и чинит её полностью.
 
-    checkpoints — прочности, для которых нужно запомнить счётчики сломанных блоков в момент, когда кирка с такой
-    прочностью сломалась бы (траектория от прочности не зависит — она лишь решает, когда остановиться)."""
+    track — стартовые кирки, для которых нужно запомнить счётчики сломанных блоков в момент, когда партия такой
+    киркой закончилась бы (траектория от кирки не зависит — уровень и прочность лишь решают, когда остановиться)."""
     pays = PICKAXE_TABLE if pays is None else pays
     types, ws = list(PICK_WEIGHTS), list(PICK_WEIGHTS.values())
     ws_top = [w * 3 if t == "dirt" else w for t, w in PICK_WEIGHTS.items()]
@@ -206,16 +207,20 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
     th, om = 0.0, round(rng.choice((-1, 1)) * rng.uniform(5, 10), 4)     # стартует ровно как стоит в барабане
     start = {"t": 0, "x": x, "y": y, "vx": vx, "vy": vy, "a": th, "w": om}
     touches = 0                                 # касаний с последнего верстака (верстак чинит полностью)
+    benches = 0                                 # сломано верстаков — столько раз кирка поднялась на уровень
     t, total = 0.0, 0.0
     events: list[dict[str, Any]] = []
     counts = {k: 0 for k in _PAY_CLASSES}
-    snaps: dict[int, dict[int, int]] = {}
-    pending = sorted(set(checkpoints))
+    snaps: dict[str, dict[int, int]] = {}
+    pending = [k for k in PICK_ORDER if k in track]
     dt, g = PICK_DT, PICK_G
-    def hp_left(h: int) -> int:
-        return h - touches * PICK_TOUCH
+    def level(start: str) -> str:
+        return PICK_ORDER[min(PICK_ORDER.index(start) + benches, len(PICK_ORDER) - 1)]
 
-    while hp_left(hp0) > 0 and t < PICK_MAX_T:
+    def hp_left(start: str) -> int:
+        return PICK_TIERS[level(start)] - touches * PICK_TOUCH
+
+    while hp_left(tier) > 0 and t < PICK_MAX_T:
         nx, ny = x + vx * dt, y + vy * dt + 0.5 * g * dt * dt
         nvy, nth = vy + g * dt, th + om * dt
         t += dt
@@ -249,6 +254,7 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
         dot = vx * nxn + nvy * nyn
         c = get(cx, cy)
         broken: list = []
+        upgraded = False
         if dot >= 0:                            # уже отлетает (задело при повороте) — только выталкиваем
             vy = nvy
             kind = 0
@@ -273,20 +279,26 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
                     for _, _, bt in broken:
                         if bt == "bench":
                             touches = 0
+                            benches += 1
+                            upgraded = True
                         if PICK_HARD[bt] in counts:
                             counts[PICK_HARD[bt]] += 1
                         total += pays.get(bt, 0)
-            while pending and hp_left(pending[0]) <= 0:
-                snaps[pending.pop(0)] = dict(counts)
+            for k in [k for k in pending if hp_left(k) <= 0]:
+                snaps[k] = dict(counts)
+                pending.remove(k)
         # округляем состояние сразу — приложение продолжит траекторию ровно с тех же чисел
         x, y, vx, vy = round(x, 5), round(y, 5), round(vx, 5), round(vy, 5)
         th, om = round(th, 5), round(om, 5)
         if record:
             events.append({"t": round(t, 5), "x": x, "y": y, "vx": vx, "vy": vy, "a": th, "w": om, "k": kind,
-                           "c": [cx, cy] if kind == 1 else None, "hp": max(0, hp_left(hp0)),
+                           "c": [cx, cy] if kind == 1 else None, "hp": max(0, hp_left(tier)),
                            "br": [[bx, by, round(pays.get(bt, 0), 4)] for bx, by, bt in broken]})
-    for h in pending:
-        snaps[h] = dict(counts)
+            if upgraded:
+                events[-1]["lv"] = level(tier)
+                events[-1]["mx"] = PICK_TIERS[level(tier)]
+    for k in pending:
+        snaps[k] = dict(counts)
     out: dict[str, Any] = {"mult": round(min(total, PICKAXE_MAX_X), 2), "counts": counts, "snaps": snaps, "t": t}
     if record:
         rows = max([yy for _, yy in world] + [0]) + 10
@@ -301,13 +313,12 @@ def pickaxe_run(hp0: int, pays: dict[str, float] | None = None, rng: random.Rand
 
 def pickaxe_class_counts(n: int, rng: random.Random) -> dict[str, dict[int, float]]:
     """Монте-Карло для PICKAXE_CLASS_COUNTS: одна длинная партия даёт счётчики сразу для всех кирок."""
-    hp_by = {h: k for k, h in PICK_TIERS.items()}
     acc = {k: {c: 0 for c in _PAY_CLASSES} for k in PICK_TIERS}
     for _ in range(n):
-        run = pickaxe_run(max(PICK_TIERS.values()), {}, rng, record=False, checkpoints=tuple(PICK_TIERS.values()))
-        for h, cnt in run["snaps"].items():
+        run = pickaxe_run(PICK_ORDER[-1], {}, rng, record=False, track=PICK_ORDER)
+        for k, cnt in run["snaps"].items():
             for c, v in cnt.items():
-                acc[hp_by[h]][c] += v
+                acc[k][c] += v
     return {k: {c: v / n for c, v in a.items()} for k, a in acc.items()}
 
 
@@ -343,7 +354,7 @@ def pickaxe_play(rng: random.Random = RNG) -> dict[str, Any]:
     tier = pickaxe_spin(rng)
     if tier == "none":
         return {"tier": "none", "mult": 0.0}
-    return {"tier": tier, "hp": PICK_TIERS[tier], **pickaxe_run(PICK_TIERS[tier], rng=rng)}
+    return {"tier": tier, "hp": PICK_TIERS[tier], **pickaxe_run(tier, rng=rng)}
 
 
 # ---------------- Мины ----------------

@@ -2152,8 +2152,18 @@ function pkApply(ev) {
     pkBits(bx + 0.5, by + 0.5, pkBitCols(t), 14);
     if (PK_ORE[t]) pkSparks(bx + 0.5, by + 0.5, PK_ORE[t][2], 8);
     if (t === "tnt") { r.flash = 1; haptic("win"); pkExplode(bx + 0.5, by + 0.5); }
-    if (t === "bench") { text(bx, by, "❤ MAX", "#5CFF8F", false); pkSparks(bx + 0.5, by + 0.5, "#9CFFB0", 14); }
+    if (t === "bench") pkSparks(bx + 0.5, by + 0.5, "#9CFFB0", 14);
     if (m > 0) { pk.sum += m; text(bx, by, `+${pkAmount(m)}`, PK_ORE[t] ? PK_ORE[t][0] : "#fff", m >= 1); }
+  }
+  if (ev.lv) {                                   // верстак: кирка поднялась на уровень и починилась
+    const up = ev.lv !== pk.tier;
+    pk.tier = ev.lv;
+    pk.max = ev.mx;
+    pk.trail = [];
+    pkSparks(ev.x, ev.y, PK_PICK[ev.lv].H, 26);
+    pk.texts.push({ x: ev.x, y: ev.y - 0.9, txt: up ? `⬆ ${PK_PICK_NAMES[ev.lv]}` : "❤ MAX", color: up ? PK_PICK[ev.lv].H : "#5CFF8F",
+      big: true, life: 1.3, age: 0 });
+    haptic("win");
   }
   pk.hp = ev.hp;
   pkHud();
@@ -2581,7 +2591,7 @@ async function pickaxePlay() {
     pkHud();
     setBalance(r.balance, r.cur);
     res.className = "result reveal " + (r.win > bet ? "win" : r.win > 0 ? "" : "lose");
-    res.textContent = `${PK_PICK_NAMES[r.tier]} сломалась · ${fmtX(r.multiplier)} · ${r.win > 0 ? "+" : ""}${money(r.win, r.cur)}`;
+    res.textContent = `${PK_PICK_NAMES[pk.tier]} сломалась · ${fmtX(r.multiplier)} · ${r.win > 0 ? "+" : ""}${money(r.win, r.cur)}`;
     if (r.win > 0) pkWinShow(r.win, r.cur, r.multiplier);
     if (r.win > bet) haptic("win");
   } catch (e) {
