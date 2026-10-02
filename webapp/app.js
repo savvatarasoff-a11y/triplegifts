@@ -2098,9 +2098,7 @@ function pkAmount(mult) {      // сумма в валюте ставки, вс�
   return (Math.floor(v * 100) / 100).toFixed(2);
 }
 
-function pkHud() {
-  $("#pk-sum").textContent = pk.sum === null ? "0.00" : pkAmount(pk.sum);
-}
+function pkHud() {}       // счётчиков поверх поля нет: прочность — над киркой, итог — на экране WIN
 
 // ----- частицы: обломки, дым, кольцо взрыва, искры -----
 function pkBits(x, y, cols, n, power = 1) {
