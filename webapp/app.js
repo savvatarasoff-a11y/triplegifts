@@ -2328,7 +2328,7 @@ function pkFrame(tf) {
   const r = pk.run;
   if (r) {
     if (state.screen !== "pickaxe") r.t = Infinity;          // ушли с экрана — досчитываем мгновенно
-    r.t += dt / 1000 * (pk.fast ? 6 : r.speed);
+    r.t += dt / 1000 * r.speed * pk.mult;
     while (r.i < r.events.length && r.events[r.i].t <= r.t) pkApply(r.events[r.i++]);
     if (r.flash > 0) r.flash = Math.max(0, r.flash - dt / 380);
     if (r.t !== Infinity) {
@@ -2538,9 +2538,18 @@ async function pkReelSpin(result) {
   });
 }
 
+const PK_SPEEDS = [1, 2, 4];
+pk.mult = PK_SPEEDS.includes(Number(store("pk:speed"))) ? Number(store("pk:speed")) : 1;
+function pkSpeedLabel() { $("#pk-speed").textContent = `⏩ ×${pk.mult}`; }
+function pkSpeedToggle() {
+  pk.mult = PK_SPEEDS[(PK_SPEEDS.indexOf(pk.mult) + 1) % PK_SPEEDS.length];
+  store("pk:speed", String(pk.mult));
+  pkSpeedLabel();
+  haptic();
+}
+
 async function pickaxePlay() {
-  if (pk.run) { pk.fast = true; $("#pk-btn").textContent = "Ускорено ⏩"; return; }
-  if (pk.spinning) return;
+  if (pk.run || pk.spinning) return;
   let bet;
   try { bet = getBet("pickaxe"); } catch (e) { toast(e.message, true); return; }
   const btn = $("#pk-btn");
@@ -2569,8 +2578,7 @@ async function pickaxePlay() {
     await new Promise((ok) => setTimeout(ok, 650));         // показываем прочность, потом кирка падает
     pk.reel.taken = true;
     pk.sum = 0;
-    btn.disabled = false;
-    btn.textContent = "Быстрее ⏩";
+    $("#pk-speed").classList.remove("hidden");
     const end = r.events.length ? r.events[r.events.length - 1].t + 0.12 : 0.5;
     await new Promise((resolve) => {
       pk.run = { t: 0, i: 0, events: r.events, seg: r.start, end, speed: Math.max(1, end / 70), flash: 0,   // дольше ~70 с не тянем
@@ -2587,8 +2595,8 @@ async function pickaxePlay() {
     toast(e.message, true);
   } finally {
     pk.spinning = false;
+    $("#pk-speed").classList.add("hidden");
     btn.disabled = false;
-    btn.textContent = "Копать";
   }
 }
 
@@ -3671,6 +3679,8 @@ function bind() {
   $("#slots-spin").addEventListener("click", slotsSpin);
   $("#plinko-btn").addEventListener("click", plinkoDrop);
   $("#pk-btn").addEventListener("click", pickaxePlay);
+  $("#pk-speed").addEventListener("click", pkSpeedToggle);
+  pkSpeedLabel();
   $("#bonus-btn").addEventListener("click", claimBonus);
   $("#rake-btn").addEventListener("click", claimRakeback);
   $$("#plinko-risk button").forEach((b) => b.addEventListener("click", () => {

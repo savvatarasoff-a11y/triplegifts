@@ -554,6 +554,10 @@ button { -webkit-user-select: none; user-select: none; }
   background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(0, 0, 0, .55) calc(10% - 2px) 10%); }
 @keyframes pkblink { 50% { opacity: .55; } }
 /* финальный экран, как в конце видео: небо с облаками и пиксельная табличка */
+.pk-speed { position: absolute; right: 10px; bottom: 10px; z-index: 1; padding: 8px 12px; border-radius: 12px;
+  font: 800 13px var(--font-head, sans-serif); color: #fff; background: rgba(8, 9, 14, .78); border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(6px); box-shadow: 0 4px 14px rgba(0, 0, 0, .35); cursor: pointer; }
+.pk-speed:active { transform: scale(.95); }
 .pk-win { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; opacity: 0; pointer-events: none;
   transition: opacity .3s; background:
     radial-gradient(40% 14% at 22% 30%, #fff 0 60%, transparent 62%), radial-gradient(34% 12% at 78% 70%, #fff 0 60%, transparent 62%),
