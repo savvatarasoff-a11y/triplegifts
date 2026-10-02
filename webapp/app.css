@@ -740,3 +740,8 @@ button { -webkit-user-select: none; user-select: none; }
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, .5)); }
 .game .gi .f { fill: var(--accent-soft); stroke: none; }
 .game.accent .gi .f { fill: var(--on-accent); }
+.fb-nums { display: flex; gap: 8px; margin: 4px 0 2px; }
+.fb-nums div { flex: 1; background: var(--surface-3); border-radius: 10px; padding: 6px 10px; display: grid; gap: 1px; }
+.fb-nums small { font-size: 11px; color: var(--muted); font-weight: 700; }
+.fb-nums b { font-size: 15px; font-weight: 800; }
+.fb-bet.lost .fb-nums b { opacity: .5; }

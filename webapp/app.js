@@ -2648,9 +2648,11 @@ async function fbBets() {
       const w = fbWhen(b.kickoff), team = b.pick === "home" ? b.home : b.pick === "away" ? b.away : "ничья";
       const score = b.home_score !== null && b.home_score !== undefined ? ` · ${b.home_score}:${b.away_score}` : "";
       const res = b.status === "won" ? ` +${money(b.payout, b.cur)}` : b.status === "void" ? ` ${money(b.payout, b.cur)}` : "";
-      return `<div class="fb-match fb-bet"><div class="fb-meta"><span>${escH(w.day)} · ${w.time}</span><span>${money(b.amount, b.cur)}</span></div>`
+      return `<div class="fb-match fb-bet ${b.status}"><div class="fb-meta"><span>${escH(w.day)} · ${w.time}</span><span>${money(b.amount, b.cur)}</span></div>`
         + `<div class="fb-teams"><span>${escH(b.home)} — ${escH(b.away)}${score}</span></div>`
-        + `<div class="fb-meta"><span>${FB_PICK[b.pick]} · ${escH(team)} @ ${fbOdds(b.odds)}</span></div>`
+        + `<div class="fb-meta"><span>${FB_PICK[b.pick]} · ${escH(team)}</span></div>`
+        + `<div class="fb-nums"><div><small>Кэф</small><b>${fbOdds(b.odds)}</b></div>`
+        + `<div><small>${b.status === "won" ? "Выигрыш" : "Возможный выигрыш"}</small><b>${money(b.possible, b.cur)}</b></div></div>`
         + `<span class="st ${b.status}">${FB_STATUS[b.status] || b.status}${res}</span></div>`;
     }).join("");
   } catch (e) {

@@ -115,7 +115,7 @@ async def test_bet_win_lose_void(book):
     assert await book.settle_pending(notify) == 2
     win = int(100 * odds["home"])
     assert await balance(c, 1) == 900 + win and await balance(c, 2) == 950
-    assert (await book.my_bets(1))[0]["status"] == "won" and (await book.my_bets(2))[0]["status"] == "lost"
+    assert (await book.my_bets(1))[0]["possible"] == win and (await book.my_bets(1))[0]["status"] == "won" and (await book.my_bets(2))[0]["status"] == "lost"
     assert len(sent) == 2 and "сыграла" in sent[0][1] and "2:1" in sent[0][1]
     assert (await c.db.recent_bets(1, 5))[0]["game"] == "football"
     assert await book.settle_pending(notify) == 0                      # повторно ничего не меняется

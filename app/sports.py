@@ -490,7 +490,8 @@ class Sportsbook:
             "SELECT b.*, e.home, e.away, e.league, e.home_score, e.away_score FROM sport_bets b "
             "JOIN sport_events e ON e.id=b.event_id WHERE b.user_id=? ORDER BY b.id DESC LIMIT 30", user_id)
         return [{k: r[k] for k in ("id", "event_id", "pick", "odds", "amount", "cur", "kickoff", "status", "payout",
-                                   "home", "away", "league", "home_score", "away_score", "created_at")} for r in rows]
+                                   "home", "away", "league", "home_score", "away_score", "created_at")}
+                | {"possible": math.floor(r["amount"] * r["odds"])} for r in rows]
 
     async def place(self, user_id: int, event_id: Any, pick: Any, amount: Any, cur: Any = money.STARS) -> dict:
         if pick not in PICKS:
