@@ -528,10 +528,11 @@ def _ts(iso: Any) -> float | None:
 # ---------- значки лиг: премиум-эмодзи из набора Telegram ----------
 
 ICON_SET = "europeHDSofascout"
+LOCAL_ICONS = {"unl": "static/mc/unl.png"}   # свои картинки лиг (флаг Лиги наций)
 ICON_KEY = "sports:icons"            # {лига: custom_emoji_id}, назначенные вручную (/league_icons epl 5)
 # подсказки для автоподбора по «базовому» эмодзи стикера, если вручную не назначено
 ICON_HINTS = {"epl": ["🏴\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f", "🇬🇧", "🦁"],
-              "laliga": ["🇪🇸"], "ligue1": ["🇫🇷"], "ucl": ["⭐", "🌟", "🏆", "✨"]}   # Лига наций — официальный логотип с ESPN
+              "laliga": ["🇪🇸"], "ligue1": ["🇫🇷"], "ucl": ["⭐", "🌟", "🏆", "✨"]}   # Лига наций — свой флаг (LOCAL_ICONS)
 
 
 class LeagueIcons:

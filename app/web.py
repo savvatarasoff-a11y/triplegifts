@@ -355,7 +355,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             "enabled": sports.client.enabled,
             "leagues": [{"id": k, "name": n, "icon": i,
                          # эмодзи из набора, иначе логотип турнира — оба отдаём со своего домена
-                         "img": f"sporticon?league={k}&v={icons[k][-8:] if icons.get(k) else 'logo2'}"}
+                         "img": f"sporticon?league={k}&v={icons[k][-8:]}" if icons.get(k)
+                         else sp.LOCAL_ICONS.get(k) or f"sporticon?league={k}&v=logo2"}
                         for k, (_, n, i) in sp.LEAGUES.items()],
             "events": await sports.events(league),
         })

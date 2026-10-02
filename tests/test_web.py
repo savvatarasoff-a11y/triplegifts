@@ -355,7 +355,7 @@ async def test_cors_for_pages_origin(client):
 
 
 async def test_league_logo_served_from_own_domain(tmp_path):
-    """Лига без эмодзи (Лига наций): логотип турнира ESPN скачивает сервер и отдаёт со своего адреса."""
+    """Лига без эмодзи: логотип турнира ESPN скачивает сервер и отдаёт со своего адреса."""
     from io import BytesIO
 
     from PIL import Image
@@ -386,11 +386,12 @@ async def test_league_logo_served_from_own_domain(tmp_path):
     app = build_app(cfg, casino, bot, images=NftImages(fetch=fetch), sports=sp.Sportsbook(casino, Espn()))
     async with TestClient(TestServer(app)) as c:
         r = await (await c.get("/api/sports", headers=auth())).json()
-        unl = next(lg for lg in r["leagues"] if lg["id"] == "unl")
-        assert unl["img"].startswith("sporticon?league=unl")
-        resp = await c.get("/" + unl["img"])
+        imgs = {lg["id"]: lg["img"] for lg in r["leagues"]}
+        assert imgs["unl"] == "static/mc/unl.png" and (await c.get("/" + imgs["unl"])).status == 200
+        assert imgs["ucl"].startswith("sporticon?league=ucl")
+        resp = await c.get("/" + imgs["ucl"])
         assert resp.status == 200 and (await resp.read())[:4] in (b"\x89PNG", b"RIFF")
-        assert fetched == ["https://a.espncdn.com/uefa.nations-dark.png"]
-        assert await db.kv_get("sports:logo:unl") == fetched[0]
+        assert fetched == ["https://a.espncdn.com/uefa.champions-dark.png"]
+        assert await db.kv_get("sports:logo:ucl") == fetched[0]
         assert (await c.get("/sporticon?league=nope")).status == 404
     await db.close()
