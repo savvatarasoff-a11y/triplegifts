@@ -127,10 +127,11 @@ PICK_COLS = 7
 PICK_TOP = -8                 # выше кирка не улетает (невидимый потолок в небе)
 PICK_START = (3.5, -3.5)      # отсюда — из барабана с кирками — кирка падает в шахту
 PICK_DIRT_ROWS = 3            # у поверхности больше земли (доля руд среди остального не меняется)
-PICK_G = 22.0                 # гравитация, клеток/с²
+PICK_G = 15.0                 # гравитация, клеток/с²
 PICK_DT = 1 / 180             # шаг физики, с
-PICK_REST = 0.5               # упругость отскока
-PICK_VMIN, PICK_VMAX = 3.5, 8.0
+PICK_REST = 0.55              # упругость отскока (доля нормальной скорости после удара)
+PICK_FRICTION = 0.8           # сколько касательной скорости остаётся после удара
+PICK_VMIN, PICK_VMAX = 2.8, 6.5   # отскок от блока не слабее VMIN (иначе кирка залипнет), скорость не выше VMAX
 PICK_MAX_T = 300.0            # страховка по времени
 PICK_SIZE = 1.1               # размер спрайта кирки в клетках
 # форма кирки — тот же спрайт 16×16, что рисует приложение; любой непрозрачный пиксель сталкивается с блоками
@@ -156,10 +157,10 @@ ORES = tuple(_PICK_VALUES)
 # пересчитать: pickaxe_class_counts). Тип блока внутри класса на физику не влияет, поэтому
 # E[выигрыш] = Σ по классам E[N_класса] × средняя ценность руды класса — без шума от редких изумрудов.
 PICKAXE_CLASS_COUNTS: dict[str, dict[int, float]] = {
-    "wood": {2: 9.7316, 3: 2.0414, 5: 0.0744},
-    "iron": {2: 26.8123, 3: 5.7761, 5: 0.2247},
-    "gold": {2: 41.9416, 3: 9.0757, 5: 0.3559},
-    "diamond": {2: 51.0223, 3: 11.0479, 5: 0.4332},
+    "wood": {2: 9.7707, 3: 2.0122, 5: 0.0632},
+    "iron": {2: 26.4686, 3: 5.6276, 5: 0.1912},
+    "gold": {2: 41.6844, 3: 8.9144, 5: 0.3097},
+    "diamond": {2: 50.9183, 3: 10.9185, 5: 0.3799},
 }
 
 
@@ -259,15 +260,20 @@ def pickaxe_run(tier: str, pays: dict[str, float] | None = None, rng: random.Ran
             vy = nvy
             kind = 0
         else:
-            rvx, rvy = vx - (1 + PICK_REST) * dot * nxn, nvy - (1 + PICK_REST) * dot * nyn
-            ang = math.atan2(rvy, rvx) + rng.uniform(-0.45, 0.45)
-            sp = min(PICK_VMAX, max(PICK_VMIN, math.hypot(rvx, rvy)))
+            # отражение: нормальная составляющая гасится упругостью, касательная — трением
+            vn = dot
+            tx, ty = vx - vn * nxn, nvy - vn * nyn
+            rvx, rvy = tx * PICK_FRICTION - PICK_REST * vn * nxn, ty * PICK_FRICTION - PICK_REST * vn * nyn
+            ang = math.atan2(rvy, rvx) + rng.uniform(-0.12, 0.12)    # чуть-чуть случайности от неровностей
+            sp = min(PICK_VMAX, math.hypot(rvx, rvy))
             vx, vy = math.cos(ang) * sp, math.sin(ang) * sp
-            if vx * nxn + vy * nyn < 0.35 * sp:     # отскок всегда от блока, а не вдоль него
-                ang = math.atan2(nyn, nxn) + rng.uniform(-0.8, 0.8)
-                vx, vy = math.cos(ang) * sp, math.sin(ang) * sp
-            om = -om * 0.7 + rng.uniform(-6, 6)
-            om = math.copysign(min(16.0, max(4.0, abs(om))), om)
+            out_n = vx * nxn + vy * nyn
+            if out_n < PICK_VMIN:                    # слишком вяло — добавляем отскок от блока, чтобы кирка не залипала
+                vx, vy = vx + (PICK_VMIN - out_n) * nxn, vy + (PICK_VMIN - out_n) * nyn
+            # вращение: кирку закручивает трение о блок (касательная скорость) плюс немного прежнего вращения
+            tang = tx * -nyn + ty * nxn
+            om = om * 0.45 + tang * 1.6 + rng.uniform(-1.5, 1.5)
+            om = math.copysign(min(12.0, max(2.0, abs(om))), om)
             kind = 2
             if c != "wall":
                 kind = 1

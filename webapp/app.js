@@ -2581,8 +2581,7 @@ async function pickaxePlay() {
     btn.textContent = "Быстрее ⏩";
     const end = r.events.length ? r.events[r.events.length - 1].t + 0.12 : 0.5;
     await new Promise((resolve) => {
-      // длинные партии показываем быстрее, чтобы не тянуть дольше ~20 с
-      pk.run = { t: 0, i: 0, events: r.events, seg: r.start, end, speed: Math.min(3, Math.max(1.3, end / 20)), flash: 0,
+      pk.run = { t: 0, i: 0, events: r.events, seg: r.start, end, speed: Math.max(1, end / 70), flash: 0,   // дольше ~70 с не тянем
         done: resolve };
       pkHud();
       pkKick();
