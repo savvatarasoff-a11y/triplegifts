@@ -1407,16 +1407,26 @@ function upgUpdate() {
   });
 }
 
+const UPG_SHOW = 80;
+
 function upgRenderTargets() {
   const tbox = $("#upg-targets");
   tbox.innerHTML = "";
   const q = upg.query.trim().toLowerCase();
+  const stake = upgStake();
   const list = upg.targets.map((t, i) => [t, i])
-    .filter(([t]) => !q || `${t.title} ${t.model}`.toLowerCase().includes(q));
+    .filter(([t]) => !q || `${t.title} ${t.model}`.toLowerCase().includes(q))
+    .sort(([a], [b]) => (stake ? (a.price <= stake) - (b.price <= stake) : 0) || a.price - b.price);   // доступные цели — первыми
   $("#upg-tcount").textContent = upg.targets.length ? `· ${list.length}` : "";
   if (!upg.targets.length) tbox.innerHTML = '<div class="note">Сейчас нет NFT для апгрейда — загляните позже.</div>';
   else if (!list.length) tbox.innerHTML = '<div class="note">Ничего не найдено</div>';
-  list.forEach(([t, i]) => {
+  // каталог — тысячи моделей: рисуем первые UPG_SHOW (и выбранную цель), остальные — через поиск
+  const shown = list.slice(0, UPG_SHOW);
+  if (upg.target && !shown.some(([t]) => t === upg.target)) {
+    const sel = list.find(([t]) => t === upg.target);
+    if (sel) shown.unshift(sel);
+  }
+  shown.forEach(([t, i]) => {
     const b = document.createElement("button");
     b.className = "upt";
     b.dataset.i = i;
@@ -1442,6 +1452,12 @@ function upgRenderTargets() {
     });
     tbox.append(b);
   });
+  if (list.length > shown.length) {
+    const more = document.createElement("div");
+    more.className = "note";
+    more.textContent = `Показаны ${shown.length} из ${list.length} — найдите нужный NFT поиском (например, «Plush Pepe»)`;
+    tbox.append(more);
+  }
 }
 
 function upgRender() {
@@ -1496,7 +1512,7 @@ async function upgradeEnter() {
     upg.cfg = data;
     upg.gifts = data.gifts;
     upg.targets = data.targets;
-    nftPreload(upg.targets.map(upgTargetNft));
+    nftPreload(upg.targets.slice(0, 24).map(upgTargetNft));
     const ids = new Set(upg.gifts.map((g) => g.id));
     upg.chosen = new Set([...upg.chosen].filter((id) => ids.has(id)));
     if (upg.target) upg.target = upg.targets.find((t) => t.id === upg.target.id) || null;

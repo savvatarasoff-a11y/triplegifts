@@ -72,10 +72,39 @@ async def sync(db: Database, relayer: Relayer) -> tuple[int, str | None]:
     return len(groups), price_error
 
 
-async def reprice_demo(db: Database, relayer: Relayer) -> None:
-    """Демо-NFT: флор с MRKT раз в 10 минут. Если MRKT недоступен — остаётся последняя цена."""
+CATALOG_KEEP = 6 * 3600   # модель из каталога, не встреченная на маркете столько времени, пропадает из кейсов
+
+
+async def catalog_store(db: Database, collection: str, emoji: str, floors: list[dict[str, Any]]) -> int:
+    """Модели коллекции с маркета Telegram — в общий список NFT (как демо: подарков у релейера нет,
+    выигрыш платится флором). Выключенные админом (/nftoff) остаются выключенными."""
     now = time.time()
-    for m in await db.all("SELECT id, collection_name, model, price FROM nft_models WHERE test=1"):
+    async with db.tx() as c:
+        for f in floors:
+            if str(f["model"]).isdigit():
+                continue
+            await c.execute(
+                "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at, "
+                "seen_at, test) VALUES (?,?,?,?,?,999,?,?,?,1) ON CONFLICT(collection_id, model) DO UPDATE SET "
+                "stock=999, rarity=COALESCE(excluded.rarity, nft_models.rarity), price=excluded.price, "
+                "price_at=excluded.price_at, seen_at=excluded.seen_at, test=1",
+                (f"demo:{collection}", collection, f["model"], f.get("rarity"), emoji, f["price"], now, now))
+            await c.execute("UPDATE user_gifts SET value=?, priced_at=? WHERE test=1 AND collection_name=? AND model=? "
+                            "AND status IN ('owned','staked')", (f["price"], now, collection, f["model"]))
+    return len(floors)
+
+
+async def catalog_keep_fresh(db: Database) -> None:
+    """Каталог обходится дольше часа: цена модели, встреченной на маркете за CATALOG_KEEP, считается актуальной."""
+    now = time.time()
+    async with db.tx() as c:
+        await c.execute("UPDATE nft_models SET price_at=? WHERE test=1 AND seen_at > ?", (now, now - CATALOG_KEEP))
+
+
+async def reprice_demo(db: Database, relayer: Relayer) -> None:
+    """Демо-NFT, взятые с MRKT (не из каталога): флор раз в 10 минут. Если MRKT недоступен — остаётся последняя цена."""
+    now = time.time()
+    for m in await db.all("SELECT id, collection_name, model, price FROM nft_models WHERE test=1 AND seen_at IS NULL"):
         price = None
         try:
             price = await relayer.floor_price(None, m["model"], m["collection_name"])

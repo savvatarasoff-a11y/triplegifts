@@ -260,6 +260,59 @@ class Relayer:
             return None if norm(collection) not in (await self._gifts_by_title()) else False
         return norm(model) in docs
 
+    async def collections(self) -> list[str]:
+        """Названия коллекций, у которых есть улучшение (модели)."""
+        return [g.title for g in (await self._gifts_by_title()).values()
+                if getattr(g, "upgrade_stars", None) and getattr(g, "title", None)]
+
+    async def market_floors(self, collection: str, ton_rate: float | None = None,
+                            pause: float = 0.4) -> list[dict[str, Any]]:
+        """Все модели коллекции, что сейчас продаются на маркете Telegram: имя, редкость и флор в звёздах.
+
+        Флор — самый дешёвый лот модели (цена в звёздах; лот только за TON — по курсу ton_rate).
+        """
+        import asyncio
+        from telethon.errors import FloodWaitError
+        from telethon.tl.functions.payments import GetResaleStarGiftsRequest
+        from telethon.tl.types import (StarGiftAttributeIdModel, StarGiftAttributeModel, StarGiftAttributeRarity,
+                                       StarsAmount, StarsTonAmount)
+        from .nftimg import norm
+        if not self.ready:
+            raise RelayerError("Релейер не подключён")
+        gift = (await self._gifts_by_title()).get(norm(collection))
+        if gift is None:
+            return []
+
+        async def call(**kw: Any) -> Any:
+            for _ in range(3):
+                try:
+                    return await self.client(GetResaleStarGiftsRequest(gift_id=gift.id, offset="", **kw))
+                except FloodWaitError as e:              # Telegram просит подождать — ждём и повторяем
+                    await asyncio.sleep(min(e.seconds, 300) + 1)
+            return None
+
+        head = await call(limit=1, attributes_hash=0)
+        if head is None:
+            return []
+        listed = {getattr(c.attribute, "document_id", None): c.count for c in getattr(head, "counters", None) or []}
+        out = []
+        for a in getattr(head, "attributes", None) or []:
+            if not isinstance(a, StarGiftAttributeModel) or not listed.get(a.document.id):
+                continue
+            await asyncio.sleep(pause)
+            res = await call(limit=5, sort_by_price=True, attributes=[StarGiftAttributeIdModel(document_id=a.document.id)])
+            prices = []
+            for g in getattr(res, "gifts", None) or []:
+                for amount in getattr(g, "resell_amount", None) or []:
+                    if isinstance(amount, StarsAmount) and amount.amount > 0:
+                        prices.append(amount.amount)
+                    elif isinstance(amount, StarsTonAmount) and amount.amount > 0 and ton_rate:
+                        prices.append(int(amount.amount / 1e9 * ton_rate))
+            if prices:
+                rarity = a.rarity.permille / 10 if isinstance(a.rarity, StarGiftAttributeRarity) else None
+                out.append({"model": a.name, "rarity": rarity, "price": min(prices)})
+        return out
+
     async def model_image(self, collection: str, model: str | None) -> bytes | None:
         """Картинка модели: стикер модели из Telegram (или самого подарка, если улучшений ещё нет) в PNG."""
         if not self.ready or not collection:

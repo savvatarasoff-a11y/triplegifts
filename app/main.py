@@ -20,7 +20,8 @@ from .db import Database
 from .logging_setup import setup_logging
 from .gifts import notify_deposits, scan as gifts_scan
 from .nftimg import NftImages
-from .nft import deliver_waiting, reprice_demo, sync as sync_nfts
+from .mrkt import emoji_for
+from .nft import catalog_keep_fresh, catalog_store, deliver_waiting, reprice_demo, sync as sync_nfts
 from .relayer import Relayer
 from .sports import Sportsbook
 from . import ton as ton_mod
@@ -105,6 +106,8 @@ async def top_up_demo(casino: Casino, relayer: Relayer) -> None:
         await c.execute("DELETE FROM user_gifts WHERE test=1 AND status='owned' AND model NOT GLOB '*[^0-9]*'")
     if not relayer.ready:
         return
+    if (await casino.db.one("SELECT COUNT(*) n FROM nft_models WHERE seen_at IS NOT NULL"))["n"]:
+        return                                   # есть каталог с маркета Telegram — случайные модели не нужны
     for m in await casino.db.all("SELECT id, collection_name, model FROM nft_models WHERE test=1 AND enabled=1"):
         if await relayer.has_model(m["collection_name"], m["model"]) is False:
             async with casino.db.tx() as c:
@@ -127,6 +130,10 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, imag
         except Exception:
             log.warning("Не удалось обновить NFT-модели")
         try:
+            await catalog_keep_fresh(casino.db)
+        except Exception:
+            log.warning("Не удалось обновить каталог NFT")
+        try:
             await reprice_demo(casino.db, relayer)
         except Exception:
             log.warning("Не удалось обновить цены демо-NFT")
@@ -139,6 +146,34 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, imag
                 await prewarm_images(casino, images)
             except Exception:
                 log.warning("Не удалось прогреть картинки NFT")
+        await asyncio.sleep(600)
+
+
+async def catalog_loop(casino: Casino, relayer: Relayer) -> None:
+    """Каталог NFT: по кругу обходит все коллекции на маркете Telegram и обновляет модели с их флором."""
+    await asyncio.sleep(60)
+    while True:
+        if not relayer.ready:
+            await asyncio.sleep(300)
+            continue
+        try:
+            names = await relayer.collections()
+        except Exception as e:
+            log.warning("Список коллекций недоступен: %s", type(e).__name__)
+            await asyncio.sleep(300)
+            continue
+        total = 0
+        for name in names:
+            try:
+                rate = await relayer.market.ton_rate()
+            except Exception:
+                rate = None
+            try:
+                total += await catalog_store(casino.db, name, emoji_for(name), await relayer.market_floors(name, rate))
+            except Exception as e:
+                log.warning("Каталог: коллекция %s не обновлена: %s", name, type(e).__name__)
+            await asyncio.sleep(2)
+        log.info("Каталог NFT: %s коллекций, %s моделей на продаже", len(names), total)
         await asyncio.sleep(600)
 
 
@@ -278,6 +313,7 @@ async def run() -> None:
     ton_task = asyncio.create_task(ton_loop(bot, casino))
     channel_task = asyncio.create_task(channel_loop(bot, casino))
     sports_task = asyncio.create_task(sports_loop(bot, sports))
+    catalog_task = asyncio.create_task(catalog_loop(casino, relayer))
 
     try:
         me = await bot.get_me()
@@ -300,6 +336,7 @@ async def run() -> None:
         ton_task.cancel()
         channel_task.cancel()
         sports_task.cancel()
+        catalog_task.cancel()
         await relayer.stop()
         await runner.cleanup()
         await db.close()

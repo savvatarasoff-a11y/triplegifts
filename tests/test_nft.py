@@ -288,3 +288,58 @@ async def test_ton_rate_from_channel(env):
     assert "@tonprices" in market.rate_source
     await db.kv_set("mrkt:ton_stars", "250")
     assert await market.ton_rate() == 250                                         # ручной курс важнее
+
+
+async def test_catalog_from_telegram_market(env):
+    """Каталог: все модели коллекции, что продаются на маркете Telegram, с флором в звёздах (лот за TON — по курсу)."""
+    from telethon.tl import types as T
+    from telethon.tl.functions.payments import GetResaleStarGiftsRequest, GetStarGiftsRequest
+
+    def doc(i):
+        return T.Document(id=i, access_hash=0, file_reference=b"", date=None, mime_type="", size=0, dc_id=1, attributes=[])
+
+    models = {1: "Frog Prince", 2: "Gucci Pepe", 3: "Nobody Buys", 4: "Ton Only"}
+    attrs = [T.StarGiftAttributeModel(name=n, document=doc(i), rarity=T.StarGiftAttributeRarity(permille=5 * i))
+             for i, n in models.items()]
+    lots = {1: [[T.StarsAmount(amount=500_000, nanos=0)], [T.StarsAmount(amount=420_000, nanos=0),
+                                                           T.StarsTonAmount(amount=3_000 * 10**9)]],
+            2: [[T.StarsAmount(amount=900_000, nanos=0)]], 4: [[T.StarsTonAmount(amount=10 * 10**9)]]}
+
+    def lot(i, amounts):
+        return T.StarGiftUnique(id=i, gift_id=100, title="Plush Pepe", slug="x", num=1, attributes=[],
+                                availability_issued=1, availability_total=1, resell_amount=amounts)
+
+    class Client:
+        async def __call__(self, req):
+            if isinstance(req, GetStarGiftsRequest):
+                return T.payments.StarGifts(hash=0, gifts=[
+                    T.StarGift(id=100, sticker=doc(9), stars=1, convert_stars=1, title="Plush Pepe", upgrade_stars=10),
+                    T.StarGift(id=200, sticker=doc(8), stars=1, convert_stars=1, title="Plain")], chats=[], users=[])
+            assert isinstance(req, GetResaleStarGiftsRequest) and req.gift_id == 100
+            if not req.attributes:
+                return T.payments.ResaleStarGifts(count=4, gifts=[], chats=[], users=[], attributes=attrs, counters=[
+                    T.StarGiftAttributeCounter(attribute=T.StarGiftAttributeIdModel(document_id=i), count=c)
+                    for i, c in ((1, 2), (2, 1), (3, 0), (4, 1))])
+            i = req.attributes[0].document_id
+            assert req.sort_by_price
+            return T.payments.ResaleStarGifts(count=1, gifts=[lot(i, a) for a in lots[i]], chats=[], users=[])
+
+    _, db = env
+    relayer = Relayer(db, "1:x")
+    relayer.client = Client()
+    assert await relayer.collections() == ["Plush Pepe"]
+    floors = await relayer.market_floors("Plush Pepe", ton_rate=200, pause=0)
+    assert floors == [{"model": "Frog Prince", "rarity": 0.5, "price": 420_000},
+                      {"model": "Gucci Pepe", "rarity": 1.0, "price": 900_000},
+                      {"model": "Ton Only", "rarity": 2.0, "price": 2000}]
+    assert await nft.catalog_store(db, "Plush Pepe", "🐸", floors) == 3
+    rows = await db.all("SELECT model, price, test, stock, seen_at FROM nft_models ORDER BY price")
+    assert [(r["model"], r["price"], r["test"]) for r in rows] == [
+        ("Ton Only", 2000, 1), ("Frog Prince", 420_000, 1), ("Gucci Pepe", 900_000, 1)]
+    # цена держится, пока модель видели на маркете за CATALOG_KEEP; потом модель пропадает из кейсов
+    await db.conn.execute("UPDATE nft_models SET price_at=0, seen_at=? WHERE model='Ton Only'",
+                          (time.time() - nft.CATALOG_KEEP - 1,))
+    await db.conn.execute("UPDATE nft_models SET price_at=0 WHERE model!='Ton Only'")
+    await nft.catalog_keep_fresh(db)
+    fresh = await db.all("SELECT model FROM nft_models WHERE price_at > ?", time.time() - nft.PRICE_MAX_AGE)
+    assert sorted(r["model"] for r in fresh) == ["Frog Prince", "Gucci Pepe"]

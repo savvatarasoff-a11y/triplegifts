@@ -12,6 +12,8 @@ from .withdraw import GiftCatalog
 
 log = logging.getLogger(__name__)
 
+NFT_CASE_MAX_MODELS = 60   # каталог большой — в NFT-кейс берём столько моделей, равномерно по цене
+
 
 class CaseCatalog:
     def __init__(self, gifts: GiftCatalog, db: Database, nft_case_price: int):
@@ -96,6 +98,9 @@ class CaseCatalog:
         models = [m for m in models if m["price"] >= price * g.NFT_CASE_MIN_PRICE_SHARE]
         if not models:
             return None
+        if len(models) > NFT_CASE_MAX_MODELS:     # каталог большой — в кейс равномерно по цене, не все тысячи
+            step = (len(models) - 1) / (NFT_CASE_MAX_MODELS - 1)
+            models = [models[round(i * step)] for i in range(NFT_CASE_MAX_MODELS)]
         probs = g.nft_case_weights(price, [m["price"] for m in models], [x["stars"] for x in regular],
                                    target_rtp=d.rtp, share=d.share)
         if probs is None:
