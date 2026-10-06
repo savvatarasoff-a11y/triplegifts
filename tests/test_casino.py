@@ -359,6 +359,7 @@ async def test_withdraw_failed_send_returns_to_pending_and_reject_refunds(casino
 async def test_withdraw_requires_wagering_free_stars(casino):
     code = await casino.create_check(7, 100, 1)
     await casino.activate_check(1, code)
+    await fund(casino, 1, 100)                          # вывод — только после пополнения от 100 ⭐ за неделю
     with pytest.raises(GameError, match="отыграйте"):
         await casino.withdraw_request(1, "g1", 50, "🧸")
     assert (await casino.wager_status(1))["left"] == 100
@@ -367,8 +368,26 @@ async def test_withdraw_requires_wagering_free_stars(casino):
     await casino.db.conn.execute("UPDATE users SET wagered=100, balance=100 WHERE id=1")
     wd = await casino.withdraw_request(1, "g1", 50, "🧸")
     assert wd["status"] == "pending"
+    await fund(casino, 2, 100)
+    await casino.db.conn.execute("UPDATE users SET balance=10 WHERE id=2")
     with pytest.raises(GameError, match="Недостаточно"):
         await casino.withdraw_request(2, "g1", 50, "🧸")
+
+
+async def test_withdraw_needs_recent_deposit(casino):
+    await casino.db.conn.execute("INSERT OR IGNORE INTO users(id, created_at, last_seen, balance) VALUES (5, 0, 0, 500)")
+    with pytest.raises(GameError, match="пополнение от 100"):
+        await casino.withdraw_request(5, "g1", 50, "🧸")
+    await fund(casino, 5, 99)                                       # меньше 100 одним платежом — не считается
+    assert not await casino.recent_deposit_ok(5)
+    assert await casino.db.credit_payment("old", 5, 500)
+    await casino.db.conn.execute("UPDATE payments SET ts=? WHERE charge_id='old'", (time.time() - 8 * 86400,))
+    assert not await casino.recent_deposit_ok(5)                    # старше недели — не считается
+    assert await casino.db.credit_ton("tx1", 5, 1_000_000_000)      # 1 TON — считается
+    assert await casino.recent_deposit_ok(5)
+    assert await casino.recent_deposit_ok(7)                        # админу не нужно
+    with pytest.raises(GameError, match="пополнение"):
+        await casino.ton_withdraw_request(6, 2_000_000_000, "UQ" + "A" * 46)
 
 
 async def test_pvp_hockey_round(casino, monkeypatch):

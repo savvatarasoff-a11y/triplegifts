@@ -160,6 +160,9 @@ async def test_withdraw_gift(env):
     relayer = FakeRelayer([sent(1, 42)], {"Frog": 900})
     await gifts.scan(db, cfg, relayer)
     gift_id = (await casino.gifts(42))[0]["id"]
+    with pytest.raises(GameError, match="пополнение"):
+        await gifts.withdraw(casino, relayer, 42, gift_id)              # без пополнения за неделю — нельзя
+    assert await db.credit_payment("p42", 42, 100)
     relayer.fail = "NEED_CONTACT"
     with pytest.raises(GameError, match="@svag_relayer"):
         await gifts.withdraw(casino, relayer, 42, gift_id)

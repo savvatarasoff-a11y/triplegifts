@@ -429,9 +429,26 @@ class Casino:
             return {"required": total, "done": wagered, "left": max(0, total - wagered)}
         return {"required": free["s"], "done": wagered, "left": max(0, free["s"] - wagered)}
 
+    async def recent_deposit_ok(self, user_id: int) -> bool:
+        """Было ли за последнюю неделю пополнение от 100 ⭐ (или от 1 TON) одним платежом. Админам не нужно."""
+        if user_id in self.cfg.admin_ids:
+            return True
+        row = await self.db.one(
+            "SELECT 1 FROM payments WHERE user_id=? AND ts > ? AND "
+            "((COALESCE(cur, 'stars')='stars' AND amount >= ?) OR (cur='ton' AND amount >= ?)) LIMIT 1",
+            user_id, time.time() - g.WITHDRAW_DEPOSIT_DAYS * 86400, g.WITHDRAW_DEPOSIT_STARS, g.WITHDRAW_DEPOSIT_TON)
+        return row is not None
+
+    async def require_recent_deposit(self, user_id: int) -> None:
+        if not await self.recent_deposit_ok(user_id):
+            raise GameError(f"Для вывода нужно хотя бы одно пополнение от {g.WITHDRAW_DEPOSIT_STARS} ⭐ "
+                            f"(или от {money.fmt(g.WITHDRAW_DEPOSIT_TON, money.TON)}) за последние "
+                            f"{g.WITHDRAW_DEPOSIT_DAYS} дней")
+
     async def withdraw_request(self, user_id: int, gift_id: str, price: int, emoji: str | None) -> dict:
         if price < 1:
             raise GameError("Подарок недоступен")
+        await self.require_recent_deposit(user_id)
         wager = await self.wager_status(user_id)
         if wager["left"] > 0:
             raise GameError(f"Сначала отыграйте бонусные звёзды: осталось поставить {wager['left']} ⭐")
@@ -511,6 +528,7 @@ class Casino:
         if not isinstance(address, str) or not TON_ADDRESS_RE.match(address.strip()):
             raise GameError("Некорректный адрес TON-кошелька")
         address = address.strip()
+        await self.require_recent_deposit(user_id)
         wager = await self.wager_status(user_id, money.TON)
         if wager["left"] > 0:
             raise GameError(f"Сначала поставьте в играх пополнения и бонусы хотя бы раз: осталось "
@@ -1063,6 +1081,7 @@ class Casino:
     async def gift_withdraw_claim(self, user_id: int, gift_id: Any) -> dict:
         if not isinstance(gift_id, int) or isinstance(gift_id, bool):
             raise GameError("Подарок не найден")
+        await self.require_recent_deposit(user_id)
         async with self.db.tx() as c:
             async with c.execute("SELECT * FROM user_gifts WHERE id=? AND user_id=? AND kind='nft'",
                                  (gift_id, user_id)) as q:
