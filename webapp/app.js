@@ -476,6 +476,7 @@ async function homeEnter() {
   loadTicker();
   loadVip();
   loadLeaders();
+  loadAllBets();
 }
 
 // ---------- VIP-уровень, рейкбек, ежедневный бонус ----------
@@ -602,6 +603,39 @@ async function loadLeaders() {
       box.append(row);
     });
     $("#lb-me").textContent = lb.me ? `вы #${lb.me.place}` : "";
+  } catch (e) { /* не критично */ }
+}
+
+// История ставок всех игроков с поиском по буквам (имя/ник игрока или название игры)
+let abTimer = 0, abSeq = 0;
+async function loadAllBets() {
+  const seq = ++abSeq;
+  const box = $("#ab-list");
+  try {
+    const q = $("#ab-q").value.trim();
+    const { bets } = await api("/api/bets/all" + (q ? `?q=${encodeURIComponent(q)}` : ""));
+    if (seq !== abSeq) return;                 // пока грузили, ввели ещё буквы
+    box.innerHTML = "";
+    if (!bets.length) { box.innerHTML = `<div class="note">${q ? "Ничего не найдено" : "Ставок пока нет"}</div>`; return; }
+    bets.forEach((b) => {
+      const row = document.createElement("div");
+      row.className = "ab";
+      const who = document.createElement("span");
+      who.className = "ab-who";
+      const nm = document.createElement("b");
+      nm.textContent = b.name;
+      const meta = document.createElement("small");
+      const d = new Date(b.ts * 1000);
+      meta.textContent = `${GAME_NAMES[b.game] || b.game} · ${money(b.bet, b.cur)} · `
+        + `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} ${d.toTimeString().slice(0, 5)}`;
+      who.append(nm, meta);
+      const res = document.createElement("span");
+      const diff = b.win - b.bet;
+      res.className = "ab-res " + (b.win > 0 && diff >= 0 ? "win" : "lose");
+      res.textContent = b.win > 0 ? "+" + money(b.win, b.cur) : "−" + money(b.bet, b.cur);
+      row.append(who, res);
+      box.append(row);
+    });
   } catch (e) { /* не критично */ }
 }
 
@@ -3857,6 +3891,7 @@ function bind() {
   }));
   $("#upg-btn").addEventListener("click", upgradeGo);
   $("#upg-all").addEventListener("click", upgSelectAll);
+  $("#ab-q").addEventListener("input", () => { clearTimeout(abTimer); abTimer = setTimeout(loadAllBets, 300); });
   $("#upg-search").addEventListener("input", (e) => { upg.query = e.target.value; upgRenderTargets(); upgUpdate(); });
   $$("#upg-mults button").forEach((b) => b.addEventListener("click", () => {
     if (upg.spinning) return;

@@ -413,6 +413,10 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def sports_bets(request: web.Request) -> web.Response:
         return web.json_response({"bets": await sports.my_bets(request[USER_ID])})
 
+    @routes.get("/api/bets/all")
+    async def bets_all(request: web.Request) -> web.Response:
+        return web.json_response({"bets": await casino.all_bets(request.query.get("q", ""))})
+
     @routes.get("/api/feed")
     async def feed(_: web.Request) -> web.Response:
         return web.json_response({"wins": await casino.big_wins()})

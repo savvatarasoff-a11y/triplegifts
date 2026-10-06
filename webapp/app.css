@@ -745,3 +745,11 @@ button { -webkit-user-select: none; user-select: none; }
 .fb-nums small { font-size: 11px; color: var(--muted); font-weight: 700; }
 .fb-nums b { font-size: 15px; font-weight: 800; }
 .fb-bet.lost .fb-nums b { opacity: .5; }
+.ab-q { width: 100%; margin: 10px 0 8px; }
+.ab-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+.ab { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface-3); }
+.ab-who { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.ab-who b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ab-who small { font-size: 11px; color: var(--muted); font-weight: 700; }
+.ab-res { font-weight: 800; font-size: 13px; white-space: nowrap; }
+.ab-res.win { color: var(--accent-soft); } .ab-res.lose { color: #6A665C; }

@@ -570,3 +570,18 @@ async def test_leaders_reset(casino):
     assert (await db.one("SELECT COUNT(*) n FROM bets"))["n"] == 1
     await casino.plinko(1, 10)
     assert [p["points"] for p in (await casino.leaders(1))["top"]] == [10]
+
+
+async def test_all_bets_history_with_search(casino):
+    await casino.db.touch_user(1, "vasya_pro", "Вася")
+    await casino.db.touch_user(2, None, "Петя")
+    await fund(casino, 1, 100)
+    await fund(casino, 2, 100)
+    await casino.slots(1, 5)
+    await casino.plinko(2, 5)
+    allb = await casino.all_bets()
+    assert len(allb) == 2 and allb[0]["name"] == "Петя"                # новые сверху
+    assert [b["name"] for b in await casino.all_bets("вас")] == ["Вася"]  # кириллица, любой регистр
+    assert [b["name"] for b in await casino.all_bets("@VASYA")] == ["Вася"]
+    assert [b["name"] for b in await casino.all_bets("слот")] == [b["name"] for b in allb if b["game"] == "slots"]
+    assert await casino.all_bets("никого") == []

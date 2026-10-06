@@ -315,6 +315,33 @@ class Casino:
             for r in rows
         ]
 
+    async def all_bets(self, query: str = "", limit: int = 50) -> list[dict]:
+        """История ставок всех игроков, новые сверху. Поиск — по имени/нику игрока или названию игры (любой регистр)."""
+        from .channel import GAME_NAMES
+        q = (query or "").strip().lower().lstrip("@")[:40]
+        where, args = "", []
+        if q:
+            users = await self.db.all("SELECT id, first_name, username FROM users")
+            ids = [u["id"] for u in users
+                   if q in f"{u['first_name'] or ''} {u['username'] or ''} {display_name(u)}".lower()][:500]
+            games = [k for k, v in GAME_NAMES.items() if q in f"{k} {v}".lower()]
+            conds = []
+            if ids:
+                conds.append(f"b.user_id IN ({','.join('?' * len(ids))})")
+                args += ids
+            if games:
+                conds.append(f"b.game IN ({','.join('?' * len(games))})")
+                args += games
+            if not conds:
+                return []
+            where = "WHERE " + " OR ".join(conds)
+        rows = await self.db.all(
+            "SELECT b.id, b.game, b.bet, b.win, b.ts, b.cur, u.id uid, u.first_name, u.username FROM bets b "
+            f"LEFT JOIN users u ON u.id = b.user_id {where} ORDER BY b.id DESC LIMIT ?", *args, max(1, min(limit, 100)))
+        return [{"id": r["id"], "game": r["game"], "bet": r["bet"], "win": r["win"], "cur": r["cur"], "ts": r["ts"],
+                 "name": display_name({"id": r["uid"], "first_name": r["first_name"], "username": r["username"]})}
+                for r in rows]
+
     async def case_drops(self, limit: int = 20) -> list[dict]:
         """Лента последних дропов из кейсов всех игроков (NFT и призы дороже кейса — отмечены)."""
         rows = await self.db.all(
