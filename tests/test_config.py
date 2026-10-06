@@ -9,7 +9,7 @@ def test_defaults_need_only_token(monkeypatch):
     monkeypatch.setenv("BOT_TOKEN", "1:x")
     cfg = Config.from_env()
     assert cfg.admin_ids == frozenset({5349009098})
-    assert cfg.min_bet == 10 and cfg.max_bet == 10000          # минимальная ставка во всех режимах — 10 ★
+    assert cfg.min_bet == 5 and cfg.max_bet == 10000           # минимальная ставка во всех режимах — 5 ★
 
 
 def test_env_overrides(monkeypatch):

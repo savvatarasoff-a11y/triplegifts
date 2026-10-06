@@ -9,7 +9,7 @@ from dataclasses import dataclass
 # Любое из них можно переопределить одноимённой переменной окружения.
 DEFAULT_ADMIN_IDS = "5349009098"   # @wodoias
 DEFAULT_DB_PATH = "/data/bot.db" if os.path.isdir("/data") else "bot.db"
-DEFAULT_MIN_BET = 10
+DEFAULT_MIN_BET = 5
 DEFAULT_MAX_BET = 10000
 DEFAULT_START_BONUS = 0
 DEFAULT_NFT_CASE_PRICE = 250      # цена NFT-кейса в звёздах
