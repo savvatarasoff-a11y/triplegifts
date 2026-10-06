@@ -476,7 +476,9 @@ async function homeEnter() {
   loadTicker();
   loadVip();
   loadLeaders();
-  loadAllBets();
+  const admin = !!(state.me && state.me.admin);
+  $("#admin-panels").classList.toggle("hidden", !admin);
+  if (admin) { loadAllBets(); loadAdminUsers(); }
 }
 
 // ---------- VIP-уровень, рейкбек, ежедневный бонус ----------
@@ -637,6 +639,69 @@ async function loadAllBets() {
       box.append(row);
     });
   } catch (e) { /* не критично */ }
+}
+
+// Админ: все пользователи со статистикой; поиск по имени, нику или id, нажатие раскрывает подробности
+let auTimer = 0, auSeq = 0;
+const auDate = (ts) => (ts ? new Date(ts * 1000).toLocaleString("ru-RU", { day: "numeric", month: "short",
+  hour: "2-digit", minute: "2-digit" }) : "—");
+async function loadAdminUsers() {
+  const seq = ++auSeq;
+  const box = $("#au-list");
+  try {
+    const q = $("#au-q").value.trim();
+    const r = await api("/api/admin/users" + (q ? `?q=${encodeURIComponent(q)}` : ""));
+    if (seq !== auSeq) return;
+    $("#au-count").textContent = q ? `${r.found} из ${r.total}` : `всего ${r.total}`;
+    box.innerHTML = "";
+    if (!r.users.length) { box.innerHTML = '<div class="note">Никого не найдено</div>'; return; }
+    r.users.forEach((u) => {
+      const row = document.createElement("div");
+      row.className = "ab au";
+      const head = document.createElement("div");
+      head.className = "au-head";
+      const who = document.createElement("span");
+      who.className = "ab-who";
+      const nm = document.createElement("b");
+      nm.textContent = (u.admin ? "👑 " : "") + (u.first_name || u.name);
+      const meta = document.createElement("small");
+      meta.textContent = `${u.username ? "@" + u.username + " · " : ""}id ${u.id} · был ${auDate(u.last_seen)}`;
+      who.append(nm, meta);
+      const bal = document.createElement("span");
+      bal.className = "ab-res win";
+      bal.textContent = stars(u.balance) + (u.ton ? ` · ${money(u.ton, "ton")}` : "");
+      head.append(who, bal);
+      const info = document.createElement("div");
+      info.className = "au-info hidden";
+      const profit = (u.wagered || 0) - (u.won || 0);
+      const lines = [
+        ["Баланс", `${stars(u.balance)} · ${money(u.ton, "ton")}`],
+        ["Пополнил", `${stars(u.deposited)} · ${money(u.ton_deposited, "ton")}`],
+        ["Поставил", `${stars(u.wagered)} · ${money(u.ton_wagered, "ton")}`],
+        ["Выиграл", `${stars(u.won)} · ${money(u.ton_won, "ton")}`],
+        ["Казино в плюсе", (profit >= 0 ? "+" : "") + stars(profit)],
+        ["Вывел", `${stars(u.withdrawn)} · ${money(u.ton_withdrawn, "ton")}` + (u.withdraw_pending ? ` (ждёт ${stars(u.withdraw_pending)})` : "")],
+        ["NFT у игрока", u.nfts ? `${u.nfts} шт. на ${stars(u.nft_value)}` : "нет"],
+        ["Ставок", `${u.bets}` + (u.last_bet ? `, последняя ${auDate(u.last_bet)}` : "")],
+        ["Рефералов", `${u.referrals}` + (u.referrer_id ? ` · пригласил id ${u.referrer_id}` : "")],
+        ["Регистрация", auDate(u.created_at)],
+      ];
+      lines.forEach(([k, v]) => {
+        const l = document.createElement("div");
+        const a = document.createElement("span");
+        a.textContent = k;
+        const b = document.createElement("b");
+        b.textContent = v;
+        l.append(a, b);
+        info.append(l);
+      });
+      row.append(head, info);
+      row.addEventListener("click", () => info.classList.toggle("hidden"));
+      box.append(row);
+    });
+  } catch (e) {
+    box.innerHTML = `<div class="note">${escH(e.message)}</div>`;
+  }
 }
 
 function historyRow(label, value, positive) {
@@ -3891,6 +3956,7 @@ function bind() {
   }));
   $("#upg-btn").addEventListener("click", upgradeGo);
   $("#upg-all").addEventListener("click", upgSelectAll);
+  $("#au-q").addEventListener("input", () => { clearTimeout(auTimer); auTimer = setTimeout(loadAdminUsers, 300); });
   $("#ab-q").addEventListener("input", () => { clearTimeout(abTimer); abTimer = setTimeout(loadAllBets, 300); });
   $("#upg-search").addEventListener("input", (e) => { upg.query = e.target.value; upgRenderTargets(); upgUpdate(); });
   $$("#upg-mults button").forEach((b) => b.addEventListener("click", () => {

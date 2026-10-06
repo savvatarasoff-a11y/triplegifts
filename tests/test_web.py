@@ -404,3 +404,20 @@ async def test_league_logo_served_from_own_domain(tmp_path):
         assert await db.kv_get("sports:logo:ucl") == fetched[0]
         assert (await c.get("/sporticon?league=nope")).status == 404
     await db.close()
+
+
+async def test_admin_only_users_and_all_bets(client):
+    casino = client.app[CASINO]
+    await client.get("/api/me", headers=auth(3))
+    assert await casino.db.credit_payment("p3", 3, 100)
+    await casino.slots(3, 5)
+    assert (await (await client.get("/api/me", headers=auth(3))).json())["admin"] is False
+    assert (await client.get("/api/bets/all", headers=auth(3))).status == 403        # игрокам — нельзя
+    assert (await client.get("/api/admin/users", headers=auth(3))).status == 403
+    assert (await (await client.get("/api/me", headers=auth(777))).json())["admin"] is True
+    r = await (await client.get("/api/admin/users?q=3", headers=auth(777))).json()
+    u = next(x for x in r["users"] if x["id"] == 3)
+    assert u["deposited"] == 100 and u["wagered"] == 5 and u["bets"] == 1 and r["total"] >= 2
+    assert (await (await client.get("/api/admin/users?q=никого", headers=auth(777))).json())["users"] == []
+    bets = (await (await client.get("/api/bets/all", headers=auth(777))).json())["bets"]
+    assert bets[0]["game"] == "slots"

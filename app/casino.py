@@ -342,6 +342,53 @@ class Casino:
                  "name": display_name({"id": r["uid"], "first_name": r["first_name"], "username": r["username"]})}
                 for r in rows]
 
+    async def admin_users(self, query: str = "", limit: int = 100) -> dict:
+        """Для админа: игроки со всей статистикой (балансы, пополнения, ставки, выводы, NFT, рефералы).
+        Поиск — по имени, нику или id; без поиска — недавно заходившие сверху."""
+        q = (query or "").strip().lower().lstrip("@")[:40]
+        users = await self.db.all("SELECT * FROM users ORDER BY last_seen DESC")
+        total = len(users)
+        if q:
+            users = [u for u in users
+                     if q in f"{u['id']} {u['first_name'] or ''} {u['username'] or ''}".lower()]
+        found = len(users)
+        users = users[:max(1, min(limit, 200))]
+        ids = [u["id"] for u in users]
+        extra: dict[int, dict] = {i: {} for i in ids}
+        if ids:
+            marks = ",".join("?" * len(ids))
+            for r in await self.db.all(
+                    f"SELECT user_id, COALESCE(SUM(CASE WHEN status='sent' THEN amount END),0) out, "
+                    f"COALESCE(SUM(CASE WHEN status IN ('pending','sending') THEN amount END),0) wait "
+                    f"FROM withdrawals WHERE user_id IN ({marks}) GROUP BY user_id", *ids):
+                extra[r["user_id"]].update(withdrawn=r["out"], withdraw_pending=r["wait"])
+            for r in await self.db.all(
+                    f"SELECT user_id, COALESCE(SUM(CASE WHEN status='sent' THEN amount END),0) out "
+                    f"FROM ton_withdrawals WHERE user_id IN ({marks}) GROUP BY user_id", *ids):
+                extra[r["user_id"]]["ton_withdrawn"] = r["out"]
+            for r in await self.db.all(
+                    f"SELECT user_id, COUNT(*) n, COALESCE(SUM(value),0) v FROM user_gifts "
+                    f"WHERE user_id IN ({marks}) AND status IN ('owned','staked') GROUP BY user_id", *ids):
+                extra[r["user_id"]].update(nfts=r["n"], nft_value=r["v"])
+            for r in await self.db.all(
+                    f"SELECT referrer_id, COUNT(*) n FROM users WHERE referrer_id IN ({marks}) GROUP BY referrer_id", *ids):
+                extra[r["referrer_id"]]["referrals"] = r["n"]
+            for r in await self.db.all(
+                    f"SELECT user_id, COUNT(*) n, MAX(ts) last FROM bets WHERE user_id IN ({marks}) GROUP BY user_id", *ids):
+                extra[r["user_id"]].update(bets=r["n"], last_bet=r["last"])
+        keys = ("id", "username", "first_name", "balance", "ton", "deposited", "ton_deposited", "wagered", "won",
+                "ton_wagered", "ton_won", "referrer_id", "created_at", "last_seen")
+        out = []
+        for u in users:
+            e = extra[u["id"]]
+            out.append({**{k: u.get(k) for k in keys}, "name": display_name(u),
+                        "withdrawn": e.get("withdrawn", 0), "withdraw_pending": e.get("withdraw_pending", 0),
+                        "ton_withdrawn": e.get("ton_withdrawn", 0), "nfts": e.get("nfts", 0),
+                        "nft_value": e.get("nft_value", 0), "referrals": e.get("referrals", 0),
+                        "bets": e.get("bets", 0), "last_bet": e.get("last_bet"),
+                        "admin": u["id"] in self.cfg.admin_ids})
+        return {"users": out, "found": found, "total": total}
+
     async def case_drops(self, limit: int = 20) -> list[dict]:
         """Лента последних дропов из кейсов всех игроков (NFT и призы дороже кейса — отмечены)."""
         rows = await self.db.all(

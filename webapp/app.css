@@ -753,3 +753,9 @@ button { -webkit-user-select: none; user-select: none; }
 .ab-who small { font-size: 11px; color: var(--muted); font-weight: 700; }
 .ab-res { font-weight: 800; font-size: 13px; white-space: nowrap; }
 .ab-res.win { color: var(--accent-soft); } .ab-res.lose { color: #6A665C; }
+.au { flex-direction: column; align-items: stretch; cursor: pointer; }
+.au-head { display: flex; align-items: center; gap: 10px; }
+.au-info { display: grid; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; }
+.au-info div { display: flex; justify-content: space-between; gap: 10px; }
+.au-info span { color: var(--muted); font-weight: 700; }
+.au-info b { text-align: right; }

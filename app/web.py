@@ -306,6 +306,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         user = await casino.db.get_user(uid)
         return web.json_response({
             "user": {"id": uid, "name": display_name(user)},
+            "admin": is_admin,
             "subscribed": await subscribed(uid),
             "free_case": await casino.free_case_info(uid),
             "balance": user["balance"],
@@ -413,9 +414,19 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def sports_bets(request: web.Request) -> web.Response:
         return web.json_response({"bets": await sports.my_bets(request[USER_ID])})
 
+    def admin_only(request: web.Request) -> None:
+        if request[USER_ID] not in cfg.admin_ids:
+            raise web.HTTPForbidden(text='{"error": "Только для админа"}', content_type="application/json")
+
     @routes.get("/api/bets/all")
     async def bets_all(request: web.Request) -> web.Response:
+        admin_only(request)
         return web.json_response({"bets": await casino.all_bets(request.query.get("q", ""))})
+
+    @routes.get("/api/admin/users")
+    async def admin_users(request: web.Request) -> web.Response:
+        admin_only(request)
+        return web.json_response(await casino.admin_users(request.query.get("q", "")))
 
     @routes.get("/api/feed")
     async def feed(_: web.Request) -> web.Response:
