@@ -457,7 +457,7 @@ class Casino:
         return {"required": free["s"], "done": wagered, "left": max(0, free["s"] - wagered)}
 
     async def recent_deposit_ok(self, user_id: int) -> bool:
-        """Было ли за последнюю неделю пополнение от 100 ⭐ (или от 1 TON) одним платежом. Админам не нужно."""
+        """Было ли за последнюю неделю пополнение от 50 ⭐ (или от 0.5 TON) одним платежом. Админам не нужно."""
         if user_id in self.cfg.admin_ids:
             return True
         row = await self.db.one(

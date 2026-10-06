@@ -207,7 +207,7 @@ async def test_withdraw_api(client):
     assert "gp" not in ids and "gsold" not in ids and ids[0] in ("id💝", "id🧸")   # премиум и распроданные скрыты
     assert data["wager"]["left"] == 25                           # стартовый бонус нужно отыграть
     r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "id🧸"})
-    assert r.status == 400 and "пополнение от 100" in (await r.json())["error"]
+    assert r.status == 400 and "пополнение от 50" in (await r.json())["error"]
     assert await client.app[CASINO].db.credit_payment("p3", 3, 100)
     await client.app[CASINO].db.conn.execute("UPDATE users SET wagered=0 WHERE id=3")
     r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "id🧸"})
