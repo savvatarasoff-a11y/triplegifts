@@ -53,6 +53,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("channel_wins", "Выигрыши в канал"),
     ("dupe", "Демо-NFT (модели с MRKT)"),
     ("tonwallet", "Кошелёк для пополнений TON"),
+    ("broadcast", "Рассылка игрокам"),
 ]
 
 

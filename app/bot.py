@@ -28,7 +28,7 @@ from .mrkt import STAR_USD
 from .channel import CHANNEL
 from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
 from .relayer import Relayer
-from . import money, ton
+from . import broadcast as bc, money, ton
 from .withdraw import admin_keyboard, approve, reject, ton_admin_keyboard, ton_decide
 
 log = logging.getLogger(__name__)
@@ -224,7 +224,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/channel_wins <code>on|off</code> — выигрыши в канал\n"
             "/league_icons — значки лиг в футболе (из премиум-эмодзи)\n"
             "/sports_refresh — обновить матчи футбола сейчас\n"
-            "/user <code>@username или ID</code> — баланс игрока"
+            "/user <code>@username или ID</code> — баланс игрока\n"
+            "/broadcast — рассылка игрокам (всем, пополнявшим, активным… или своему списку)"
         )
 
     @admin.message(Command("checks"))
@@ -776,6 +777,110 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             f"Баланс: {user['balance']} ⭐\nПополнил: {user['deposited']} ⭐\n"
             f"Поставил: {user['wagered']} ⭐, выиграл: {user['won']} ⭐"
         )
+
+    # ---------- рассылка: /broadcast → кому → сообщение → превью → отправить ----------
+
+    drafts: dict[int, dict] = {}        # админ → {"step": "list"|"content"|"confirm", "ids": [...], "who": "..."}
+
+    def bc_cancel_kb() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="bc:cancel")]])
+
+    @admin.message(Command("broadcast"))
+    async def broadcast_start(message: Message) -> None:
+        n = await bc.counts(casino.db)
+        rows = [[InlineKeyboardButton(text=f"{title} · {n[key]}", callback_data=f"bc:a:{key}")]
+                for key, (title, _) in bc.AUDIENCES.items()]
+        rows.append([InlineKeyboardButton(text="✍️ Свой список (@ники / id)", callback_data="bc:a:list")])
+        rows.append([InlineKeyboardButton(text="✖️ Отмена", callback_data="bc:cancel")])
+        drafts.pop(message.from_user.id, None)
+        await message.answer("📣 <b>Рассылка</b>\nКому отправить?", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+    @admin.callback_query(F.data.startswith("bc:"))
+    async def broadcast_step(query: CallbackQuery, bot: Bot) -> None:
+        uid = query.from_user.id
+        parts = query.data.split(":")
+        msg = query.message if isinstance(query.message, Message) else None
+        if parts[1] == "cancel":
+            drafts.pop(uid, None)
+            await query.answer("Рассылка отменена")
+            if msg:
+                await msg.edit_text("📣 Рассылка отменена.")
+            return
+        if parts[1] == "a":
+            kind = parts[2]
+            if kind == "list":
+                drafts[uid] = {"step": "list"}
+                text = "Пришли @ники или id получателей — через пробел, запятую или с новой строки."
+            else:
+                ids = await bc.audience(casino.db, kind)
+                drafts[uid] = {"step": "content", "ids": ids, "who": bc.AUDIENCES[kind][0].lower()}
+                text = (f"Получатели: <b>{bc.AUDIENCES[kind][0].lower()}</b> — {len(ids)}.\n"
+                        "Теперь пришли сообщение для рассылки: текст, фото, видео, кружок — что угодно, "
+                        "оформление сохранится.")
+            await query.answer()
+            if msg:
+                await msg.edit_text(text, reply_markup=bc_cancel_kb())
+            return
+        if parts[1] == "go":
+            draft = drafts.pop(uid, None)
+            if not draft or draft.get("step") != "confirm":
+                await query.answer("Черновик устарел — начните заново: /broadcast", show_alert=True)
+                return
+            await query.answer("Отправляю…")
+            if msg:
+                await msg.edit_text(f"⏳ Рассылка {len(draft['ids'])} получателям идёт…")
+
+            async def run() -> None:
+                res = await bc.send(bot, draft["ids"], draft["chat"], draft["message_id"],
+                                    play_keyboard(cfg) if draft.get("button") else None)
+                report = (f"✅ Рассылка завершена ({draft['who']}): доставлено <b>{res['sent']}</b> из {len(draft['ids'])}"
+                          + (f", заблокировали бота / не запускали его: {res['blocked']}" if res["blocked"] else "")
+                          + (f", ошибки: {res['failed']}" if res["failed"] else ""))
+                try:
+                    await bot.send_message(uid, report)
+                except Exception:
+                    log.warning("Отчёт о рассылке не отправлен")
+            asyncio.create_task(run())
+            return
+        if parts[1] == "btn":
+            draft = drafts.get(uid)
+            if draft and draft.get("step") == "confirm":
+                draft["button"] = not draft.get("button")
+                await query.answer("Кнопка " + ("добавлена" if draft["button"] else "убрана"))
+                if msg:
+                    await msg.edit_reply_markup(reply_markup=bc_confirm_kb(draft))
+            return
+
+    def bc_confirm_kb(draft: dict) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"🚀 Отправить ({len(draft['ids'])})", callback_data="bc:go")],
+            [InlineKeyboardButton(text=("✅" if draft.get("button") else "➕") + " Кнопка «Открыть Triple Gifts»",
+                                  callback_data="bc:btn")],
+            [InlineKeyboardButton(text="✖️ Отмена", callback_data="bc:cancel")],
+        ])
+
+    @admin.message(lambda m: m.from_user is not None and m.from_user.id in drafts
+                   and drafts[m.from_user.id].get("step") in ("list", "content")
+                   and not (m.text or "").startswith("/"))
+    async def broadcast_input(message: Message, bot: Bot) -> None:
+        uid = message.from_user.id
+        draft = drafts[uid]
+        if draft["step"] == "list":
+            ids, missing = await bc.parse_list(casino.db, message.text or "")
+            if not ids:
+                await message.answer("Никого не нашёл. Пришли @ники или id ещё раз.", reply_markup=bc_cancel_kb())
+                return
+            drafts[uid] = {"step": "content", "ids": ids, "who": "свой список"}
+            note = f"\nНе найдены: {html.escape(', '.join(missing[:20]))}" if missing else ""
+            await message.answer(f"Получатели: {len(ids)}.{note}\nТеперь пришли сообщение для рассылки.",
+                                 reply_markup=bc_cancel_kb())
+            return
+        draft.update(step="confirm", chat=message.chat.id, message_id=message.message_id,
+                     button=bool(cfg.webapp_url) and not message.reply_markup)
+        await bot.copy_message(chat_id=message.chat.id, from_chat_id=message.chat.id, message_id=message.message_id,
+                               reply_markup=play_keyboard(cfg) if draft["button"] else None)
+        await message.answer(f"👆 Так увидят игроки. Получатели: <b>{draft['who']}</b> — {len(draft['ids'])}.",
+                             reply_markup=bc_confirm_kb(draft))
 
     root = Router(name="root")
     root.include_router(admin)
