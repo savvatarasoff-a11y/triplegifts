@@ -534,7 +534,8 @@ class Casino:
             user_id, since))["s"]
         nft_out = (await self.db.one(
             "SELECT COALESCE(SUM(value),0) s FROM user_gifts WHERE user_id=? AND status IN ('withdrawing','withdrawn') "
-            "AND withdrawn_at>? AND COALESCE(from_user, 0)!=?", user_id, since, user_id))["s"]
+            # выведенные до появления withdrawn_at — по времени, когда NFT попал в профиль
+            "AND COALESCE(withdrawn_at, created_at)>? AND COALESCE(from_user, 0)!=?", user_id, since, user_id))["s"]
         used = stars_out + ton_out * g.LEVEL_TON_STARS // money.NANO + nft_out
         nxt = g.WITHDRAW_TIERS[lv + 1] if lv + 1 < len(g.WITHDRAW_TIERS) else None
         admin = user_id in self.cfg.admin_ids

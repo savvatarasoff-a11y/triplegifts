@@ -605,3 +605,18 @@ async def test_withdraw_limit_by_deposit_tier(casino):
     assert (lim["name"], lim["limit"]) == ("Игрок", 500)
     assert (await casino.withdraw_request(8, "g3", 400, "🧸"))["status"] == "pending"
     assert (await casino.withdraw_limit(7))["unlimited"]            # админ — без лимита
+
+
+async def test_withdraw_limit_counts_past_withdrawals(casino):
+    """Выводы до введения лимита тоже считаются: звёзды/TON — по заявкам, NFT без withdrawn_at — по дате попадания в профиль."""
+    db = casino.db
+    await db.conn.execute("INSERT OR IGNORE INTO users(id, created_at, last_seen) VALUES (9, 0, 0)")
+    await fund(casino, 9, 300)
+    now = time.time()
+    await db.conn.execute("INSERT INTO withdrawals(user_id, amount, gift_id, status, created_at) VALUES (9, 50, 'g', 'sent', ?)",
+                          (now - 86400,))
+    await db.conn.execute("INSERT INTO user_gifts(user_id, ref, kind, value, status, created_at) "
+                          "VALUES (9, 'old-nft', 'nft', 40, 'withdrawn', ?)", (now - 2 * 86400,))
+    await db.conn.execute("INSERT INTO user_gifts(user_id, ref, kind, value, status, created_at) "
+                          "VALUES (9, 'ancient', 'nft', 999, 'withdrawn', ?)", (now - 30 * 86400,))
+    assert (await casino.withdraw_limit(9))["used"] == 90
