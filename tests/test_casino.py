@@ -585,3 +585,23 @@ async def test_all_bets_history_with_search(casino):
     assert [b["name"] for b in await casino.all_bets("@VASYA")] == ["Вася"]
     assert [b["name"] for b in await casino.all_bets("слот")] == [b["name"] for b in allb if b["game"] == "slots"]
     assert await casino.all_bets("никого") == []
+
+
+async def test_withdraw_limit_by_deposit_tier(casino):
+    from app.games import logic as g
+    await casino.db.conn.execute("INSERT OR IGNORE INTO users(id, created_at, last_seen) VALUES (8, 0, 0)")
+    await fund(casino, 8, 300)                                      # «Новичок»: 150 ★ за 7 дней
+    lim = await casino.withdraw_limit(8)
+    assert (lim["name"], lim["limit"], lim["left"], lim["next"]["need"]) == ("Новичок", 150, 150, 200)
+    wd = await casino.withdraw_request(8, "g1", 100, "🧸")
+    with pytest.raises(GameError, match="доступно 50"):
+        await casino.withdraw_request(8, "g2", 100, "🧸")
+    await casino.withdraw_reject(wd["id"], 7)                       # отклонённый не считается
+    assert (await casino.withdraw_limit(8))["left"] == 150
+    await casino.db.conn.execute("UPDATE withdrawals SET created_at=? WHERE user_id=8",
+                                 (time.time() - g.WITHDRAW_WINDOW - 1,))
+    await fund(casino, 8, 250)                                      # всего 550 → «Игрок»: 500 ★
+    lim = await casino.withdraw_limit(8)
+    assert (lim["name"], lim["limit"]) == ("Игрок", 500)
+    assert (await casino.withdraw_request(8, "g3", 400, "🧸"))["status"] == "pending"
+    assert (await casino.withdraw_limit(7))["unlimited"]            # админ — без лимита

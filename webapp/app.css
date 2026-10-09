@@ -759,3 +759,12 @@ button { -webkit-user-select: none; user-select: none; }
 .au-info div { display: flex; justify-content: space-between; gap: 10px; }
 .au-info span { color: var(--muted); font-weight: 700; }
 .au-info b { text-align: right; }
+.wd-limit { margin: 10px 0; padding: 12px; border-radius: 14px; background: var(--surface-3); border: 1px solid var(--line); font-size: 13px; }
+.wl-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.wl-bar { height: 6px; margin: 8px 0; border-radius: 99px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.wl-bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.wl-next { color: var(--muted); font-weight: 700; }
+.wl-next b { color: var(--accent-soft); }
+.wl-tiers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.wl-tiers span { padding: 3px 8px; border-radius: 8px; background: rgba(255, 255, 255, .05); color: var(--muted); font-size: 11px; font-weight: 700; }
+.wl-tiers span.sel { background: rgba(245, 185, 60, .18); color: var(--accent-pale); }

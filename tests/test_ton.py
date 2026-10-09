@@ -123,6 +123,7 @@ async def test_pvp_rounds_separate_by_currency(casino):
 async def test_ton_withdraw(casino):
     db = casino.db
     await db.credit_ton("d", 1, 3 * NANO)
+    await db.conn.execute("UPDATE users SET deposited=2000 WHERE id=1")   # уровень вывода «Постоянный» — лимит не мешает
     with pytest.raises(GameError, match="адрес"):
         await casino.ton_withdraw_request(1, NANO, "not an address")
     with pytest.raises(GameError, match="от 0.1 TON"):

@@ -519,10 +519,45 @@ class Casino:
                             f"(или от {money.fmt(g.WITHDRAW_DEPOSIT_TON, money.TON)}) за последние "
                             f"{g.WITHDRAW_DEPOSIT_DAYS} дней")
 
+    async def withdraw_limit(self, user_id: int) -> dict:
+        """Рейтинг вывода: уровень по сумме пополнений и сколько ещё можно вывести за последние 7 дней (в ★)."""
+        user = await self.db.get_user(user_id) or {}
+        points = (user.get("deposited") or 0) + (user.get("ton_deposited") or 0) * g.LEVEL_TON_STARS // money.NANO
+        lv = g.withdraw_tier(points)
+        name, emoji, _, limit = g.WITHDRAW_TIERS[lv]
+        since = time.time() - g.WITHDRAW_WINDOW
+        stars_out = (await self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM withdrawals WHERE user_id=? AND status!='rejected' AND created_at>?",
+            user_id, since))["s"]
+        ton_out = (await self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM ton_withdrawals WHERE user_id=? AND status!='rejected' AND created_at>?",
+            user_id, since))["s"]
+        nft_out = (await self.db.one(
+            "SELECT COALESCE(SUM(value),0) s FROM user_gifts WHERE user_id=? AND status IN ('withdrawing','withdrawn') "
+            "AND withdrawn_at>? AND COALESCE(from_user, 0)!=?", user_id, since, user_id))["s"]
+        used = stars_out + ton_out * g.LEVEL_TON_STARS // money.NANO + nft_out
+        nxt = g.WITHDRAW_TIERS[lv + 1] if lv + 1 < len(g.WITHDRAW_TIERS) else None
+        admin = user_id in self.cfg.admin_ids
+        return {"level": lv, "name": name, "emoji": emoji, "deposited": points, "limit": limit, "used": used,
+                "left": max(0, limit - used), "unlimited": admin,
+                "next": {"name": nxt[0], "emoji": nxt[1], "at": nxt[2], "limit": nxt[3], "need": nxt[2] - points}
+                if nxt else None,
+                "tiers": [{"name": n, "emoji": e, "at": a, "limit": lim} for n, e, a, lim in g.WITHDRAW_TIERS]}
+
+    async def require_withdraw_limit(self, user_id: int, stars: int) -> None:
+        lim = await self.withdraw_limit(user_id)
+        if lim["unlimited"] or stars <= lim["left"]:
+            return
+        more = (f" Пополните ещё {lim['next']['need']} ★ — уровень {lim['next']['emoji']} {lim['next']['name']}: "
+                f"до {lim['next']['limit']} ★ в неделю." if lim["next"] else "")
+        raise GameError(f"Лимит вывода для уровня {lim['emoji']} {lim['name']} — {lim['limit']} ★ за 7 дней, "
+                        f"сейчас доступно {lim['left']} ★.{more}")
+
     async def withdraw_request(self, user_id: int, gift_id: str, price: int, emoji: str | None) -> dict:
         if price < 1:
             raise GameError("Подарок недоступен")
         await self.require_recent_deposit(user_id)
+        await self.require_withdraw_limit(user_id, price)
         wager = await self.wager_status(user_id)
         if wager["left"] > 0:
             raise GameError(f"Сначала отыграйте бонусные звёзды: осталось поставить {wager['left']} ⭐")
@@ -603,6 +638,7 @@ class Casino:
             raise GameError("Некорректный адрес TON-кошелька")
         address = address.strip()
         await self.require_recent_deposit(user_id)
+        await self.require_withdraw_limit(user_id, amount * g.LEVEL_TON_STARS // money.NANO)
         wager = await self.wager_status(user_id, money.TON)
         if wager["left"] > 0:
             raise GameError(f"Сначала поставьте в играх пополнения и бонусы хотя бы раз: осталось "
@@ -1166,7 +1202,9 @@ class Casino:
                 raise GameError("Демо-NFT нельзя вывести — его можно продать казино или поставить")
             if row["transfer_at"] > time.time():
                 raise GameError("Telegram пока не даёт передать этот подарок — попробуйте позже")
-            await c.execute("UPDATE user_gifts SET status='withdrawing' WHERE id=?", (gift_id,))
+            if row["from_user"] != user_id:                 # свой присланный NFT игрок забирает без лимита
+                await self.require_withdraw_limit(user_id, row["value"] or 0)
+            await c.execute("UPDATE user_gifts SET status='withdrawing', withdrawn_at=? WHERE id=?", (time.time(), gift_id))
         return dict(row)
 
     async def gift_withdraw_finish(self, gift_id: int, ok: bool) -> None:

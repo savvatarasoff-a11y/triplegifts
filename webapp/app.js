@@ -1070,6 +1070,7 @@ async function loadTonWithdraw() {
   try {
     const t = await loadTonInfo();
     $("#ton-min").textContent = tonNum(t.min_withdraw);
+    renderWithdrawLimit($("#ton-wager-limit"), t.limit);
     const w = $("#ton-wager");
     w.classList.toggle("hidden", !t.wager.left);
     w.textContent = t.wager.left ? `Перед выводом пополнения и бонусы нужно хотя бы раз поставить в играх: осталось ${money(t.wager.left, "ton")}.` : "";
@@ -1096,11 +1097,26 @@ async function tonWithdraw() {
   });
 }
 
+// Рейтинг вывода: уровень по сумме пополнений, недельный лимит и что даст следующий уровень
+function renderWithdrawLimit(el, l) {
+  if (!el || !l) return;
+  el.classList.toggle("hidden", !!l.unlimited);
+  if (l.unlimited) return;
+  const pct = Math.min(100, Math.round((l.used / l.limit) * 100));
+  const next = l.next
+    ? `<div class="wl-next">Пополните ещё <b>${stars(l.next.need)}</b> → ${l.next.emoji} ${escH(l.next.name)}: до ${stars(l.next.limit)} в неделю</div>`
+    : '<div class="wl-next">Максимальный уровень</div>';
+  el.innerHTML = `<div class="wl-head"><span>${l.emoji} <b>${escH(l.name)}</b></span><span>доступно <b>${stars(l.left)}</b> из ${stars(l.limit)} за 7 дней</span></div>`
+    + `<div class="wl-bar"><i style="width:${pct}%"></i></div>${next}`
+    + `<div class="wl-tiers">${l.tiers.map((t, i) => `<span class="${i === l.level ? "sel" : ""}">${t.emoji} от ${fmt(t.at)} ★ → ${fmt(t.limit)} ★/нед</span>`).join("")}</div>`;
+}
+
 async function loadWithdraw() {
   const box = $("#gifts");
   box.textContent = "Загружаем подарки…";
   try {
     const data = await api("/api/withdraw");
+    renderWithdrawLimit($("#wager-limit"), data.limit);
     const wager = $("#wager");
     wager.classList.toggle("hidden", !data.wager.left);
     wager.textContent = data.wager.left
