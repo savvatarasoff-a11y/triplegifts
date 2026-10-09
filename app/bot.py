@@ -427,19 +427,32 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             await status.edit_text(f"⚠️ Не удалось обновить: {html.escape(type(e).__name__)}: "
                                    f"{html.escape(str(e)[:300])}")
             return
-        rows = await casino.db.all("SELECT * FROM nft_models WHERE (stock > 0 OR reserved > 0) "
+        # только настоящие подарки у релейера; модели из каталога маркета (демо) — одной строкой, их тысячи
+        rows = await casino.db.all("SELECT * FROM nft_models WHERE test=0 AND (stock > 0 OR reserved > 0) "
                                    "ORDER BY price DESC")
-        if not rows:
-            text = f"⚠️ {html.escape(error)}" if error else "У релейера нет NFT-подарков, которые можно передать."
-            await status.edit_text(text)
-            return
-        lines = [f"<b>{r['id']}.</b> {describe_nft(r)}" for r in rows]
+        demo = (await casino.db.one("SELECT COUNT(*) n FROM nft_models WHERE test=1 AND enabled=1"))["n"]
+        demo_line = f"\n\n🧩 Демо-модели из каталога маркета: {demo} (выигрыш — цена звёздами)." if demo else ""
         note = f"\n\n⚠️ {html.escape(error)}" if error else ""
-        await status.edit_text(
-            f"💎 <b>Модели у релейера: {count}</b>\n\n" + "\n".join(lines) +
-            f"\n\nNFT-кейс: {cfg.nft_case_price} ⭐. В кейс попадают модели с проверенной ценой и свободным запасом; "
-            "выигравшему релейер передаёт случайный подарок этой модели." + note
-        )
+        if not rows:
+            text = (f"⚠️ {html.escape(error)}" if error else "У релейера нет NFT-подарков, которые можно передать.")
+            await status.edit_text(text + demo_line)
+            return
+        head = f"💎 <b>Модели у релейера: {count}</b>\n\n"
+        tail = (f"\n\nNFT-кейс: {cfg.nft_case_price} ⭐. В кейс попадают модели с проверенной ценой и свободным "
+                "запасом; выигравшему релейер передаёт случайный подарок этой модели." + demo_line + note)
+        chunks, cur = [], head
+        for r in rows:                                   # Telegram — не больше 4096 символов в сообщении
+            line = f"<b>{r['id']}.</b> {describe_nft(r)}\n"
+            if len(cur) + len(line) > 3800:
+                chunks.append(cur)
+                cur = ""
+            cur += line
+        chunks.append(cur.rstrip("\n") + tail if len(cur) + len(tail) <= 4000 else cur)
+        if len(cur) + len(tail) > 4000:
+            chunks.append(tail.strip())
+        await status.edit_text(chunks[0])
+        for part in chunks[1:]:
+            await message.answer(part)
 
     async def toggle_model(message: Message, command: CommandObject, enabled: bool) -> None:
         arg = (command.args or "").strip()
