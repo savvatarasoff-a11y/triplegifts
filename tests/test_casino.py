@@ -620,3 +620,19 @@ async def test_withdraw_limit_counts_past_withdrawals(casino):
     await db.conn.execute("INSERT INTO user_gifts(user_id, ref, kind, value, status, created_at) "
                           "VALUES (9, 'ancient', 'nft', 999, 'withdrawn', ?)", (now - 30 * 86400,))
     assert (await casino.withdraw_limit(9))["used"] == 90
+
+
+async def test_admin_take_and_give_silently(casino):
+    await fund(casino, 1, 300)
+    r = await casino.admin_adjust(7, 1, -100, reason="абуз краша")
+    assert r["delta"] == -100 and r["balance"] == 200
+    r = await casino.admin_adjust(7, 1, -1000)                      # больше, чем есть, — списываем всё
+    assert r["delta"] == -200 and r["balance"] == 0
+    assert (await casino.admin_adjust(7, 1, None))["delta"] == 0
+    r = await casino.admin_adjust(7, 1, 50, reason="ошибся")
+    assert r["balance"] == 50
+    rows = await casino.db.all("SELECT kind, delta, ref FROM ledger WHERE user_id=1 AND kind LIKE 'admin_%' ORDER BY id")
+    assert [(x["kind"], x["delta"]) for x in rows] == [("admin_take", -100), ("admin_take", -200), ("admin_give", 50)]
+    assert rows[0]["ref"] == "7:абуз краша"
+    with pytest.raises(GameError):
+        await casino.admin_adjust(7, 999, -1)

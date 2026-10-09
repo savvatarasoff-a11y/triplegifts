@@ -54,6 +54,8 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("dupe", "Демо-NFT (модели с MRKT)"),
     ("tonwallet", "Кошелёк для пополнений TON"),
     ("broadcast", "Рассылка игрокам"),
+    ("take", "Списать баланс игрока"),
+    ("give", "Начислить баланс игроку"),
 ]
 
 

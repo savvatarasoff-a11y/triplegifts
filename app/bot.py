@@ -225,7 +225,9 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/league_icons — значки лиг в футболе (из премиум-эмодзи)\n"
             "/sports_refresh — обновить матчи футбола сейчас\n"
             "/user <code>@username или ID</code> — баланс игрока\n"
-            "/broadcast — рассылка игрокам (всем, пополнявшим, активным… или своему списку)"
+            "/broadcast — рассылка игрокам (всем, пополнявшим, активным… или своему списку)\n"
+            "/take <code>@user|ID сумма|all [ton] [причина]</code> — тихо списать баланс (абуз уязвимостей)\n"
+            "/give <code>@user|ID сумма [ton] [причина]</code> — тихо вернуть/начислить"
         )
 
     @admin.message(Command("checks"))
@@ -764,6 +766,60 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                     await query.message.answer(html.escape(text))
             except Exception:
                 pass
+
+    async def adjust(message: Message, command: CommandObject, sign: int) -> None:
+        """/take и /give: игрок, сумма (или all), необязательно ton, причина. Игроку ничего не пишем."""
+        name = "take" if sign < 0 else "give"
+        parts = (command.args or "").split()
+        if len(parts) < 2:
+            await message.answer(f"Формат: <code>/{name} @username|ID сумма|all [ton] [причина]</code>\n"
+                                 f"Например: <code>/{name} @vasya 500 абуз краша</code> или <code>/{name} 123 1.5 ton</code>")
+            return
+        user = await casino.db.find_user(parts[0])
+        if not user:
+            await message.answer("Игрок не найден")
+            return
+        rest = parts[2:]
+        cur = money.STARS
+        if rest and rest[0].lower() == "ton":
+            cur, rest = money.TON, rest[1:]
+        raw = parts[1].lower().replace(",", ".")
+        if raw == "all":
+            if sign > 0:
+                await message.answer("«all» — только для списания")
+                return
+            amount = None
+        else:
+            try:
+                value = float(raw)
+            except ValueError:
+                await message.answer("Сумма — число или all")
+                return
+            units = round(value * money.NANO) if cur == money.TON else int(value)
+            if units <= 0:
+                await message.answer("Сумма должна быть больше нуля")
+                return
+            amount = sign * units
+        try:
+            res = await casino.admin_adjust(message.from_user.id, user["id"], amount, cur, " ".join(rest))
+        except GameError as e:
+            await message.answer(html.escape(str(e)))
+            return
+        who = html.escape(user["first_name"] or user["username"] or str(user["id"]))
+        if not res["delta"]:
+            await message.answer(f"У {who} баланс {money.fmt(res['balance'], cur)} — списывать нечего.")
+            return
+        verb = "Списано" if res["delta"] < 0 else "Начислено"
+        await message.answer(f"{verb} {money.fmt(abs(res['delta']), cur)} у {who} (<code>{user['id']}</code>). "
+                             f"Баланс: {money.fmt(res['balance'], cur)}. Игрок не уведомлён.")
+
+    @admin.message(Command("take"))
+    async def take(message: Message, command: CommandObject) -> None:
+        await adjust(message, command, -1)
+
+    @admin.message(Command("give"))
+    async def give(message: Message, command: CommandObject) -> None:
+        await adjust(message, command, 1)
 
     @admin.message(Command("user"))
     async def user_info(message: Message, command: CommandObject) -> None:

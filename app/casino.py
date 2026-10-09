@@ -519,6 +519,25 @@ class Casino:
                             f"(или от {money.fmt(g.WITHDRAW_DEPOSIT_TON, money.TON)}) за последние "
                             f"{g.WITHDRAW_DEPOSIT_DAYS} дней")
 
+    async def admin_adjust(self, admin_id: int, user_id: int, amount: int | None, cur: str = money.STARS,
+                           reason: str = "") -> dict:
+        """Админ списывает (amount < 0, None — весь баланс) или начисляет звёзды/TON. Игрока не уведомляем,
+        но в журнале операций остаётся запись: кто, сколько и за что."""
+        cur = self._cur(cur)
+        col = money.column(cur)
+        async with self.db.tx() as c:
+            async with c.execute(f"SELECT {col} b FROM users WHERE id=?", (user_id,)) as q:
+                row = await q.fetchone()
+            if not row:
+                raise GameError("Игрок не найден")
+            delta = -row["b"] if amount is None else max(amount, -row["b"])   # больше, чем есть, не списать
+            if delta == 0:
+                return {"delta": 0, "balance": row["b"], "cur": cur}
+            kind = "admin_take" if delta < 0 else "admin_give"
+            ref = f"{admin_id}:{(reason or '').strip()[:200]}"
+            balance = await self.db.change_balance(c, user_id, delta, kind, ref, cur)
+        return {"delta": delta, "balance": balance, "cur": cur}
+
     async def withdraw_limit(self, user_id: int) -> dict:
         """Рейтинг вывода: уровень по сумме пополнений и сколько ещё можно вывести за последние 7 дней (в ★)."""
         user = await self.db.get_user(user_id) or {}
