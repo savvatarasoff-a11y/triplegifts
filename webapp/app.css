@@ -790,3 +790,37 @@ button { -webkit-user-select: none; user-select: none; }
 .daily.one .daily-card small { min-height: 0; }
 .daily.one .daily-go { margin: 0 0 0 auto; align-self: center; min-width: 96px; }
 .daily.one .daily-t { display: grid; gap: 2px; }
+
+/* ---------- NFT как на маркетах ---------- */
+.mygifts, .shop-list, .upg-targets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.mygifts > .empty, .mygifts > .note, .mygifts > .btn, .shop-list > .note, .upg-targets > .note { grid-column: 1 / -1; }
+.mg.nc, .upt.nc { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 7px 7px 10px;
+  border-radius: 20px; background: var(--surface-2); border: 1px solid var(--line); text-align: left; color: var(--text);
+  grid-template-columns: none; }
+.na { position: relative; aspect-ratio: 1 / 1; border-radius: 15px; overflow: hidden; display: grid; place-items: center;
+  background-size: 120px 120px, cover; background-repeat: repeat, no-repeat; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06); }
+.na::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, transparent 55%, rgba(0, 0, 0, .25)); pointer-events: none; }
+.na .na-img { position: relative; z-index: 1; width: 76%; height: 76%; display: grid; place-items: center; font-size: 58px;
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, .35)); }
+.na .na-img img { width: 100%; height: 100%; object-fit: contain; }
+.na.num .na-img { position: absolute; inset: 0; width: 100%; height: 100%; filter: none; }
+.na.num .na-img img { object-fit: cover; }
+.na-b { position: absolute; z-index: 2; top: 7px; padding: 3px 7px; border-radius: 8px; font-size: 10.5px; font-weight: 800;
+  color: #fff; background: rgba(0, 0, 0, .32); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.na-b.l { left: 7px; } .na-b.r { right: 7px; }
+.na-b.st { top: auto; bottom: 7px; left: 7px; right: 7px; text-align: center; background: rgba(10, 10, 13, .55); }
+.nc .nc-t, .upt.nc b { margin: 8px 4px 0; font-weight: 800; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nc .nc-s, .upt.nc small { margin: 0 4px; color: var(--muted); font-size: 11.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mg.nc .v, .upt.nc .pr { margin: 4px 4px 0; font-weight: 800; font-size: 14px; color: var(--accent-soft); }
+.nc .nc-buy { margin: 8px 0 0; padding: 9px 8px; border-radius: 12px; text-align: center; font-weight: 800; font-size: 14px;
+  background: var(--grad); color: var(--on-accent); }
+.mg.nc .acts { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 8px; }
+.mg.nc .acts .btn { padding: 9px 6px; font-size: 13px; }
+.mg.nc.sel, .upt.nc.sel { border-color: var(--accent); background: linear-gradient(180deg, rgba(245, 185, 60, .25), var(--surface-2));
+  box-shadow: 0 10px 28px -16px var(--accent-glow); }
+.upt.nc { position: relative; padding-top: 7px; }
+.upt.nc .x { position: absolute; z-index: 3; top: 14px; left: 14px; right: auto; padding: 3px 7px; border-radius: 8px;
+  background: rgba(10, 10, 13, .6); }
+.upt.nc .x:empty { display: none; }
+.upt.nc .em { display: block; height: auto; }
+.mygifts.pick .mg.nc { padding-bottom: 8px; }

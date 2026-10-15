@@ -1186,18 +1186,17 @@ function shopRender() {
   if (!list.length) { box.innerHTML = `<div class="note">${q ? "Ничего не найдено" : "Магазин пока пуст"}</div>`; return; }
   list.slice(0, SHOP_SHOW).forEach((t) => {
     const b = document.createElement("button");
-    b.className = "upt";
-    const em = document.createElement("span");
-    em.className = "em";
-    em.append(nftIcon(upgTargetNft(t), "nft-inline big"));
-    const ttl = document.createElement("b");
+    b.className = "mg nc";
+    const ttl = document.createElement("div");
+    ttl.className = "nc-t";
     ttl.textContent = t.title;
-    const md = document.createElement("small");
-    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
+    const md = document.createElement("div");
+    md.className = "nc-s";
+    md.textContent = `«${t.model}»`;
     const pr = document.createElement("span");
-    pr.className = "pr";
+    pr.className = "nc-buy";
     pr.textContent = nftPrice(t.price);
-    b.append(em, ttl, md, pr);
+    b.append(nftArt(upgTargetNft(t)), ttl, md, pr);
     b.addEventListener("click", () => shopBuy(t));
     box.append(b);
   });
@@ -1222,7 +1221,7 @@ async function shopBuy(t) {
 // ---------- мои подарки (прислали релейеру) ----------
 
 const myGifts = { relayer: null, list: [], timer: 0 };
-const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится", pending: "администратор ищет на маркете…" };
+const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится", pending: "ищем на маркете…" };
 
 // ---------- картинки NFT: превью с нашего сервера (ужатые и закэшированные) ----------
 
@@ -1333,27 +1332,67 @@ function setNftIcon(target, o) {
   target.append(nftIcon(o, "nft-inline"));
 }
 
+// ---------- карточка NFT как на маркетах: фон-бэкдроп, узор из символа коллекции, крупная модель ----------
+
+// Бэкдропы в духе Telegram: [центр, край]. NFT без своего фона получает постоянный — по коллекции и модели
+const NFT_BACKDROPS = [
+  ["#5FA8E0", "#24527F"], ["#7BC67E", "#2F6B36"], ["#E9787A", "#8A2C35"], ["#B97AD9", "#56287A"],
+  ["#F2B45C", "#9A5A16"], ["#5CC4B4", "#1D6159"], ["#EE7BA8", "#8B2752"], ["#9AAEBA", "#3F5260"],
+  ["#E3C46A", "#7D5E14"], ["#B49482", "#56392C"], ["#79B9F2", "#20508E"], ["#9C86DB", "#3E2B7E"],
+  ["#8FD09A", "#2E6E40"], ["#F59A7A", "#9A3B23"], ["#62CDE8", "#0F5A78"], ["#8B8F99", "#2A2C33"],
+];
+function nftHash(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+const nftBackdrop = (o) => o.backdrop || NFT_BACKDROPS[nftHash(`${o.collection || o.title}|${o.model || ""}`) % NFT_BACKDROPS.length];
+
+const nftPatterns = new Map();
+function nftPattern(emoji) {             // плитка узора: символ коллекции, едва заметный, в шахматном порядке
+  const e = emoji || "✦";
+  if (!nftPatterns.has(e)) {
+    const spots = [[18, 24, 15], [62, 14, 11], [96, 40, 15], [40, 64, 11], [12, 98, 13], [78, 92, 15], [108, 112, 11]];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">${spots.map(([x, y, f]) =>
+      `<text x="${x}" y="${y}" font-size="${f}" text-anchor="middle" opacity=".16">${e}</text>`).join("")}</svg>`;
+    nftPatterns.set(e, `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`);
+  }
+  return nftPatterns.get(e);
+}
+
+function nftArt(o, badge) {
+  const a = document.createElement("div");
+  a.className = "na" + (o.number ? " num" : "");
+  const [c1, c2] = nftBackdrop(o);
+  a.style.backgroundImage = `${nftPattern(o.emoji)}, radial-gradient(circle at 50% 40%, ${c1} 0%, ${c2} 80%)`;
+  a.append(nftIcon(o, "na-img"));
+  const tag = (text, cls) => {
+    const t = document.createElement("span");
+    t.className = "na-b " + cls;
+    t.textContent = text;
+    a.append(t);
+  };
+  if (o.number) tag(`#${fmt(o.number)}`, "l");
+  if (o.rarity != null) tag(`${o.rarity}%`, "r");
+  if (badge) tag(badge, "st");
+  return a;
+}
+
 function giftCard(gift, opts) {
   const el = document.createElement(opts && opts.button ? "button" : "div");
-  el.className = "mg";
-  const em = nftIcon(gift, "em");
-  const info = document.createElement("div");
+  el.className = "mg nc";
+  const status = gift.upgraded && gift.status === "owned" ? "✨ улучшен" : GIFT_STATUS[gift.status] || (!gift.priced ? "цена проверяется" : "");
+  el.append(nftArt(gift, status));
   const t = document.createElement("div");
-  t.className = "t";
-  t.textContent = gift.title;
+  t.className = "nc-t";
+  t.textContent = gift.collection || gift.title;
   const sub = document.createElement("div");
-  sub.className = "s";
-  const parts = [];
-  if (gift.model) parts.push(`модель «${gift.model}»` + (gift.rarity ? ` · ${gift.rarity}%` : ""));
-  if (gift.upgraded) parts.push("✨ улучшен");
-  if (GIFT_STATUS[gift.status]) parts.push(GIFT_STATUS[gift.status]);
-  else if (!gift.priced) parts.push("цена проверяется");
-  sub.textContent = parts.join(" · ");
-  info.append(t, sub);
+  sub.className = "nc-s";
+  sub.textContent = gift.model ? `«${gift.model}»` : (gift.number ? `#${gift.number}` : "");
   const v = document.createElement("span");
   v.className = "v";
   v.textContent = gift.value ? nftPrice(gift.value) : "—";
-  el.append(em, info, v);
+  el.append(t, sub, v);
   return el;
 }
 
@@ -1524,7 +1563,7 @@ const upg = { gifts: [], targets: [], chosen: new Set(), target: null, cfg: null
   mult: null, query: "" };
 const UPG_R = 84;
 const UPG_C = 2 * Math.PI * UPG_R;
-const upgTargetNft = (t) => ({ collection: t.title, model: t.model, emoji: t.emoji });
+const upgTargetNft = (t) => ({ collection: t.title, model: t.model, emoji: t.emoji, rarity: t.rarity });
 
 function upgStake() {
   return upg.gifts.filter((g) => upg.chosen.has(g.id)).reduce((a, g) => a + g.value, 0);
@@ -1617,13 +1656,12 @@ function upgRenderTargets() {
     const b = document.createElement("button");
     b.className = "upt";
     b.dataset.i = i;
-    const em = document.createElement("span");
-    em.className = "em";
-    em.append(nftIcon(upgTargetNft(t), "nft-inline big"));
+    b.classList.add("nc");
+    const em = nftArt(upgTargetNft(t));
     const ttl = document.createElement("b");
     ttl.textContent = t.title;
     const md = document.createElement("small");
-    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
+    md.textContent = `«${t.model}»`;
     const pr = document.createElement("span");
     pr.className = "pr";
     pr.textContent = nftPrice(t.price);

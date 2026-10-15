@@ -22,7 +22,7 @@ import aiohttp
 
 log = logging.getLogger(__name__)
 
-SIZE = 160                 # px — хватает для карточек на ретине
+SIZE = 320                 # px — крупные карточки NFT в стиле маркета (ретина)
 QUALITY = 80
 MEM_MAX = 3000             # превью в памяти (~8 КБ каждое)
 FAIL_TTL = 600             # не долбим источники, если картинки нет
@@ -191,7 +191,8 @@ class NftImages:
 
     async def nft(self, collection: str, model: str | None = None, number: int | None = None) -> tuple[bytes, str] | None:
         """Превью NFT: конкретный номер (Fragment) или модель (Telegram, затем changes.tg)."""
-        key = f"n|{collection}|{number}" if number else f"m|{collection}|{model}"
+        # «2» — превью 320 px (раньше хранились 160 px): старые ключи не мешают
+        key = f"n2|{collection}|{number}" if number else f"m2|{collection}|{model}"
         return await self.get(key, self._sources(collection, model, number))
 
     async def get(self, key: str, sources: list[tuple[str, Source]] | None = None) -> tuple[bytes, str] | None:
