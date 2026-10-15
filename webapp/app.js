@@ -3859,13 +3859,13 @@ function hockeyDrawField(players, layout, highlight) {
   ctx.clearRect(0, 0, c.width, c.height);
   ctx.fillStyle = "#0F0E12";
   ctx.fillRect(0, 0, c.width, c.height);
+  const ps = players || [];
+  const { zones, labels, hub, r: hubR } = layout;
   // разметка площадки — под зонами
   ctx.strokeStyle = "rgba(245,185,60,.18)";
   ctx.lineWidth = k * 0.6;
-  ctx.beginPath(); ctx.arc(50 * k, 80 * k, 12 * k, 0, 7); ctx.stroke();
+  if (!hubR) { ctx.beginPath(); ctx.arc(50 * k, 80 * k, 12 * k, 0, 7); ctx.stroke(); }
   ctx.beginPath(); ctx.moveTo(0, 80 * k); ctx.lineTo(c.width, 80 * k); ctx.stroke();
-  const ps = players || [];
-  const { zones, labels, hub } = layout;
   // заливка: свет от центра раздачи к бортам
   ps.forEach((p, i) => {
     if (!zones[i]) return;
@@ -3875,18 +3875,19 @@ function hockeyDrawField(players, layout, highlight) {
     // тёмные цвета заливаем плотнее, чтобы зона не терялась на тёмном поле
     const on = (1 + (1 - lum) * 1.6) * (highlight === undefined ? 1 : highlight === i ? 2 : 0.35);
     hockeyPath(ctx, zones[i], k);
-    const [hx, hy] = zones[i][0];
+    const [hx, hy] = hub || zones[i][0];
     const g = ctx.createRadialGradient(hx * k, hy * k, 0, hx * k, hy * k, 110 * k);
     g.addColorStop(0, bg + Math.round(Math.min(255, 70 * on)).toString(16).padStart(2, "0"));
     g.addColorStop(1, bg + Math.round(Math.min(255, 22 * on)).toString(16).padStart(2, "0"));
     ctx.fillStyle = g;
     ctx.fill();
   });
-  // границы зон: лучи из центра к бортам
+  // границы зон: лучи от круга вбрасывания к бортам
   if (ps.length > 1) {
     ctx.strokeStyle = "rgba(255,244,220,.55)";
     ctx.lineWidth = k * 0.5;
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     zones.slice(0, ps.length).forEach((z) => {
       ctx.beginPath(); ctx.moveTo(z[0][0] * k, z[0][1] * k); ctx.lineTo(z[1][0] * k, z[1][1] * k); ctx.stroke();
     });
@@ -3896,12 +3897,28 @@ function hockeyDrawField(players, layout, highlight) {
     ctx.save();
     ctx.strokeStyle = COLOR.accent;
     ctx.lineWidth = k * 1.1;
+    ctx.lineJoin = "round";
     ctx.shadowColor = COLOR.accent;
     ctx.shadowBlur = 10 * k / 3;
     ctx.stroke();
     ctx.restore();
   }
-  if (hub && ps.length > 1) {                          // центр раздачи
+  if (hub && hubR) {                                   // круг вбрасывания: отсюда вылетает шайба
+    ctx.save();
+    const glow = ctx.createRadialGradient(hub[0] * k, hub[1] * k, 0, hub[0] * k, hub[1] * k, hubR * k);
+    glow.addColorStop(0, "rgba(245,185,60,.22)");
+    glow.addColorStop(1, "rgba(245,185,60,.06)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, hubR * k, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(245,185,60,.7)";
+    ctx.lineWidth = k * 0.7;
+    ctx.shadowColor = COLOR.accent;
+    ctx.shadowBlur = 6 * k / 3;
+    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, hubR * k, 0, 7); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = "rgba(245,185,60,.35)";
+    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, 1.2 * k, 0, 7); ctx.fill();
+  } else if (hub && ps.length > 1) {                   // центр веера старых раундов
     ctx.fillStyle = COLOR.soft;
     ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, 1.3 * k, 0, 7); ctx.fill();
   }
@@ -3962,8 +3979,9 @@ function hockeyPuck(x, y, trail) {
 function hockeyDrawIdle(round) {
   if (pvp.animating) return;
   const players = round ? round.players : [];
-  hockeyDrawField(players, hockeyLayout(players, round && round.layout));
-  hockeyPuck(50, 80);
+  const layout = hockeyLayout(players, round && round.layout);
+  hockeyDrawField(players, layout);
+  hockeyPuck(...(layout.hub && layout.r ? layout.hub : [50, 80]));
 }
 
 // Шайба едет по траектории с сервера с равномерным торможением

@@ -176,37 +176,38 @@ def _inside(poly, x, y):
 
 
 def test_hockey_zones_fan_proportional():
-    field = g.HOCKEY_W * g.HOCKEY_H
+    field = g.HOCKEY_W * g.HOCKEY_H - math.pi * g.HOCKEY_HUB_R ** 2
     for seed in range(200):
         amounts = [30, 10, 60, 5, 120][: 2 + seed % 4]
         lay = g.hockey_layout(amounts, seed)
-        zones = lay["zones"]
-        assert len(zones) == len(amounts)
+        zones, hub = lay["zones"], lay["hub"]
+        assert len(zones) == len(amounts) and lay["r"] == g.HOCKEY_HUB_R
         for zone, amount, label in zip(zones, amounts, lay["labels"]):
-            assert zone[0] == lay["hub"]                                    # все зоны сходятся в центре
-            for x, y in zone[1:]:                                           # остальные вершины — на бортах
-                assert min(x, g.HOCKEY_W - x, y, g.HOCKEY_H - y) < 1e-3
-            assert _area(zone) == pytest.approx(field * amount / sum(amounts), abs=0.5)   # площадь = доля ставки
-            assert _inside(zone, *label)
-        assert zones[-1][-1] == zones[0][1]                                 # веер замкнут
+            for x, y in zone:                     # вершины — на бортах или на краю круга вбрасывания (без острых углов)
+                on_wall = min(x, g.HOCKEY_W - x, y, g.HOCKEY_H - y) < 1e-3
+                on_hub = abs(math.dist((x, y), hub) - g.HOCKEY_HUB_R) < 1e-2
+                assert on_wall or on_hub
+            assert _area(zone) == pytest.approx(field * amount / sum(amounts), abs=1.0)   # площадь = доля ставки
+            assert _inside(zone, *label) and math.dist(label, hub) > g.HOCKEY_HUB_R
+            assert not _inside(zone, *hub)                                   # круг вбрасывания не входит в зоны
+        for prev, zone in zip(zones[-1:] + zones[:-1], zones):              # веер замкнут: зоны стыкуются краями
+            assert min(math.dist(zone[0], p) for p in prev) < 1e-2 and min(math.dist(zone[1], p) for p in prev) < 1e-2
     # центр и поворот — у каждого раунда свои, в течение раунда — одни и те же
     assert g.hockey_layout([1, 1], 7)["hub"] == g.hockey_layout([5, 2, 9], 7)["hub"]
     assert len({tuple(g.hockey_layout([1, 1], r)["hub"]) for r in range(20)}) == 20
-    # треугольники и многоугольники с углами поля
-    sizes = {len(z) for r in range(50) for z in g.hockey_layout([1, 1, 1, 1, 1], r)["zones"]}
-    assert 3 in sizes and max(sizes) >= 4
 
 
 def test_hockey_shot_is_valid_path():
     for seed in range(300):
         rng = random.Random(seed)
-        zone = g.hockey_layout([10, 3, 25], seed)["zones"][seed % 3]
-        shot = g.hockey_shot(zone, rng)
+        lay = g.hockey_layout([10, 3, 25], seed)
+        zone = lay["zones"][seed % 3]
+        shot = g.hockey_shot(zone, rng, start=lay["hub"])
         pts = shot["points"]
-        assert pts[0] == list(g.HOCKEY_START)
+        assert pts[0] == lay["hub"]                             # шайба вылетает из круга вбрасывания
         tx, ty = pts[-1]
         assert _inside(zone, tx, ty)                            # останавливается в зоне победителя
-        assert 2 < tx < g.HOCKEY_W - 2 and 2 < ty < g.HOCKEY_H - 2
+        assert 0 < tx < g.HOCKEY_W and 0 < ty < g.HOCKEY_H
         # сильный удар: путь от 2.5 до 5 длин поля, и длина ломаной совпадает с заявленной
         length = sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
         assert length == pytest.approx(shot["length"], abs=0.05)
@@ -217,7 +218,7 @@ def test_hockey_shot_is_valid_path():
 
 
 def test_hockey_directions_vary():
-    zone = g.hockey_layout([1], 1)["zones"][0]                              # одна зона — всё поле
+    zone = g.hockey_layout([1], 1)["zones"][0]                              # одна зона — всё поле без круга
     angles = {round(g.hockey_shot(zone, random.Random(s))["angle"] / 45) for s in range(200)}
     assert len(angles) >= 6
 
