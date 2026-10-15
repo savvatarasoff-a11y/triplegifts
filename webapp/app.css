@@ -784,3 +784,9 @@ button { -webkit-user-select: none; user-select: none; }
   text-align: center; background: var(--surface-3); color: var(--text); border: 0; }
 .daily-card.ready .daily-go, .daily-card.on .daily-go { background: var(--grad); color: var(--on-accent); }
 .mg .acts .btn { flex: 1; }
+.daily.one { grid-template-columns: 1fr; }
+.daily.one .daily-card { flex-direction: row; align-items: center; gap: 12px; }
+.daily.one .daily-ic { margin: 0; }
+.daily.one .daily-card small { min-height: 0; }
+.daily.one .daily-go { margin: 0 0 0 auto; align-self: center; min-width: 96px; }
+.daily.one .daily-t { display: grid; gap: 2px; }

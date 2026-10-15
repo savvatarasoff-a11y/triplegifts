@@ -54,19 +54,12 @@
     <section class="screen active" id="games">
       <div class="ticker" id="ticker"><div class="ticker-track" id="ticker-track"></div></div>
 
-      <div class="daily">
+      <div class="daily one">
         <button class="daily-card" id="quest-card">
           <span class="daily-ic">📢</span>
-          <b>Квест дня</b>
-          <small id="quest-sub">подписка на канал</small>
+          <span class="daily-t"><b>Квест дня</b><small id="quest-sub">подписка на канал</small></span>
           <span class="daily-go" id="quest-go">Забрать</span>
         </button>
-        <div class="daily-card" id="bonus-card">
-          <span class="daily-ic" id="bonus-ic">🎁</span>
-          <b>Бонус дня</b>
-          <small id="bonus-sub">до 100 ★ раз в сутки</small>
-          <button class="daily-go" id="bonus-btn">Забрать</button>
-        </div>
       </div>
 
       <div class="sec-head"><span>NFT</span></div>
@@ -103,7 +96,6 @@
         <div class="plist" id="leaders"></div>
       </div>
 
-      <p class="note">Пополнение — Telegram Stars и TON, вывод — NFT-подарками. В PvP казино берёт комиссию 5%. Играйте ответственно. 18+</p>
     </section>
 
     <!-- Апгрейд NFT -->
@@ -156,7 +148,6 @@
         <input class="search" id="upg-search" placeholder="Поиск: коллекция или модель" autocomplete="off">
         <div class="upg-targets" id="upg-targets"></div>
       </div>
-      <p class="note">Ставка — ваши NFT (Кошелёк → Подарки). Шанс = стоимость ставки / цена цели × 0,9, максимум 75%. Цены — флор MRKT. Выиграли — NFT цели появится в профиле → «Мои подарки»; поставленные NFT забирает казино.</p>
     </section>
 
     <!-- Рефералы -->
@@ -184,7 +175,6 @@
           <li>Друг запускает бота по ней — он становится вашим рефералом.</li>
           <li>Каждый раз, когда он пополняет баланс, вы получаете <b><span class="ref-rate">10</span>%</b> от суммы.</li>
         </ol>
-        <p class="note left">Бонус нужно один раз отыграть ставками, как звёзды из чеков. Пригласить можно только новых игроков.</p>
       </div>
       <div class="panel">
         <div class="panel-title">Мои рефералы</div>
@@ -205,7 +195,7 @@
         <div><small>Баланс</small><b id="prof-balance">0 ★</b></div>
         <div class="prof-acts">
           <button class="btn" data-wallet="dep">Пополнить</button>
-          <button class="btn small" data-wallet="out">Вывести</button>
+          <button class="btn small" data-wallet="nft">Мои NFT</button>
         </div>
       </div>
       <div class="vip-card" id="vip-card">
@@ -228,7 +218,6 @@
       </div>
       <div class="panel" id="checks-panel">
         <div class="panel-title">🎁 Чеки</div>
-        <p class="note left">Раздайте звёзды друзьям: сумма × активации спишется с баланса, неактивированное можно вернуть.</p>
         <div class="row">
           <input id="chk-amount" type="number" inputmode="numeric" min="1" placeholder="Сумма ★">
           <input id="chk-count" type="number" inputmode="numeric" min="1" value="1" placeholder="Активаций">
@@ -268,18 +257,16 @@
 
     <!-- Кошелёк: пополнение и вывод -->
     <section class="screen" id="wallet">
-      <div class="seg three tabs" id="wallet-tabs">
-        <button data-tab="dep" class="sel">Пополнить</button><button data-tab="nft">Подарки</button><button data-tab="out">Вывести</button>
+      <div class="seg two tabs" id="wallet-tabs">
+        <button data-tab="dep" class="sel">Пополнить</button><button data-tab="nft">Мои NFT</button>
       </div>
       <div class="panel center only-ton" id="dep-ton">
         <div class="big-star">💎</div>
         <div class="panel-title">Пополнить TON</div>
         <div id="ton-dep-body">
-          <p class="note">Переведите любую сумму TON на кошелёк казино <b>с комментарием</b> — баланс пополнится сам через ~30 секунд.</p>
           <div class="kv"><small>Кошелёк</small><div class="ref-link" id="ton-wallet">—</div><button class="btn small" data-copy="ton-wallet">Копировать</button></div>
           <div class="kv"><small>Комментарий (обязательно!)</small><div class="ref-link" id="ton-comment">—</div><button class="btn small" data-copy="ton-comment">Копировать</button></div>
           <button class="btn big" id="ton-open">Открыть кошелёк</button>
-          <p class="note">Без комментария перевод не найти — пишите его точно как указано.</p>
         </div>
         <p class="note hidden" id="ton-dep-off">Пополнение TON пока не подключено.</p>
       </div>
@@ -291,33 +278,14 @@
           <input id="dep-amount" type="number" inputmode="numeric" placeholder="Своя сумма">
           <button class="btn" id="dep-btn">Пополнить</button>
         </div>
-        <p class="note">Зачисление мгновенно.</p>
       </div>
       <div class="hidden" id="tab-nft">
-        <div class="panel center">
-          <div class="big-star">🎁</div>
-          <div class="panel-title">Ставьте свои подарки</div>
-          <p class="note" id="nft-howto">Отправьте NFT или подарок в Telegram аккаунту казино — он появится здесь через несколько секунд.</p>
-          <button class="btn" id="nft-open">Отправить подарок</button>
-          <p class="note">NFT оценивается по полу маркета своей модели. Обычный NFT можно поставить в игры, продать казино за <span id="nft-rate">95</span>% или улучшить — администратор найдёт его на маркете. Улучшенный NFT можно только вывести в Telegram (<span class="nft-fee">30</span> ★). Обычные подарки сразу зачисляются звёздами.</p>
-        </div>
         <div class="panel">
-          <div class="panel-title">Мои подарки</div>
+          <div class="panel-head"><div class="panel-title">Мои NFT</div><button class="btn small ghost" id="nft-open">Отправить NFT</button></div>
           <div class="mygifts" id="mygifts"></div>
         </div>
       </div>
-      <div class="hidden" id="tab-out">
-        <div class="panel center">
-          <div class="big-star">🎁</div>
-          <div class="panel-title">Вывод — только NFT</div>
-          <p class="note">Купите NFT в магазине или выбейте в играх, затем нажмите «Улучшить» в «Мои подарки»: администратор найдёт этот подарок на маркете. Улучшенный NFT выводится в Telegram за <b><span class="nft-fee">30</span> ★</b>.</p>
-          <div class="wd-limit hidden" id="wager-limit"></div>
-          <div class="row">
-            <button class="btn" data-go="shop">Магазин NFT</button>
-            <button class="btn" data-wallet="nft">Мои подарки</button>
-          </div>
-        </div>
-      </div>
+      <div class="hidden" id="tab-out"></div>
     </section>
 
     <!-- Слоты -->
@@ -397,7 +365,6 @@
         <div class="betbox" data-bet="plinko"></div>
         <button class="btn big" id="plinko-btn">Бросить шарик</button>
       </div>
-      <p class="note">Можно бросать несколько шариков подряд.</p>
     </section>
 
     <!-- Футбол -->
@@ -405,7 +372,6 @@
       <div class="fb-leagues" id="fb-leagues"></div>
       <div class="seg two" id="fb-view"><button data-v="matches" class="sel">Матчи</button><button data-v="bets">Мои ставки</button></div>
       <div id="fb-list"></div>
-      <p class="note">Ставка на исход основного времени: П1 — победа хозяев, Х — ничья, П2 — победа гостей. Коэффициент фиксируется в момент ставки, выигрыш придёт после матча.</p>
     </section>
 
     <!-- Кирка -->
@@ -422,13 +388,11 @@
         <div class="betbox" data-bet="pickaxe"></div>
         <button class="btn big" id="pk-btn">Копать</button>
       </div>
-      <p class="note">Чем лучше кирка, тем она прочнее и тем дольше копает. Ценные руды крепче: алмаз и изумруд выдерживают 5 ударов.</p>
     </section>
 
     <!-- Кейсы -->
     <!-- Магазин NFT: покупка по цене маркета для апгрейда -->
     <section class="screen" id="shop">
-      <p class="note left">NFT по цене маркета. Купленный NFT можно поставить в апгрейд или игры, продать (−5%) или улучшить — администратор найдёт его на маркете, после этого NFT выводится в Telegram за <span class="nft-fee">30</span> ★.</p>
       <input id="shop-q" class="ab-q" placeholder="Поиск: коллекция или модель" autocomplete="off">
       <div class="shop-list" id="shop-list"></div>
     </section>
@@ -439,7 +403,6 @@
       <div class="roller tall" id="free-roller"><div class="roller-track"></div><div class="roller-pointer"></div></div>
       <div class="result" id="free-result"></div>
       <button class="btn big" id="free-btn">Открыть бесплатно</button>
-      <p class="note">Звёзды из бесплатного кейса — бонусные: их нужно один раз поставить в любой игре, прежде чем вывести.</p>
       <div class="panel"><div class="panel-title">Что внутри</div><div id="free-prizes" class="prizes"></div></div>
     </section>
 
@@ -484,7 +447,6 @@
           <button class="btn gift-btn" id="pvp-gifts" aria-label="Поставить подарки">🎁</button>
         </div>
       </div>
-      <p class="note">Шанс на победу пропорционален ставке. Победитель забирает банк за вычетом комиссии <span class="pvp-fee">5</span>%.</p>
     </section>
 
     <!-- PvP-хоккей -->
@@ -503,7 +465,6 @@
           <button class="btn gift-btn" id="hockey-gifts" aria-label="Поставить подарки">🎁</button>
         </div>
       </div>
-      <p class="note">Поле делится на зоны пропорционально ставкам. Шайба вылетает из центра в случайную сторону с сильным ударом — чья зона, где она остановится, тот и забирает банк (комиссия <span class="pvp-fee">5</span>%).</p>
     </section>
   </main>
 

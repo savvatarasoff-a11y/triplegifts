@@ -499,6 +499,7 @@ function renderBonus() {
   const b = v.bonus;
   const card = $("#bonus-card");
   const btn = $("#bonus-btn");
+  if (!card || !btn) return;                 // ежедневного бонуса больше нет
   card.classList.toggle("ready", b.allowed && b.ready);
   btn.disabled = !b.allowed || !b.ready;
   if (!b.allowed) {
@@ -974,7 +975,6 @@ function walletTab(tab) {
   $("#tab-out").classList.toggle("hidden", tab !== "out");
   $("#tab-nft").classList.toggle("hidden", tab !== "nft");
   if (tab === "dep" && state.cur === "ton") loadTonDeposit();
-  if (tab === "out") loadWithdraw();
   if (tab === "nft") loadMyGifts();
 }
 
@@ -1364,13 +1364,9 @@ async function loadMyGifts(quiet) {
     const data = await api("/api/gifts");
     myGifts.relayer = data.relayer;
     myGifts.list = data.gifts;
-    $("#nft-rate").textContent = Math.round(data.sell_rate * 100);
-    $("#nft-howto").textContent = data.relayer
-      ? `Отправьте NFT или подарок в Telegram аккаунту @${data.relayer} — он появится здесь через несколько секунд.`
-      : "Приём подарков временно недоступен.";
     $("#nft-open").classList.toggle("hidden", !data.relayer);
     box.innerHTML = "";
-    if (!data.gifts.length) box.textContent = "Пока пусто. Отправьте подарок — и он появится здесь.";
+    if (!data.gifts.length) box.innerHTML = '<div class="empty">Пусто</div>';
     data.gifts.forEach((gift) => {
       const card = giftCard(gift);
       if (gift.status === "owned") {
@@ -1655,14 +1651,11 @@ function upgRender() {
   const gbox = $("#upg-gifts");
   gbox.innerHTML = "";
   if (!upg.gifts.length) {
-    const p = document.createElement("p");
-    p.className = "note";
-    p.textContent = "У вас нет NFT. Отправьте NFT аккаунту казино (Кошелёк → Подарки) — и апгрейдьте его здесь.";
     const b = document.createElement("button");
     b.className = "btn";
-    b.textContent = "Как отправить NFT";
-    b.addEventListener("click", () => { go("wallet"); walletTab("nft"); });
-    gbox.append(p, b);
+    b.textContent = "Купить NFT в магазине";
+    b.addEventListener("click", () => go("shop"));
+    gbox.append(b);
   }
   upg.gifts.forEach((gift) => {
     const card = giftCard(gift, { button: true });
@@ -3993,7 +3986,6 @@ function bind() {
   $("#fb-sheet").addEventListener("click", (e) => { if (e.target.closest(".betbox")) setTimeout(fbWin, 0); });
   $("#pk-speed").addEventListener("click", pkSpeedToggle);
   pkSpeedLabel();
-  $("#bonus-btn").addEventListener("click", claimBonus);
   $("#rake-btn").addEventListener("click", claimRakeback);
   $$("#plinko-risk button").forEach((b) => b.addEventListener("click", () => {
     plk.risk = b.dataset.risk;

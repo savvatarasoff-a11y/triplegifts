@@ -626,7 +626,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
     @routes.post("/api/bonus")
     async def daily_bonus(request: web.Request) -> web.Response:
-        return web.json_response(await casino.daily_bonus(request[USER_ID]))
+        raise GameError("Ежедневного бонуса больше нет — забирайте награду за подписку на канал")
 
     @routes.get("/api/leaders")
     async def leaders(request: web.Request) -> web.Response:
