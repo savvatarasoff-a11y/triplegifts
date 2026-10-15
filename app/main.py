@@ -57,6 +57,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("take", "Списать баланс игрока"),
     ("give", "Начислить баланс игроку"),
     ("upgrades", "Заявки на улучшение NFT"),
+    ("clearhistory", "Очистить историю ставок"),
 ]
 
 

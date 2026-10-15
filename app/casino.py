@@ -27,6 +27,7 @@ CHECK_CODE_RE = re.compile(r"^[A-Za-z0-9]{6,32}$")
 # адрес TON: «дружелюбный» (48 символов base64url) или сырой 0:hex
 TON_ADDRESS_RE = re.compile(r"^(?:[A-Za-z0-9_-]{48}|-?[0-9]:[0-9a-fA-F]{64})$")
 LEADERS_SINCE_KEY = "leaders:since"   # сброс таблицы лидеров: ставки раньше этого момента не считаются
+HISTORY_SINCE_KEY = "history:since_id"   # очистка истории: ставки с id не больше этого больше не показываются
 USER_CHECK_MIN = 1
 USER_CHECK_MAX_ACTIVATIONS = 100
 GIFT_SELL_RATE = 0.95       # продажа NFT казино — 95% пола маркета (комиссия 5%)
@@ -228,6 +229,18 @@ class Casino:
             balance = await self._balance(c, user_id)
         return {**item, "balance": balance, "next_at": now + g.FREE_CASE_EVERY}
 
+    async def history_since(self) -> int:
+        return int(await self.db.kv_get(HISTORY_SINCE_KEY) or 0)
+
+    async def history_reset(self) -> int:
+        """Очистка истории ставок для игроков: в «Истории» игр, «Моих играх» и ленте выигрышей видны только
+        новые ставки. Сами записи остаются (статистика, бонус новичка, лидеры, админский список). Возвращает,
+        сколько ставок скрыто."""
+        row = await self.db.one("SELECT COALESCE(MAX(id), 0) m FROM bets")
+        old = await self.history_since()
+        await self.db.kv_set(HISTORY_SINCE_KEY, str(row["m"]))
+        return row["m"] - old
+
     async def leaders_reset(self) -> None:
         await self.db.kv_set(LEADERS_SINCE_KEY, str(time.time()))
 
@@ -253,8 +266,8 @@ class Casino:
         rows = await self.db.all(
             "SELECT b.game, b.bet, b.win, b.ts, b.cur, u.id, u.first_name, u.username FROM bets b "
             "LEFT JOIN users u ON u.id = b.user_id WHERE b.win >= b.bet * 5 AND b.win > 0 AND b.bet > 0 "
-            "ORDER BY b.id DESC LIMIT ?",
-            limit,
+            "AND b.id > ? ORDER BY b.id DESC LIMIT ?",
+            await self.history_since(), limit,
         )
         return [
             {"game": r["game"], "bet": r["bet"], "win": r["win"], "x": round(r["win"] / r["bet"], 2), "cur": r["cur"],
@@ -269,10 +282,11 @@ class Casino:
         if game not in self.HISTORY_GAMES:
             raise GameError("Неизвестная игра")
         mine = "AND b.user_id=? " if user_id is not None else "AND b.win > b.bet "
-        args = (game, user_id) if user_id is not None else (game,)
+        args = (game, await self.history_since()) + ((user_id,) if user_id is not None else ())
         rows = await self.db.all(
             "SELECT b.id, b.bet, b.win, b.ts, b.cur, u.id uid, u.first_name, u.username FROM bets b "
-            f"LEFT JOIN users u ON u.id = b.user_id WHERE b.game=? {mine}ORDER BY b.id DESC LIMIT ?", *args, limit)
+            f"LEFT JOIN users u ON u.id = b.user_id WHERE b.game=? AND b.id > ? {mine}ORDER BY b.id DESC LIMIT ?",
+            *args, limit)
         return [{"id": r["id"], "uid": r["uid"], "bet": r["bet"], "win": r["win"], "cur": r["cur"], "ts": r["ts"],
                  "x": round(r["win"] / r["bet"], 2) if r["bet"] else None,
                  "name": display_name({"id": r["uid"], "first_name": r["first_name"], "username": r["username"]})}

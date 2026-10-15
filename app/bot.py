@@ -229,7 +229,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/broadcast — рассылка игрокам (всем, пополнявшим, активным… или своему списку)\n"
             "/take <code>@user|ID сумма|all [ton] [причина]</code> — тихо списать баланс (абуз уязвимостей)\n"
             "/give <code>@user|ID сумма [ton] [причина]</code> — тихо вернуть/начислить\n"
-            "/upgrades — заявки на улучшение NFT (найти подарок на маркете и одобрить)"
+            "/upgrades — заявки на улучшение NFT (найти подарок на маркете и одобрить)\n"
+            "/clearhistory — очистить историю ставок у игроков (статистика остаётся)"
         )
 
     @admin.message(Command("checks"))
@@ -505,6 +506,13 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     async def dupe_clear(message: Message) -> None:
         count = await casino.demo_clear()
         await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
+
+    @admin.message(Command("clearhistory"))
+    async def clear_history(message: Message) -> None:
+        hidden = await casino.history_reset()
+        await message.answer(f"🧹 История ставок очищена: скрыто {hidden} ставок. Игроки видят только новые ставки "
+                             "(«История» в играх, «Мои игры», лента выигрышей). Статистика, лидеры и ваш список "
+                             "«Все ставки» не тронуты.")
 
     @admin.message(Command("leaders_reset"))
     async def leaders_reset(message: Message) -> None:

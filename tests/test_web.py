@@ -390,3 +390,20 @@ async def test_game_history_me_and_all(client):
     assert [h["uid"] for h in plinko] == [3]
     r = await client.get("/api/history?game=withdraw", headers=auth(3))
     assert r.status == 400
+
+
+async def test_clear_history_hides_old_bets(client):
+    casino = client.app[CASINO]
+    await client.get("/api/me", headers=auth(3))
+    async with casino.db.tx() as c:
+        await casino.db.log_bet(c, 3, "slots", 10, 100)
+    assert await casino.history_reset() == 1
+    async with casino.db.tx() as c:
+        await casino.db.log_bet(c, 3, "slots", 20, 200)
+    mine = (await (await client.get("/api/history?game=slots", headers=auth(3))).json())["items"]
+    every = (await (await client.get("/api/history?game=slots&scope=all", headers=auth(3))).json())["items"]
+    me = await (await client.get("/api/me", headers=auth(3))).json()
+    assert [h["bet"] for h in mine] == [20] == [h["bet"] for h in every] == [h["bet"] for h in me["history"]]
+    assert [w["bet"] for w in await casino.big_wins()] == [20]
+    assert len(await casino.all_bets()) == 2                       # админский список и статистика — полные
+    assert await casino.history_reset() == 1

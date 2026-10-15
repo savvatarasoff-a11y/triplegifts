@@ -488,9 +488,10 @@ class Database:
                 await self.change_balance(c, referrer, bonus, "ref_bonus", str(user_id), money.TON)
         return True
 
-    async def recent_bets(self, user_id: int, limit: int = 20) -> list[dict]:
+    async def recent_bets(self, user_id: int, limit: int = 20, since_id: int = 0) -> list[dict]:
         return await self.all(
-            "SELECT game, bet, win, ts, cur FROM bets WHERE user_id=? ORDER BY id DESC LIMIT ?", user_id, limit
+            "SELECT game, bet, win, ts, cur FROM bets WHERE user_id=? AND id > ? ORDER BY id DESC LIMIT ?",
+            user_id, since_id, limit
         )
 
     async def stats(self) -> dict[str, Any]:
