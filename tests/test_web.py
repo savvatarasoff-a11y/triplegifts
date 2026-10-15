@@ -220,13 +220,13 @@ async def test_cases_closed_shop_and_quest(client):
         "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at, test) "
         "VALUES ('demo:Lol Pop','Lol Pop','Pink','🍭',999,40,?,1)", (time.time(),))
     shop = await (await client.get("/api/shop", headers=auth(3))).json()
-    item = shop["items"][0]
-    assert item["model"] == "Pink" and shop["fee"] == 30
+    [item] = shop["items"]
+    assert (item["title"], item["model"], item["price"]) == ("Lol Pop", None, 40) and shop["fee"] == 30
     r = await client.post("/api/shop/buy", headers=auth(3), json={"model": item["id"]})
     assert r.status == 400 and "Недостаточно" in (await r.json())["error"]   # 25 ★ стартовых не хватает
     await casino.db.conn.execute("UPDATE users SET balance=100 WHERE id=3")
     r = await (await client.post("/api/shop/buy", headers=auth(3), json={"model": item["id"]})).json()
-    assert r["balance"] == 60 and r["model"] == "Pink"
+    assert r["balance"] == 60 and r["title"] == "Lol Pop"
     r = await client.post("/api/gifts/improve", headers=auth(3), json={"id": r["gift_id"]})
     assert r.status == 200                                                # «Улучшить» → заявка админу
     assert client.app[BOT].messages[-1][0] == 777 and "Улучшение NFT" in client.app[BOT].messages[-1][1]

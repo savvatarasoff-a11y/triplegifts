@@ -99,6 +99,13 @@ async def catalog_keep_fresh(db: Database) -> None:
     now = time.time()
     async with db.tx() as c:
         await c.execute("UPDATE nft_models SET price_at=? WHERE test=1 AND seen_at > ?", (now, now - CATALOG_KEEP))
+        # подарки игроков без модели (из магазина и апгрейда) стоят как самая дешёвая модель коллекции
+        await c.execute(
+            "UPDATE user_gifts SET value=(SELECT MIN(price) FROM nft_models m WHERE m.collection_name=user_gifts.collection_name "
+            "AND m.enabled=1 AND m.price > 0 AND m.seen_at > ?), priced_at=? "
+            "WHERE test=1 AND model IS NULL AND status IN ('owned','staked') AND EXISTS (SELECT 1 FROM nft_models m "
+            "WHERE m.collection_name=user_gifts.collection_name AND m.enabled=1 AND m.price > 0 AND m.seen_at > ?)",
+            (now - CATALOG_KEEP, now, now - CATALOG_KEEP))
 
 
 async def reprice_demo(db: Database, relayer: Relayer) -> None:

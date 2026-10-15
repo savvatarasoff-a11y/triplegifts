@@ -69,7 +69,8 @@ def upgrade_text(gift: dict, user: dict | None) -> str:
     return (f"⬆️ <b>Улучшение NFT</b> (№{gift['id']})\n"
             f"Игрок: {html.escape(display_name(user))}{username} (<code>{gift['user_id']}</code>)\n"
             f"Подарок: {gift.get('emoji') or '💎'} <b>{html.escape(gift['collection_name'] or '')}</b> "
-            f"«{html.escape(gift['model'] or '')}» — {gift['value']} ⭐\n"
+            + (f"«{html.escape(gift['model'])}»" if gift.get("model") else "(любая модель — самая дешёвая)")
+            + f" — {gift['value']} ⭐\n"
             "Найдите этот подарок на маркете, отправьте релейеру и нажмите «Одобрить» — NFT станет настоящим, "
             "игрок сможет его вывести. «Отклонить» — NFT останется у игрока обычным.")
 

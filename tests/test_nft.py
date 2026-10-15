@@ -343,3 +343,10 @@ async def test_catalog_from_telegram_market(env):
     await nft.catalog_keep_fresh(db)
     fresh = await db.all("SELECT model FROM nft_models WHERE price_at > ?", time.time() - nft.PRICE_MAX_AGE)
     assert sorted(r["model"] for r in fresh) == ["Frog Prince", "Gucci Pepe"]
+    # подарок игрока без модели (из магазина) стоит как самая дешёвая свежая модель коллекции
+    await db.touch_user(5, "u5", "U5")
+    await db.conn.execute("INSERT INTO user_gifts(user_id, ref, kind, collection_name, model, value, priced_at, status, "
+                          "created_at, test) VALUES (5, 'shop:1', 'nft', 'Plush Pepe', NULL, 1, 0, 'owned', 0, 1)")
+    await nft.catalog_keep_fresh(db)
+    row = await db.one("SELECT value, priced_at FROM user_gifts WHERE ref='shop:1'")
+    assert row["value"] == 420_000 and row["priced_at"] > time.time() - 5

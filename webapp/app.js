@@ -1166,6 +1166,7 @@ async function questClick() {
 // ---------- магазин NFT (для апгрейда) ----------
 
 const shop = { items: [], query: "" };
+const nftName = (o) => (o.model ? `${o.title} «${o.model}»` : o.title);   // до улучшения у подарка нет модели
 const SHOP_SHOW = 60;
 
 async function shopEnter() {
@@ -1181,7 +1182,7 @@ async function shopEnter() {
 function shopRender() {
   const box = $("#shop-list");
   const q = shop.query.trim().toLowerCase();
-  const list = shop.items.filter((t) => !q || `${t.title} ${t.model}`.toLowerCase().includes(q));
+  const list = shop.items.filter((t) => !q || t.title.toLowerCase().includes(q));
   box.innerHTML = "";
   if (!list.length) { box.innerHTML = `<div class="note">${q ? "Ничего не найдено" : "Магазин пока пуст"}</div>`; return; }
   list.slice(0, SHOP_SHOW).forEach((t) => {
@@ -1190,30 +1191,27 @@ function shopRender() {
     const ttl = document.createElement("div");
     ttl.className = "nc-t";
     ttl.textContent = t.title;
-    const md = document.createElement("div");
-    md.className = "nc-s";
-    md.textContent = `«${t.model}»`;
     const pr = document.createElement("span");
     pr.className = "nc-buy";
     pr.textContent = nftPrice(t.price);
-    b.append(nftArt(upgTargetNft(t), "", true), ttl, md, pr);
+    b.append(nftArt(upgTargetNft(t), "", true), ttl, pr);
     b.addEventListener("click", () => shopBuy(t));
     box.append(b);
   });
   if (list.length > SHOP_SHOW) {
     const more = document.createElement("div");
     more.className = "note";
-    more.textContent = `Показаны ${SHOP_SHOW} из ${list.length} — найдите нужный NFT поиском`;
+    more.textContent = `Ещё ${list.length - SHOP_SHOW} — через поиск`;
     box.append(more);
   }
 }
 
 async function shopBuy(t) {
-  const ok = await confirmAsk(`Купить ${t.title} «${t.model}» за ${fmt(t.price)} ★? NFT появится в «Мои подарки»: поставьте его в апгрейд или улучшите и выведите.`);
+  const ok = await confirmAsk(`Купить ${t.title} за ${fmt(t.price)} ★?`);
   if (!ok) return;
   await guard(async () => {
     await api("/api/shop/buy", { model: t.id });
-    toast(`${t.title} «${t.model}» — в «Мои подарки»`);
+    toast(`${t.title} — в «Мои NFT»`);
     haptic("win");
   });
 }
@@ -1467,7 +1465,7 @@ async function sellGift(gift) {
 }
 
 async function improveGift(gift) {
-  const ok = await confirmAsk(`Улучшить ${gift.title} «${gift.model}»? Администратор найдёт этот подарок на маркете. `
+  const ok = await confirmAsk(`Улучшить ${nftName(gift)}? Администратор найдёт этот подарок на маркете. `
     + `Улучшенный NFT можно только вывести в Telegram (${nftFee()} ★) — продать или поставить его будет нельзя.`);
   if (!ok) return;
   await guard(async () => {
@@ -1612,7 +1610,7 @@ function upgUpdate() {
   $("#upg-stake").textContent = stake ? nftPrice(stake) : "выберите NFT";
   if (upg.target) setNftIcon($("#upg-to-em"), { collection: upg.target.title, emoji: upg.target.emoji });   // до улучшения — подарок без модели
   else $("#upg-to-em").textContent = "💎";
-  $("#upg-target").textContent = upg.target ? `${upg.target.title} «${upg.target.model}» · ${nftPrice(upg.target.price)}` : "выберите цель";
+  $("#upg-target").textContent = upg.target ? `${nftName(upg.target)} · ${nftPrice(upg.target.price)}` : "выберите цель";
   $("#upg-from").classList.toggle("filled", !!stake);
   $("#upg-to").classList.toggle("filled", !!upg.target);
   $$("#upg-mults button").forEach((b) => b.classList.toggle("sel", Number(b.dataset.x) === upg.mult));
@@ -1644,7 +1642,7 @@ function upgRenderTargets() {
   const q = upg.query.trim().toLowerCase();
   const stake = upgStake();
   const list = upg.targets.map((t, i) => [t, i])
-    .filter(([t]) => !q || `${t.title} ${t.model}`.toLowerCase().includes(q))
+    .filter(([t]) => !q || nftName(t).toLowerCase().includes(q))
     .sort(([a], [b]) => (stake ? (a.price <= stake) - (b.price <= stake) : 0) || a.price - b.price);   // доступные цели — первыми
   $("#upg-tcount").textContent = upg.targets.length ? `· ${list.length}` : "";
   if (!upg.targets.length) tbox.innerHTML = '<div class="note">Сейчас нет NFT для апгрейда — загляните позже.</div>';
@@ -1663,14 +1661,12 @@ function upgRenderTargets() {
     const em = nftArt(upgTargetNft(t), "", true);
     const ttl = document.createElement("b");
     ttl.textContent = t.title;
-    const md = document.createElement("small");
-    md.textContent = `«${t.model}»`;
     const pr = document.createElement("span");
     pr.className = "pr";
     pr.textContent = nftPrice(t.price);
     const x = document.createElement("span");
     x.className = "x";
-    b.append(x, em, ttl, md, pr);
+    b.append(x, em, ttl, pr);
     b.addEventListener("click", () => {
       if (upg.spinning) return;
       upg.target = upg.target === t ? null : t;
@@ -1749,7 +1745,7 @@ async function upgradeGo() {
   if (!upg.target || !upg.chosen.size) return;
   const chance = upgChance();
   const target = upg.target;
-  const ok = await confirmAsk(`Поставить NFT на ${nftPrice(upgStake())} ради ${target.title} «${target.model}» `
+  const ok = await confirmAsk(`Поставить NFT на ${nftPrice(upgStake())} ради ${nftName(target)} `
     + `(${nftPrice(target.price)})? Шанс ${pct(chance)}. При проигрыше NFT уйдут казино.`);
   if (!ok) return;
   await guard(async () => {
@@ -1772,12 +1768,12 @@ async function upgradeGo() {
       res.className = "result reveal " + (r.won ? "win" : "lose");
       wheel.classList.add(r.won ? "won" : "lost");
       if (r.won) {
-        res.textContent = `Апгрейд! ${r.nft.title} «${r.nft.model}» — в «Мои подарки»: продайте, поставьте или улучшите`;
+        res.textContent = `Апгрейд! ${nftName(r.nft)} — в «Мои NFT»`;
         haptic("win");
         fxBurstAt(wheel, { count: 80, speed: 7 });
         $("#bigwin-label").textContent = "UPGRADE";
         $("#bigwin-x").textContent = fmtX(r.target / r.stake);
-        $("#bigwin-sum").textContent = `${r.nft.title} «${r.nft.model}»`;
+        $("#bigwin-sum").textContent = nftName(r.nft);
         $("#bigwin").classList.remove("hidden");
       } else {
         res.textContent = `Мимо: выпало ${fmtChance(r.roll * 100)}, нужно было меньше ${pct(r.chance)}`;
