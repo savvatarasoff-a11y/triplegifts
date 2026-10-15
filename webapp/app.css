@@ -824,3 +824,5 @@ button { -webkit-user-select: none; user-select: none; }
 .upt.nc .x:empty { display: none; }
 .upt.nc .em { display: block; height: auto; }
 .mygifts.pick .mg.nc { padding-bottom: 8px; }
+.na.plain { background: radial-gradient(circle at 50% 40%, #3A3B42 0%, #24252B 80%); }
+.na.plain .na-img { width: 68%; height: 68%; }

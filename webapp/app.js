@@ -1196,7 +1196,7 @@ function shopRender() {
     const pr = document.createElement("span");
     pr.className = "nc-buy";
     pr.textContent = nftPrice(t.price);
-    b.append(nftArt(upgTargetNft(t)), ttl, md, pr);
+    b.append(nftArt(upgTargetNft(t), "", true), ttl, md, pr);
     b.addEventListener("click", () => shopBuy(t));
     box.append(b);
   });
@@ -1360,20 +1360,23 @@ function nftPattern(emoji) {             // плитка узора: симво�
   return nftPatterns.get(e);
 }
 
-function nftArt(o, badge) {
+// plain — NFT до улучшения: как обычный подарок Telegram, серый фон и картинка подарка без модели
+function nftArt(o, badge, plain) {
   const a = document.createElement("div");
-  a.className = "na" + (o.number ? " num" : "");
-  const [c1, c2] = nftBackdrop(o);
-  a.style.backgroundImage = `${nftPattern(o.emoji)}, radial-gradient(circle at 50% 40%, ${c1} 0%, ${c2} 80%)`;
-  a.append(nftIcon(o, "na-img"));
+  a.className = "na" + (plain ? " plain" : o.number ? " num" : "");
+  if (!plain) {
+    const [c1, c2] = nftBackdrop(o);
+    a.style.backgroundImage = `${nftPattern(o.emoji)}, radial-gradient(circle at 50% 40%, ${c1} 0%, ${c2} 80%)`;
+  }
+  a.append(nftIcon(plain ? { collection: o.collection || o.title, emoji: o.emoji } : o, "na-img"));
   const tag = (text, cls) => {
     const t = document.createElement("span");
     t.className = "na-b " + cls;
     t.textContent = text;
     a.append(t);
   };
-  if (o.number) tag(`#${fmt(o.number)}`, "l");
-  if (o.rarity != null) tag(`${o.rarity}%`, "r");
+  if (o.number && !plain) tag(`#${fmt(o.number)}`, "l");
+  if (o.rarity != null && !plain) tag(`${o.rarity}%`, "r");
   if (badge) tag(badge, "st");
   return a;
 }
@@ -1382,7 +1385,7 @@ function giftCard(gift, opts) {
   const el = document.createElement(opts && opts.button ? "button" : "div");
   el.className = "mg nc";
   const status = gift.upgraded && gift.status === "owned" ? "✨ улучшен" : GIFT_STATUS[gift.status] || (!gift.priced ? "цена проверяется" : "");
-  el.append(nftArt(gift, status));
+  el.append(nftArt(gift, status, !gift.real));
   const t = document.createElement("div");
   t.className = "nc-t";
   t.textContent = gift.collection || gift.title;
@@ -1607,7 +1610,7 @@ function upgUpdate() {
   picked.slice(0, 3).forEach((g) => from.append(nftIcon(g, "nft-inline")));
   if (picked.length > 3) from.append(Object.assign(document.createElement("span"), { className: "more", textContent: `+${picked.length - 3}` }));
   $("#upg-stake").textContent = stake ? nftPrice(stake) : "выберите NFT";
-  if (upg.target) setNftIcon($("#upg-to-em"), upgTargetNft(upg.target));
+  if (upg.target) setNftIcon($("#upg-to-em"), { collection: upg.target.title, emoji: upg.target.emoji });   // до улучшения — подарок без модели
   else $("#upg-to-em").textContent = "💎";
   $("#upg-target").textContent = upg.target ? `${upg.target.title} «${upg.target.model}» · ${nftPrice(upg.target.price)}` : "выберите цель";
   $("#upg-from").classList.toggle("filled", !!stake);
@@ -1657,7 +1660,7 @@ function upgRenderTargets() {
     b.className = "upt";
     b.dataset.i = i;
     b.classList.add("nc");
-    const em = nftArt(upgTargetNft(t));
+    const em = nftArt(upgTargetNft(t), "", true);
     const ttl = document.createElement("b");
     ttl.textContent = t.title;
     const md = document.createElement("small");
