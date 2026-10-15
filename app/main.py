@@ -157,7 +157,8 @@ async def nft_loop(bot: Bot, cfg: Config, casino: Casino, relayer: Relayer, imag
 
 
 async def catalog_loop(casino: Casino, relayer: Relayer) -> None:
-    """Каталог NFT: по кругу обходит все коллекции на маркете Telegram и обновляет модели с их флором."""
+    """Каталог NFT: по кругу обходит все коллекции на маркете Telegram и обновляет их флор (один запрос на коллекцию —
+    полный круг занимает минуты, цены не успевают устареть)."""
     await asyncio.sleep(60)
     while True:
         if not relayer.ready:
@@ -176,11 +177,12 @@ async def catalog_loop(casino: Casino, relayer: Relayer) -> None:
             except Exception:
                 rate = None
             try:
-                total += await catalog_store(casino.db, name, emoji_for(name), await relayer.market_floors(name, rate))
+                total += await catalog_store(casino.db, name, emoji_for(name), await relayer.market_floor(name, rate))
             except Exception as e:
                 log.warning("Каталог: коллекция %s не обновлена: %s", name, type(e).__name__)
             await asyncio.sleep(2)
-        log.info("Каталог NFT: %s коллекций, %s моделей на продаже", len(names), total)
+        await catalog_keep_fresh(casino.db)
+        log.info("Каталог NFT: %s коллекций, у %s есть цена на маркете", len(names), total)
         await asyncio.sleep(600)
 
 

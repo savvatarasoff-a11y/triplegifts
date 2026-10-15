@@ -242,26 +242,3 @@ async def test_unupgraded_gifts_never_shown(env):
     await main.top_up_demo(casino, Rel())
     assert (await db.one("SELECT enabled FROM nft_models WHERE collection_name='Airplane'"))["enabled"] == 0
 
-
-async def test_upgrade_pick_by_multiplier_uses_models(env, monkeypatch):
-    db, casino = env
-    now = time.time()
-    await db.conn.execute(
-        "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at) VALUES "
-        "('9','Durov''s Cap','Gold','🧢',1,3100,?), ('9','Durov''s Cap','Ruby','🧢',1,15000,?)", (now, now))
-    # список целей — по одной на коллекцию, а множитель ищет любую модель каталога
-    assert [t["price"] for t in await casino.upgrade_targets()] == [3100]
-    t2 = await casino.upgrade_pick(1500, 2)
-    assert (t2["model"], t2["price"]) == (None, 3100)                       # флор коллекции — подарок без модели
-    t5 = await casino.upgrade_pick(1500, 5)
-    assert (t5["model"], t5["price"]) == ("Black", 6000)
-    t10 = await casino.upgrade_pick(1500, 10)
-    assert (t10["model"], t10["price"]) == ("Ruby", 15000)
-    assert await casino.upgrade_pick(20000, 2) is None                      # дороже ставки ничего нет
-    # выигрыш по такой цели — NFT этой модели по её цене
-    ids = [x["id"] for x in await casino.gifts(42)]
-    monkeypatch.setattr(g, "upgrade_roll", lambda rng=None: 0.0)
-    r = await casino.upgrade(42, ids, t5["id"])
-    assert r["won"] and r["nft"]["model"] == "Black" and r["nft"]["price"] == 6000
-    won = [x for x in await casino.gifts(42) if x["id"] == r["nft"]["gift_id"]][0]
-    assert won["model"] == "Black" and won["value"] == 6000

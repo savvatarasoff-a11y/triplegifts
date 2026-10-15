@@ -313,6 +313,47 @@ class Relayer:
                 out.append({"model": a.name, "rarity": rarity, "price": min(prices)})
         return out
 
+    async def market_floor(self, collection: str, ton_rate: float | None = None) -> list[dict[str, Any]]:
+        """Флор коллекции на маркете Telegram одним запросом: самый дешёвый лот (цена в звёздах; лот только
+        за TON — по курсу ton_rate) и его модель. Список из одного элемента или пустой."""
+        import asyncio
+        from telethon.errors import FloodWaitError
+        from telethon.tl.functions.payments import GetResaleStarGiftsRequest
+        from telethon.tl.types import StarGiftAttributeModel, StarGiftAttributeRarity, StarsAmount, StarsTonAmount
+        from .nftimg import norm
+        if not self.ready:
+            raise RelayerError("Релейер не подключён")
+        gift = (await self._gifts_by_title()).get(norm(collection))
+        if gift is None:
+            return []
+        res = None
+        for _ in range(3):
+            try:
+                res = await self.client(GetResaleStarGiftsRequest(gift_id=gift.id, offset="", limit=30,
+                                                                  sort_by_price=True))
+                break
+            except FloodWaitError as e:                  # Telegram просит подождать — ждём и повторяем
+                await asyncio.sleep(min(e.seconds, 300) + 1)
+        best = None
+        for g in getattr(res, "gifts", None) or []:
+            for amount in getattr(g, "resell_amount", None) or []:
+                if isinstance(amount, StarsAmount) and amount.amount > 0:
+                    price = amount.amount
+                elif isinstance(amount, StarsTonAmount) and amount.amount > 0 and ton_rate:
+                    price = int(amount.amount / 1e9 * ton_rate)
+                else:
+                    continue
+                if best is None or price < best[0]:
+                    best = (price, g)
+        if best is None:
+            return []
+        price, g = best
+        model = next((a for a in getattr(g, "attributes", None) or [] if isinstance(a, StarGiftAttributeModel)), None)
+        if model is None:
+            return []
+        rarity = model.rarity.permille / 10 if isinstance(getattr(model, "rarity", None), StarGiftAttributeRarity) else None
+        return [{"model": model.name, "rarity": rarity, "price": price}]
+
     async def model_image(self, collection: str, model: str | None) -> bytes | None:
         """Картинка модели: стикер модели из Telegram (или самого подарка, если улучшений ещё нет) в PNG."""
         if not self.ready or not collection:

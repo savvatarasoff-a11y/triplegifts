@@ -350,3 +350,39 @@ async def test_catalog_from_telegram_market(env):
     await nft.catalog_keep_fresh(db)
     row = await db.one("SELECT value, priced_at FROM user_gifts WHERE ref='shop:1'")
     assert row["value"] == 420_000 and row["priced_at"] > time.time() - 5
+
+
+async def test_market_floor_one_request_per_collection(env):
+    """Флор коллекции — один запрос: самый дешёвый лот (TON-лот по курсу тоже считается) и его модель."""
+    from telethon.tl import types as T
+    from telethon.tl.functions.payments import GetResaleStarGiftsRequest, GetStarGiftsRequest
+
+    def doc(i):
+        return T.Document(id=i, access_hash=0, file_reference=b"", date=None, mime_type="", size=0, dc_id=1, attributes=[])
+
+    def lot(i, model, amounts):
+        return T.StarGiftUnique(id=i, gift_id=100, title="Plush Pepe", slug="x", num=1, availability_issued=1,
+                                availability_total=1, resell_amount=amounts, attributes=[
+                                    T.StarGiftAttributeModel(name=model, document=doc(i),
+                                                             rarity=T.StarGiftAttributeRarity(permille=15))])
+    calls = []
+
+    class Client:
+        async def __call__(self, req):
+            if isinstance(req, GetStarGiftsRequest):
+                return T.payments.StarGifts(hash=0, gifts=[
+                    T.StarGift(id=100, sticker=doc(9), stars=1, convert_stars=1, title="Plush Pepe", upgrade_stars=10)],
+                    chats=[], users=[])
+            assert isinstance(req, GetResaleStarGiftsRequest) and req.sort_by_price and not req.attributes
+            calls.append(req)
+            return T.payments.ResaleStarGifts(count=3, chats=[], users=[], gifts=[
+                lot(1, "Frog", [T.StarsAmount(amount=500_000, nanos=0)]),
+                lot(2, "Toad", [T.StarsTonAmount(amount=1_000 * 10**9)]),           # 1000 TON × 200 = 200 000 ⭐
+                lot(3, "Gucci", [T.StarsAmount(amount=900_000, nanos=0)])])
+
+    _, db = env
+    relayer = Relayer(db, "1:x")
+    relayer.client = Client()
+    assert await relayer.market_floor("Plush Pepe", ton_rate=200) == [{"model": "Toad", "rarity": 1.5, "price": 200_000}]
+    assert await relayer.market_floor("Plush Pepe") == [{"model": "Frog", "rarity": 1.5, "price": 500_000}]
+    assert await relayer.market_floor("Unknown") == [] and len(calls) == 2
