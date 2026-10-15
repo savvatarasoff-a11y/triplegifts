@@ -22,9 +22,9 @@ import aiohttp
 
 log = logging.getLogger(__name__)
 
-SIZE = 320                 # px — крупные карточки NFT в стиле маркета (ретина)
+SIZE = 780                 # px — крупные карточки NFT в стиле маркета, чётко на любом экране
 QUALITY = 80
-MEM_MAX = 3000             # превью в памяти (~8 КБ каждое)
+MEM_MAX = 600              # превью в памяти (780 px — ~40–90 КБ каждое)
 FAIL_TTL = 600             # не долбим источники, если картинки нет
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=15)
 MAX_SOURCE = 5 * 1024 * 1024
@@ -69,7 +69,7 @@ def render_tgs(data: bytes) -> bytes | None:
     try:
         raw = gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
         anim = LottieAnimation.from_data(raw.decode("utf-8"))
-        img = anim.render_pillow_frame(frame_num=0, width=SIZE * 2, height=SIZE * 2)
+        img = anim.render_pillow_frame(frame_num=0, width=SIZE, height=SIZE)
         out = io.BytesIO()
         img.save(out, "PNG")
         return out.getvalue()
@@ -191,8 +191,8 @@ class NftImages:
 
     async def nft(self, collection: str, model: str | None = None, number: int | None = None) -> tuple[bytes, str] | None:
         """Превью NFT: конкретный номер (Fragment) или модель (Telegram, затем changes.tg)."""
-        # «2» — превью 320 px (раньше хранились 160 px): старые ключи не мешают
-        key = f"n2|{collection}|{number}" if number else f"m2|{collection}|{model}"
+        # «3» — превью 780 px (раньше хранились 160 и 320 px): старые ключи не мешают
+        key = f"n3|{collection}|{number}" if number else f"m3|{collection}|{model}"
         return await self.get(key, self._sources(collection, model, number))
 
     async def get(self, key: str, sources: list[tuple[str, Source]] | None = None) -> tuple[bytes, str] | None:

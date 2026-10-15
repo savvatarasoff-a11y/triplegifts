@@ -95,6 +95,8 @@ async def prewarm_images(casino: Casino, images: NftImages) -> None:
     rows = await casino.db.all(
         "SELECT collection_name, model FROM nft_models WHERE enabled=1 AND price > 0 ORDER BY price DESC LIMIT 400")
     items = [(r["collection_name"], r["model"]) for r in rows if r["collection_name"] and r["model"]]
+    # картинки самих подарков (без модели) — их показывают NFT до улучшения в магазине и апгрейде
+    items += [(name, None) for name in dict.fromkeys(r["collection_name"] for r in rows if r["collection_name"])]
     ready = await images.prewarm(items)
     log.info("Картинки NFT: готово %s из %s (источники: %s)", ready, len(items), images.stats)
 

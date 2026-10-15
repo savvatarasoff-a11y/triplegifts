@@ -30,10 +30,12 @@ def test_source_urls():
 
 
 def test_shrink_to_small_webp():
-    data, ctype = nftimg.shrink(png())
+    data, ctype = nftimg.shrink(png(1600))
     assert ctype == "image/webp"
     with Image.open(io.BytesIO(data)) as im:
         assert max(im.size) == nftimg.SIZE
+    with Image.open(io.BytesIO(nftimg.shrink(png(300))[0])) as im:
+        assert max(im.size) == 300                                   # маленькую не растягиваем
     assert nftimg.shrink(b"not an image") == (b"not an image", "image/jpeg")
 
 
