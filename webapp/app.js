@@ -3231,13 +3231,13 @@ function crashButton(s) {
   btn.classList.remove("cash");
   btn.disabled = false;
   if (phase === "betting") {
-    btn.textContent = my ? `Ставка ${money(my.bet, my.cur)} принята` : "Поставить";
+    btn.textContent = my ? `Ставка ${money(my.bet, my.cur)} ✓` : "Поставить";
     btn.disabled = !!my;
   } else if (phase === "running") {
     if (my && !my.cashout) btn.classList.add("cash");
-    else { btn.textContent = my ? `Забрали ${fmtX(my.cashout)}` : "Ждём следующий раунд"; btn.disabled = true; }
+    else { btn.textContent = my ? `Забрали ${fmtX(my.cashout)}` : "Ждём раунд"; btn.disabled = true; }
   } else {
-    btn.textContent = "Ждём следующий раунд";
+    btn.textContent = "Ждём раунд";
     btn.disabled = true;
   }
 }
