@@ -3677,6 +3677,11 @@ async function pvpRefresh() {
   try {
     const s = await api(`/api/pvp?game=${game}&cur=${pvp.cur}`);
     if (pvp.game !== game) return;
+    if (s.elsewhere && !pvp.animating) {        // своя ставка — в раунде другой валюты: показываем его
+      toast(`Ваша ставка — в раунде на ${s.elsewhere === "ton" ? "TON" : "★"}`);
+      setCurrency(s.elsewhere);
+      return;
+    }
     document.querySelectorAll(".pvp-fee").forEach((el) => { el.textContent = Math.round(s.commission * 100); });
     const round = s.round;
     pvp.round = round;
@@ -3730,6 +3735,11 @@ function pvpLeave() {
 }
 
 async function pvpBet(game, gifts) {
+  // NFT ставятся только в раунд на звёзды — показываем его, иначе ставка «пропадает» с экрана TON-раунда
+  if (gifts && gifts.length && state.cur !== "stars") {
+    setCurrency("stars");
+    toast("NFT играют в раунде на звёзды");
+  }
   await guard(async () => {
     const body = gifts && gifts.length ? { amount: 0, game, gifts, cur: "stars" }
       : { amount: getBet(game === "hockey" ? "hockey" : "pvp"), game, cur: state.cur };

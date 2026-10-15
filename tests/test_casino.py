@@ -606,3 +606,49 @@ async def test_newbie_bonus_first_three_games(casino, monkeypatch):
     wins = [b["win"] for b in await db.all("SELECT win FROM bets WHERE user_id=1 ORDER BY id")]
     assert wins == [210, 0, 315, 300]                                   # в истории — выигрыш вместе с бонусом
     assert (await casino.wager_status(1))["left"] == 0                  # отыгрывать не нужно
+
+
+async def test_pvp_tick_isolates_broken_round(casino, monkeypatch):
+    for u in (1, 2):
+        await fund(casino, u, 200)
+        await casino.pvp_bet(u, 50, "roulette")
+        await casino.pvp_bet(u, 50, "hockey")
+    await casino.db.conn.execute("UPDATE pvp_rounds SET ends_at=?", (time.time() - 1,))
+
+    def boom(*a, **k):
+        raise RuntimeError("сбой")
+
+    monkeypatch.setattr(g, "hockey_layout", boom)
+    res = await casino.pvp_tick()                                    # хоккей упал — рулетка всё равно доиграна
+    assert [r["game"] for r in res] == ["roulette"]
+    rounds = {r["game"]: r["status"] for r in await casino.db.all("SELECT game, status FROM pvp_rounds")}
+    assert rounds == {"roulette": "done", "hockey": "open"}
+
+
+async def test_release_stuck_gifts(casino):
+    db = casino.db
+    await db.touch_user(1, "u1", "U1")
+    now = time.time()
+    await db.conn.execute("INSERT INTO pvp_rounds(id, game, created_at, status) VALUES (5, 'hockey', ?, 'refunded'), "
+                          "(6, 'hockey', ?, 'open')", (now, now))
+    await db.conn.execute("INSERT INTO crash_rounds(id, point, status, betting_until, created_at) VALUES "
+                          "(9, 2.0, 'running', ?, ?)", (now, now))
+    for gid, round_id in ((1, 5), (2, 6), (3, None), (4, None)):
+        await db.conn.execute(
+            "INSERT INTO user_gifts(id, user_id, ref, kind, collection_name, value, priced_at, status, round_id, "
+            "created_at, test) VALUES (?, 1, ?, 'nft', 'Lol Pop', 40, ?, 'staked', ?, ?, 1)",
+            (gid, f"g{gid}", now, round_id, now))
+    await db.conn.execute("INSERT INTO crash_bets(round_id, user_id, bet, placed_at, cur, gifts) VALUES "
+                          "(9, 1, 40, ?, 'stars', ?)", (now, json.dumps([{"id": 4, "value": 40}])))
+    assert await casino.release_stuck_gifts() == 2
+    status = {r["id"]: r["status"] for r in await db.all("SELECT id, status FROM user_gifts")}
+    # закрытый раунд PvP и NFT вне ставок — вернулись; открытый раунд и идущий краш — не трогаем
+    assert status == {1: "owned", 2: "staked", 3: "owned", 4: "staked"}
+
+
+async def test_pvp_state_points_to_bet_in_other_currency(casino):
+    await fund(casino, 1, 200)
+    await casino.pvp_bet(1, 50, "hockey")
+    assert (await casino.pvp_state(1, "hockey", "ton"))["elsewhere"] == "stars"
+    assert (await casino.pvp_state(1, "hockey", "stars"))["elsewhere"] is None
+    assert (await casino.pvp_state(2, "hockey", "ton"))["elsewhere"] is None

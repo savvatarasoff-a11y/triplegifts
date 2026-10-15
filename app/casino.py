@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import time
@@ -14,6 +15,8 @@ from .config import Config
 from .db import REFERRAL_RATE, Database, InsufficientFunds
 from .games import logic as g
 from .nft import PRICE_MAX_AGE as NFT_PRICE_MAX_AGE
+
+log = logging.getLogger(__name__)
 
 CRASH_BETTING_SECONDS = 7   # приём ставок перед стартом ракеты
 CRASH_PAUSE_SECONDS = 3     # пауза после краша
@@ -48,6 +51,7 @@ class Casino:
         self.cfg = cfg
         # курс «звёзд за 1 TON» — для кейсов и NFT-джекпота в TON; подключается в main (MRKT)
         self.ton_rate: Callable[[], Awaitable[float | None]] | None = None
+        self._stuck_checked = 0.0
 
     # ---------- общее ----------
 
@@ -1447,66 +1451,98 @@ class Casino:
         return await self.pvp_state(user_id, game, cur)
 
     async def pvp_tick(self) -> list[dict]:
-        """Завершает раунды, у которых вышло время. Возвращает итоги для уведомлений."""
+        """Завершает раунды, у которых вышло время. Возвращает итоги для уведомлений.
+        Каждый раунд — в своей транзакции: сбой одного раунда не держит остальные (и NFT, поставленные в них)."""
         now = time.time()
         results = []
-        async with self.db.tx() as c:
-            async with c.execute("SELECT * FROM pvp_rounds WHERE status='open'") as q:
-                rounds = [dict(r) for r in await q.fetchall()]
-            for rnd in rounds:
-                async with c.execute(
-                    "SELECT user_id, amount, joined FROM pvp_bets WHERE round_id=? ORDER BY joined", (rnd["id"],)
-                ) as q:
-                    bets = [dict(r) for r in await q.fetchall()]
-                if rnd["ends_at"] and now >= rnd["ends_at"] and len(bets) >= 2:
-                    winner, ticket = g.pvp_pick_winner([(b["user_id"], b["amount"]) for b in bets])
-                    pot = sum(b["amount"] for b in bets)
-                    prize = g.pvp_payout(pot)
-                    # Подарки из банка целиком уходят победителю, звёзды — остаток выигрыша.
-                    # Демо-NFT игроку не передаются: их стоимость он получает звёздами.
-                    if winner not in self.cfg.admin_ids:
-                        await c.execute("UPDATE user_gifts SET status='lost', round_id=NULL "
-                                        "WHERE round_id=? AND status='staked' AND test=1", (rnd["id"],))
-                    async with c.execute("SELECT COALESCE(SUM(value),0) v FROM user_gifts WHERE round_id=? "
-                                         "AND status='staked'", (rnd["id"],)) as q:
-                        gifts_value = (await q.fetchone())["v"]
-                    await c.execute("UPDATE user_gifts SET user_id=?, status='owned', round_id=NULL "
-                                    "WHERE round_id=? AND status='staked'", (winner, rnd["id"]))
-                    stars_prize = max(0, prize - gifts_value)
-                    detail = None
-                    if rnd["game"] == "hockey":
-                        layout = g.hockey_layout([b["amount"] for b in bets], rnd["id"])
-                        winner_idx = next(i for i, b in enumerate(bets) if b["user_id"] == winner)
-                        detail = {**layout, **g.hockey_shot(layout["zones"][winner_idx], start=layout["hub"])}
-                    if stars_prize:
-                        await self.db.change_balance(c, winner, stars_prize, "pvp_win", str(rnd["id"]), rnd["cur"])
-                    prize = stars_prize + gifts_value
-                    for b in bets:
-                        win = prize if b["user_id"] == winner else 0
-                        game_name = "hockey" if rnd["game"] == "hockey" else "pvp"
-                        await self.db.log_bet(c, b["user_id"], game_name, b["amount"], win,
-                                              json.dumps({"round": rnd["id"]}), rnd["cur"])
-                    await c.execute(
-                        "UPDATE pvp_rounds SET status='done', winner_id=?, pot=?, payout=?, ticket=?, finished_at=?, "
-                        "detail=? WHERE id=?",
-                        (winner, pot, prize, ticket, now, json.dumps(detail) if detail else None, rnd["id"]),
-                    )
-                    results.append({"round": rnd["id"], "game": rnd["game"], "winner": winner, "pot": pot,
-                                    "payout": prize, "stars": stars_prize, "gifts_value": gifts_value, "cur": rnd["cur"],
-                                    "players": [b["user_id"] for b in bets]})
-                elif len(bets) == 1 and not rnd["ends_at"] and now - bets[0]["joined"] > PVP_IDLE_REFUND:
-                    async with c.execute("SELECT COALESCE(SUM(value),0) v FROM user_gifts WHERE round_id=? "
-                                         "AND status='staked'", (rnd["id"],)) as q:
-                        gifts_value = (await q.fetchone())["v"]
-                    await c.execute("UPDATE user_gifts SET status='owned', round_id=NULL "
-                                    "WHERE round_id=? AND status='staked'", (rnd["id"],))
-                    if bets[0]["amount"] > gifts_value:
-                        await self.db.change_balance(c, bets[0]["user_id"], bets[0]["amount"] - gifts_value,
-                                                     "pvp_refund", str(rnd["id"]), rnd["cur"])
-                    await c.execute(
-                        "UPDATE pvp_rounds SET status='refunded', finished_at=? WHERE id=?", (now, rnd["id"])
-                    )
+        for rnd in await self.db.all("SELECT * FROM pvp_rounds WHERE status='open'"):
+            try:
+                async with self.db.tx() as c:
+                    async with c.execute("SELECT status FROM pvp_rounds WHERE id=?", (rnd["id"],)) as q:
+                        if (await q.fetchone())["status"] != "open":
+                            continue
+                    async with c.execute(
+                        "SELECT user_id, amount, joined FROM pvp_bets WHERE round_id=? ORDER BY joined", (rnd["id"],)
+                    ) as q:
+                        bets = [dict(r) for r in await q.fetchall()]
+                    if rnd["ends_at"] and now >= rnd["ends_at"] and len(bets) >= 2:
+                        winner, ticket = g.pvp_pick_winner([(b["user_id"], b["amount"]) for b in bets])
+                        pot = sum(b["amount"] for b in bets)
+                        prize = g.pvp_payout(pot)
+                        # Подарки из банка целиком уходят победителю, звёзды — остаток выигрыша.
+                        # Демо-NFT игроку не передаются: их стоимость он получает звёздами.
+                        if winner not in self.cfg.admin_ids:
+                            await c.execute("UPDATE user_gifts SET status='lost', round_id=NULL "
+                                            "WHERE round_id=? AND status='staked' AND test=1", (rnd["id"],))
+                        async with c.execute("SELECT COALESCE(SUM(value),0) v FROM user_gifts WHERE round_id=? "
+                                             "AND status='staked'", (rnd["id"],)) as q:
+                            gifts_value = (await q.fetchone())["v"]
+                        await c.execute("UPDATE user_gifts SET user_id=?, status='owned', round_id=NULL "
+                                        "WHERE round_id=? AND status='staked'", (winner, rnd["id"]))
+                        stars_prize = max(0, prize - gifts_value)
+                        detail = None
+                        if rnd["game"] == "hockey":
+                            layout = g.hockey_layout([b["amount"] for b in bets], rnd["id"])
+                            winner_idx = next(i for i, b in enumerate(bets) if b["user_id"] == winner)
+                            detail = {**layout, **g.hockey_shot(layout["zones"][winner_idx], start=layout["hub"])}
+                        if stars_prize:
+                            await self.db.change_balance(c, winner, stars_prize, "pvp_win", str(rnd["id"]), rnd["cur"])
+                        prize = stars_prize + gifts_value
+                        for b in bets:
+                            win = prize if b["user_id"] == winner else 0
+                            game_name = "hockey" if rnd["game"] == "hockey" else "pvp"
+                            await self.db.log_bet(c, b["user_id"], game_name, b["amount"], win,
+                                                  json.dumps({"round": rnd["id"]}), rnd["cur"])
+                        await c.execute(
+                            "UPDATE pvp_rounds SET status='done', winner_id=?, pot=?, payout=?, ticket=?, finished_at=?, "
+                            "detail=? WHERE id=?",
+                            (winner, pot, prize, ticket, now, json.dumps(detail) if detail else None, rnd["id"]),
+                        )
+                        results.append({"round": rnd["id"], "game": rnd["game"], "winner": winner, "pot": pot,
+                                        "payout": prize, "stars": stars_prize, "gifts_value": gifts_value, "cur": rnd["cur"],
+                                        "players": [b["user_id"] for b in bets]})
+                    elif len(bets) == 1 and not rnd["ends_at"] and now - bets[0]["joined"] > PVP_IDLE_REFUND:
+                        async with c.execute("SELECT COALESCE(SUM(value),0) v FROM user_gifts WHERE round_id=? "
+                                             "AND status='staked'", (rnd["id"],)) as q:
+                            gifts_value = (await q.fetchone())["v"]
+                        await c.execute("UPDATE user_gifts SET status='owned', round_id=NULL "
+                                        "WHERE round_id=? AND status='staked'", (rnd["id"],))
+                        if bets[0]["amount"] > gifts_value:
+                            await self.db.change_balance(c, bets[0]["user_id"], bets[0]["amount"] - gifts_value,
+                                                         "pvp_refund", str(rnd["id"]), rnd["cur"])
+                        await c.execute(
+                            "UPDATE pvp_rounds SET status='refunded', finished_at=? WHERE id=?", (now, rnd["id"])
+                        )
+            except Exception:
+                log.exception("PvP: не удалось завершить раунд %s", rnd["id"])
+        if now - self._stuck_checked > 60:
+            self._stuck_checked = now
+            try:
+                await self.release_stuck_gifts()
+            except Exception:
+                log.exception("Не удалось проверить зависшие NFT")
         return results
+
+    async def release_stuck_gifts(self) -> int:
+        """Страховка от сбоев: NFT «в игре» без живой ставки возвращаются владельцу.
+        PvP — раунд, куда поставлен NFT, уже закрыт; краш — NFT нет ни в одной ставке идущего раунда."""
+        async with self.db.tx() as c:
+            res = await c.execute(
+                "UPDATE user_gifts SET status='owned', round_id=NULL WHERE status='staked' AND round_id IS NOT NULL "
+                "AND round_id NOT IN (SELECT id FROM pvp_rounds WHERE status='open')")
+            freed = res.rowcount
+            async with c.execute("SELECT b.gifts FROM crash_bets b JOIN crash_rounds r ON r.id = b.round_id "
+                                 "WHERE r.status != 'crashed' AND b.gifts IS NOT NULL") as q:
+                active = {x["id"] for row in await q.fetchall() for x in json.loads(row["gifts"])}
+            async with c.execute("SELECT id FROM user_gifts WHERE status='staked' AND round_id IS NULL") as q:
+                orphans = [r["id"] for r in await q.fetchall() if r["id"] not in active]
+            if orphans:
+                await c.execute(f"UPDATE user_gifts SET status='owned' WHERE status='staked' AND round_id IS NULL "
+                                f"AND id IN ({','.join('?' * len(orphans))})", orphans)
+            freed += len(orphans)
+        if freed:
+            log.warning("Вернули владельцам зависшие NFT: %s", freed)
+        return freed
 
     async def _round_players(self, round_id: int) -> list[dict]:
         rows = await self.db.all(
@@ -1552,5 +1588,10 @@ class Casino:
                 "winner": winner, "players": players, "finished_ago": now - (last["finished_at"] or now),
                 "detail": json.loads(last["detail"]) if last["detail"] else None,
             }
+        # ставка игрока в открытом раунде этой игры в другой валюте — экран переключится на неё
+        other = money.TON if cur == money.STARS else money.STARS
+        elsewhere = user_id is not None and (current is None or not current["my_bet"]) and await self.db.one(
+            "SELECT 1 FROM pvp_bets b JOIN pvp_rounds r ON r.id = b.round_id "
+            "WHERE r.status='open' AND r.game=? AND r.cur=? AND b.user_id=?", game, other, user_id) is not None
         return {"game": game, "cur": cur, "round": current, "last": last_view, "commission": g.PVP_COMMISSION,
-                "round_seconds": PVP_ROUND_SECONDS}
+                "round_seconds": PVP_ROUND_SECONDS, "elsewhere": other if elsewhere else None}
