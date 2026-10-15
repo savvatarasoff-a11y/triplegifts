@@ -1510,11 +1510,29 @@ function upgPick(mult) {
   return ok.reduce((best, t) => (Math.abs(Math.log(t.price / want)) < Math.abs(Math.log(best.price / want)) ? t : best));
 }
 
+// Сразу — ближайшая коллекция из списка, затем сервер подбирает точнее: любую модель каталога по цене
+let upgPickSeq = 0;
+function upgClearResult() {
+  if (upg.spinning) return;
+  $("#upg-result").className = "result";
+  $("#upg-result").textContent = "";
+  $("#upg-wheel").classList.remove("won", "lost");
+}
+
 function upgApplyMult() {
+  upgClearResult();
   if (!upg.mult) return;
-  const t = upgPick(upg.mult);
-  upg.target = t;
-  if (!t && upgStake()) toast("Под такой множитель целей нет", true);
+  const stake = upgStake(), mult = upg.mult, seq = ++upgPickSeq;
+  upg.target = upgPick(mult);
+  if (!stake) return;
+  api(`/api/upgrade/pick?stake=${stake}&x=${mult}`).then(({ target }) => {
+    if (seq !== upgPickSeq || upg.mult !== mult || upgStake() !== stake || upg.spinning) return;
+    upg.target = target || null;
+    if (!target) toast("Под такой множитель целей нет", true);
+    else if (Math.abs(Math.log(target.price / stake / mult)) > 0.35) toast(`Ближайшая цель — ${fmtX(target.price / stake)}`);
+    upgRenderTargets();
+    upgUpdate();
+  }).catch(() => {});
 }
 
 function upgUpdate() {
@@ -1593,6 +1611,7 @@ function upgRenderTargets() {
       if (upg.spinning) return;
       upg.target = upg.target === t ? null : t;
       upg.mult = null;
+      upgClearResult();
       haptic();
       upgUpdate();
     });
@@ -1648,8 +1667,7 @@ function upgSelectAll() {
 
 async function upgradeEnter() {
   $("#upg-arc").style.strokeDasharray = UPG_C;
-  $("#upg-result").textContent = "";
-  $("#upg-wheel").classList.remove("won", "lost");
+  upgClearResult();
   try {
     const data = await api("/api/upgrade");
     upg.cfg = data;

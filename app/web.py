@@ -650,6 +650,14 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             "edge": g.UPGRADE_EDGE, "max_chance": g.UPGRADE_MAX_CHANCE, "min_chance": g.UPGRADE_MIN_CHANCE,
         })
 
+    @routes.get("/api/upgrade/pick")
+    async def upgrade_pick(request: web.Request) -> web.Response:
+        try:
+            stake, mult = int(request.query.get("stake", "")), float(request.query.get("x", ""))
+        except ValueError:
+            raise GameError("Неверный запрос") from None
+        return web.json_response({"target": await casino.upgrade_pick(stake, mult)})
+
     @routes.post("/api/upgrade")
     async def upgrade(request: web.Request) -> web.Response:
         data = await body(request)

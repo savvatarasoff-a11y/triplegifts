@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import secrets
 import time
@@ -1198,6 +1199,47 @@ class Casino:
         return [{"id": r["id"], "title": r["collection_name"], "model": None, "emoji": r["emoji"] or "💎",
                  "rarity": None, "price": r["price"]} for r in rows]
 
+    async def _upgrade_target(self, c: aiosqlite.Connection, model_id: Any) -> dict | None:
+        """Цель апгрейда — конкретная модель каталога по её цене. Если это самая дешёвая модель коллекции,
+        выигрыш — подарок коллекции без модели (модель выберет админ при улучшении)."""
+        if not isinstance(model_id, int) or isinstance(model_id, bool):
+            return None
+        async with c.execute(f"SELECT * FROM nft_models WHERE id=? AND {self.AVAILABLE_MODELS}",
+                             (model_id, time.time() - NFT_PRICE_MAX_AGE)) as q:
+            row = await q.fetchone()
+        if not row:
+            return None
+        row = dict(row)
+        floor = await self._collection_floor(c, model_id)
+        if floor and row["price"] <= floor["price"]:
+            row["model"] = None
+        return row
+
+    async def upgrade_pick(self, stake: Any, mult: Any) -> dict | None:
+        """Подбор цели под множитель: модель из всего каталога с ценой ближе всего к ставке × mult
+        (дороже ставки и с шансом не меньше минимального)."""
+        if not isinstance(stake, int) or isinstance(stake, bool) or stake <= 0:
+            raise GameError("Выберите свои NFT")
+        if not isinstance(mult, (int, float)) or isinstance(mult, bool) or not 1 < mult <= 1000:
+            raise GameError("Неверный множитель")
+        want = stake * mult
+        top = stake * (1 - g.UPGRADE_EDGE) / g.UPGRADE_MIN_CHANCE
+        fresh = time.time() - NFT_PRICE_MAX_AGE
+        base = f"SELECT * FROM nft_models WHERE {self.AVAILABLE_MODELS} AND price > ? AND price <= ? "
+        rows = [r for r in (
+            await self.db.one(base + "AND price >= ? ORDER BY price LIMIT 1", fresh, stake, top, want),
+            await self.db.one(base + "AND price < ? ORDER BY price DESC LIMIT 1", fresh, stake, top, want),
+        ) if r]
+        if not rows:
+            return None
+        best = min(rows, key=lambda r: abs(math.log(r["price"] / want)))
+        async with self.db.tx() as c:
+            row = await self._upgrade_target(c, best["id"])
+        if not row:
+            return None
+        return {"id": row["id"], "title": row["collection_name"], "model": row["model"],
+                "emoji": row["emoji"] or "💎", "rarity": None, "price": row["price"]}
+
     async def _collection_floor(self, c: aiosqlite.Connection, model_id: Any) -> dict | None:
         """Самая дешёвая доступная модель той же коллекции, что и model_id (по ней — цена подарка)."""
         if not isinstance(model_id, int) or isinstance(model_id, bool):
@@ -1374,7 +1416,7 @@ class Casino:
         if not isinstance(target_id, int) or isinstance(target_id, bool):
             raise GameError("Выберите цель апгрейда")
         async with self.db.tx() as c:
-            target = await self._collection_floor(c, target_id)      # цель — подарок коллекции по флору
+            target = await self._upgrade_target(c, target_id)
             if not target:
                 raise GameError("Этой цели сейчас нет — выберите другую")
             staked = await self._take_gifts(c, user_id, gift_ids, None)
@@ -1392,11 +1434,12 @@ class Casino:
                                       "roll": round(roll, 4), "gifts": gift_ids}
             nft = None
             if won:                                     # выигрыш — обычный NFT в инвентарь
-                gift_id = await self._demo_gift(c, user_id, target["collection_name"], None, target["emoji"], None,
+                gift_id = await self._demo_gift(c, user_id, target["collection_name"], target["model"],
+                                                target["emoji"], target["rarity"] if target["model"] else None,
                                                 target["price"])
                 detail["gift"] = gift_id
                 nft = {"win_id": None, "gift_id": gift_id, "title": target["collection_name"],
-                       "model": None, "emoji": target["emoji"] or "💎", "price": target["price"]}
+                       "model": target["model"], "emoji": target["emoji"] or "💎", "price": target["price"]}
             await self.db.log_bet(c, user_id, "upgrade", stake, target["price"] if won else 0,
                                   json.dumps(detail, ensure_ascii=False))
         return {"won": won, "chance": chance, "roll": roll, "stake": stake, "target": target["price"], "nft": nft}
