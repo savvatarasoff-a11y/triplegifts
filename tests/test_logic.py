@@ -163,22 +163,50 @@ def test_payout_floors():
     assert g.payout(5, 0.0) == 0
 
 
-def test_hockey_zones_proportional():
-    zones = g.hockey_zones([30, 10, 60])
-    sizes = [y1 - y0 for y0, y1 in zones]
-    assert sizes == pytest.approx([48, 16, 96])
-    assert zones[0][0] == 0 and zones[-1][1] == g.HOCKEY_H
+def _area(poly):
+    return abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1]))) / 2
+
+
+def _inside(poly, x, y):
+    hit = False
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            hit = not hit
+    return hit
+
+
+def test_hockey_zones_fan_proportional():
+    field = g.HOCKEY_W * g.HOCKEY_H
+    for seed in range(200):
+        amounts = [30, 10, 60, 5, 120][: 2 + seed % 4]
+        lay = g.hockey_layout(amounts, seed)
+        zones = lay["zones"]
+        assert len(zones) == len(amounts)
+        for zone, amount, label in zip(zones, amounts, lay["labels"]):
+            assert zone[0] == lay["hub"]                                    # все зоны сходятся в центре
+            for x, y in zone[1:]:                                           # остальные вершины — на бортах
+                assert min(x, g.HOCKEY_W - x, y, g.HOCKEY_H - y) < 1e-3
+            assert _area(zone) == pytest.approx(field * amount / sum(amounts), abs=0.5)   # площадь = доля ставки
+            assert _inside(zone, *label)
+        assert zones[-1][-1] == zones[0][1]                                 # веер замкнут
+    # центр и поворот — у каждого раунда свои, в течение раунда — одни и те же
+    assert g.hockey_layout([1, 1], 7)["hub"] == g.hockey_layout([5, 2, 9], 7)["hub"]
+    assert len({tuple(g.hockey_layout([1, 1], r)["hub"]) for r in range(20)}) == 20
+    # треугольники и многоугольники с углами поля
+    sizes = {len(z) for r in range(50) for z in g.hockey_layout([1, 1, 1, 1, 1], r)["zones"]}
+    assert 3 in sizes and max(sizes) >= 4
 
 
 def test_hockey_shot_is_valid_path():
     for seed in range(300):
         rng = random.Random(seed)
-        zone = (20.0, 45.0)
+        zone = g.hockey_layout([10, 3, 25], seed)["zones"][seed % 3]
         shot = g.hockey_shot(zone, rng)
         pts = shot["points"]
         assert pts[0] == list(g.HOCKEY_START)
         tx, ty = pts[-1]
-        assert 20 <= ty <= 45 and 0 <= tx <= g.HOCKEY_W        # останавливается в зоне победителя
+        assert _inside(zone, tx, ty)                            # останавливается в зоне победителя
+        assert 2 < tx < g.HOCKEY_W - 2 and 2 < ty < g.HOCKEY_H - 2
         # сильный удар: путь не короче 1.5 длины поля, и длина ломаной совпадает с заявленной
         length = sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
         assert length == pytest.approx(shot["length"], abs=0.05)
@@ -189,7 +217,8 @@ def test_hockey_shot_is_valid_path():
 
 
 def test_hockey_directions_vary():
-    angles = {round(g.hockey_shot((0, 160), random.Random(s))["angle"] / 45) for s in range(200)}
+    zone = g.hockey_layout([1], 1)["zones"][0]                              # одна зона — всё поле
+    angles = {round(g.hockey_shot(zone, random.Random(s))["angle"] / 45) for s in range(200)}
     assert len(angles) >= 6
 
 

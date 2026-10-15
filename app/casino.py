@@ -1458,9 +1458,9 @@ class Casino:
                     stars_prize = max(0, prize - gifts_value)
                     detail = None
                     if rnd["game"] == "hockey":
-                        zones = g.hockey_zones([b["amount"] for b in bets])
+                        layout = g.hockey_layout([b["amount"] for b in bets], rnd["id"])
                         winner_idx = next(i for i, b in enumerate(bets) if b["user_id"] == winner)
-                        detail = {"zones": [list(z) for z in zones], **g.hockey_shot(zones[winner_idx])}
+                        detail = {**layout, **g.hockey_shot(layout["zones"][winner_idx])}
                     if stars_prize:
                         await self.db.change_balance(c, winner, stars_prize, "pvp_win", str(rnd["id"]), rnd["cur"])
                     prize = stars_prize + gifts_value
@@ -1521,6 +1521,8 @@ class Casino:
                 "players": players,
                 "my_bet": next((p["amount"] for p in players if p["id"] == user_id), 0),
             }
+            if game == "hockey" and players:          # зоны игроков видны ещё до удара
+                current["layout"] = g.hockey_layout([p["amount"] for p in players], rnd["id"])
         last = await self.db.one(
             "SELECT * FROM pvp_rounds WHERE status='done' AND game=? AND cur=? ORDER BY id DESC LIMIT 1", game, cur
         )

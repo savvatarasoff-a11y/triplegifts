@@ -397,16 +397,19 @@ async def test_pvp_hockey_round(casino, monkeypatch):
     await casino.pvp_bet(2, 10, "roulette")              # раунды разных игр не смешиваются
     s = await casino.pvp_bet(2, 50, "hockey")
     assert s["game"] == "hockey" and s["round"]["pot"] == 80
+    idle = s["round"]["layout"]                             # зоны видны до удара
+    assert len(idle["zones"]) == 2
     assert (await casino.pvp_state(1, "roulette"))["round"]["pot"] == 10
     await casino.db.conn.execute("UPDATE pvp_rounds SET ends_at=? WHERE game='hockey'", (time.time() - 1,))
     monkeypatch.setattr(g, "pvp_pick_winner", lambda bets, rng=None: (2, 40))
     res = await casino.pvp_tick()
     assert [r["game"] for r in res] == ["hockey"]
     last = (await casino.pvp_state(1, "hockey"))["last"]
-    zones = last["detail"]["zones"]
-    assert zones == [[0.0, 60.0], [60.0, 160.0]]          # 30 и 50 из 80
-    tx, ty = last["detail"]["points"][-1]
-    assert 60 <= ty <= 160                                 # шайба в зоне победителя
+    detail = last["detail"]
+    assert detail["zones"] == idle["zones"] and detail["hub"] == idle["hub"]   # те же зоны, что до удара
+    areas = [abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(z, z[1:] + z[:1]))) / 2 for z in detail["zones"]]
+    assert areas == pytest.approx([16000 * 30 / 80, 16000 * 50 / 80], abs=0.5)   # 30 и 50 из 80
+    assert len(detail["points"]) >= 2
     assert await balance(casino, 2) == 100 - 10 - 50 + 76
     with pytest.raises(GameError):
         await casino.pvp_bet(1, 5, "chess")

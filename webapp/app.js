@@ -3731,66 +3731,111 @@ function hockeyCtx() {
   return { c, ctx, k, dpr };
 }
 
-// Зоны игроков из текущего раунда: доли по ставкам (как на сервере)
-function zonesFromPlayers(players) {
+// Раскладка зон: веер многоугольников из центра раздачи (с сервера). Старые раунды — горизонтальные полосы.
+function hockeyLayout(players, d) {
+  if (d && d.zones && d.zones.length && Array.isArray(d.zones[0][0])) return d;
   const total = players.reduce((a, p) => a + p.amount, 0) || 1;
   let y = 0;
-  return players.map((p, i) => {
-    const y1 = i === players.length - 1 ? FIELD[1] : y + FIELD[1] * p.amount / total;
-    const z = [y, y1];
+  const zones = [], labels = [];
+  players.forEach((p, i) => {
+    const y1 = d && d.zones && d.zones[i] ? d.zones[i][1] : (i === players.length - 1 ? FIELD[1] : y + FIELD[1] * p.amount / total);
+    zones.push([[FIELD[0] / 2, y], [0, y], [0, y1], [FIELD[0], y1], [FIELD[0], y]]);
+    labels.push([FIELD[0] / 2, (y + y1) / 2]);
     y = y1;
-    return z;
   });
+  return { zones, labels, hub: null };
 }
 
-function hockeyDrawField(players, zones, highlight) {
+function hockeyPath(ctx, zone, k) {
+  ctx.beginPath();
+  zone.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
+  ctx.closePath();
+}
+
+function hockeyDrawField(players, layout, highlight) {
   const { ctx, k, c } = hockeyCtx();
   ctx.clearRect(0, 0, c.width, c.height);
   ctx.fillStyle = "#0F0E12";
   ctx.fillRect(0, 0, c.width, c.height);
-  (players || []).forEach((p, i) => {
-    const [y0, y1] = zones[i];
-    const [bg] = pvpColorFor(p.id);
-    ctx.globalAlpha = highlight === undefined ? 0.22 : highlight === i ? 0.5 : 0.08;
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, y0 * k, c.width, (y1 - y0) * k);
-    ctx.globalAlpha = 1;
-    if (i > 0) {
-      ctx.strokeStyle = "rgba(237,233,254,.35)";
-      ctx.setLineDash([6 * k / 4, 6 * k / 4]);
-      ctx.lineWidth = k * 0.4;
-      ctx.beginPath(); ctx.moveTo(0, y0 * k); ctx.lineTo(c.width, y0 * k); ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    // аватар и имя в зоне
-    const h = (y1 - y0) * k;
-    if (h > 14 * k / 2) {
-      const r = Math.min(7 * k, h * 0.3);
-      const cx = 12 * k, cy = (y0 + y1) / 2 * k;
-      const img = avatarImage(p.id);
-      ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.closePath();
-      ctx.fillStyle = bg; ctx.fill();
-      if (img.ok) { ctx.clip(); ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2); }
-      else {
-        ctx.fillStyle = pvpColorFor(p.id)[1];
-        ctx.font = `800 ${r * 0.8}px Manrope, sans-serif`;
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(initials(p.name), cx, cy);
-      }
-      ctx.restore();
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = `800 ${Math.min(4.2 * k, h * 0.22)}px Manrope, sans-serif`;
-      ctx.textAlign = "left"; ctx.textBaseline = "middle";
-      ctx.fillText(`${p.name} · ${p.chance}%`, cx + r + 3 * k, cy);
-    }
-  });
-  // разметка площадки
-  ctx.strokeStyle = "rgba(139,92,246,.55)";
+  // разметка площадки — под зонами
+  ctx.strokeStyle = "rgba(245,185,60,.18)";
   ctx.lineWidth = k * 0.6;
   ctx.beginPath(); ctx.arc(50 * k, 80 * k, 12 * k, 0, 7); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(0, 80 * k); ctx.lineTo(c.width, 80 * k); ctx.stroke();
-  ctx.strokeStyle = "rgba(237,233,254,.25)";
+  const ps = players || [];
+  const { zones, labels, hub } = layout;
+  // заливка: свет от центра раздачи к бортам
+  ps.forEach((p, i) => {
+    if (!zones[i]) return;
+    const [bg] = pvpColorFor(p.id);
+    const n = parseInt(bg.slice(1), 16);
+    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    // тёмные цвета заливаем плотнее, чтобы зона не терялась на тёмном поле
+    const on = (1 + (1 - lum) * 1.6) * (highlight === undefined ? 1 : highlight === i ? 2 : 0.35);
+    hockeyPath(ctx, zones[i], k);
+    const [hx, hy] = zones[i][0];
+    const g = ctx.createRadialGradient(hx * k, hy * k, 0, hx * k, hy * k, 110 * k);
+    g.addColorStop(0, bg + Math.round(Math.min(255, 70 * on)).toString(16).padStart(2, "0"));
+    g.addColorStop(1, bg + Math.round(Math.min(255, 22 * on)).toString(16).padStart(2, "0"));
+    ctx.fillStyle = g;
+    ctx.fill();
+  });
+  // границы зон: лучи из центра к бортам
+  if (ps.length > 1) {
+    ctx.strokeStyle = "rgba(255,244,220,.55)";
+    ctx.lineWidth = k * 0.5;
+    ctx.lineCap = "round";
+    zones.slice(0, ps.length).forEach((z) => {
+      ctx.beginPath(); ctx.moveTo(z[0][0] * k, z[0][1] * k); ctx.lineTo(z[1][0] * k, z[1][1] * k); ctx.stroke();
+    });
+  }
+  if (highlight !== undefined && zones[highlight]) {   // победная зона — золотая обводка
+    hockeyPath(ctx, zones[highlight], k);
+    ctx.save();
+    ctx.strokeStyle = COLOR.accent;
+    ctx.lineWidth = k * 1.1;
+    ctx.shadowColor = COLOR.accent;
+    ctx.shadowBlur = 10 * k / 3;
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (hub && ps.length > 1) {                          // центр раздачи
+    ctx.fillStyle = COLOR.soft;
+    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, 1.3 * k, 0, 7); ctx.fill();
+  }
+  // аватар и имя в середине зоны
+  ps.forEach((p, i) => {
+    if (!labels[i]) return;
+    const share = p.chance / 100;
+    const r = Math.max(3.2, Math.min(7.5, Math.sqrt(share * FIELD[0] * FIELD[1]) * 0.11)) * k;
+    const [lx, ly] = labels[i];
+    const cx = lx * k, cy = ly * k;
+    const [bg, fg] = pvpColorFor(p.id);
+    const img = avatarImage(p.id);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.closePath();
+    ctx.fillStyle = bg; ctx.fill();
+    ctx.lineWidth = k * 0.5; ctx.strokeStyle = "rgba(10,10,13,.8)"; ctx.stroke();
+    if (img.ok) { ctx.clip(); ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2); }
+    else {
+      ctx.fillStyle = fg;
+      ctx.font = `800 ${r * 0.8}px Manrope, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(initials(p.name), cx, cy);
+    }
+    ctx.restore();
+    if (share >= 0.06) {
+      ctx.save();
+      ctx.font = `800 ${3.6 * k}px Manrope, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 3 * k;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillText(`${p.name} · ${fmtChance(p.chance)}`, cx, cy + r + 1.5 * k);
+      ctx.restore();
+    }
+  });
+  ctx.strokeStyle = "rgba(255,244,220,.25)";
+  ctx.lineWidth = k * 0.6;
   ctx.strokeRect(k, k, c.width - 2 * k, c.height - 2 * k);
 }
 
@@ -3815,7 +3860,7 @@ function hockeyPuck(x, y, trail) {
 function hockeyDrawIdle(round) {
   if (pvp.animating) return;
   const players = round ? round.players : [];
-  hockeyDrawField(players, zonesFromPlayers(players));
+  hockeyDrawField(players, hockeyLayout(players, round && round.layout));
   hockeyPuck(50, 80);
 }
 
@@ -3823,7 +3868,7 @@ function hockeyDrawIdle(round) {
 async function hockeyAnimate(last) {
   const d = last.detail;
   const players = last.players;
-  const zones = d.zones;
+  const zones = hockeyLayout(players, d);
   const pts = d.points;
   const seg = [];
   let total = 0;

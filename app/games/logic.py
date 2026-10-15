@@ -646,7 +646,10 @@ def upgrade_roll(rng: random.Random = RNG) -> float:
 
 
 # ---------------- PvP-хоккей ----------------
-# Поле 100×160 делится на горизонтальные зоны игроков пропорционально ставкам.
+# Поле 100×160 делится на зоны игроков «веером»: из случайной точки поля (центра раздачи) к бортам идут
+# лучи, каждая зона — треугольник или многоугольник, захватывающий углы поля. Площадь зоны строго
+# пропорциональна ставке. Центр и поворот веера постоянны в течение раунда (зависят от его номера),
+# поэтому зоны не прыгают, когда заходят новые игроки — только меняют размер.
 # Победитель выбирается так же, как в PvP-рулетке (шанс = доля ставки), затем строится
 # честная траектория удара: шайба летит из центра по прямой, отражаясь от бортов,
 # и останавливается в случайной точке зоны победителя. Длина пути — не меньше 1.5 длины поля.
@@ -656,17 +659,75 @@ HOCKEY_H = 160.0
 HOCKEY_START = (50.0, 80.0)
 HOCKEY_MIN_PATH = 1.5 * HOCKEY_H
 HOCKEY_MAX_PATH = 3.5 * HOCKEY_H
+HOCKEY_PERIM = 2 * (HOCKEY_W + HOCKEY_H)
+# борта по часовой стрелке от левого верхнего угла: (начало на периметре, длина, угол-начало, направление)
+_HOCKEY_SIDES = (
+    (0.0, HOCKEY_W, (0.0, 0.0), (1.0, 0.0)),
+    (HOCKEY_W, HOCKEY_H, (HOCKEY_W, 0.0), (0.0, 1.0)),
+    (HOCKEY_W + HOCKEY_H, HOCKEY_W, (HOCKEY_W, HOCKEY_H), (-1.0, 0.0)),
+    (2 * HOCKEY_W + HOCKEY_H, HOCKEY_H, (0.0, HOCKEY_H), (0.0, -1.0)),
+)
 
 
-def hockey_zones(amounts: Sequence[int]) -> list[tuple[float, float]]:
-    """Границы зон по вертикали (y0, y1) в порядке ставок."""
-    total = sum(amounts)
-    zones, y = [], 0.0
+def _hockey_side(s: float) -> int:
+    s %= HOCKEY_PERIM
+    return next(i for i, (start, length, _, _) in enumerate(_HOCKEY_SIDES) if s < start + length)
+
+
+def _hockey_point(s: float) -> tuple[float, float]:
+    """Точка борта на расстоянии s по периметру (по часовой от левого верхнего угла)."""
+    start, _, (x0, y0), (dx, dy) = _HOCKEY_SIDES[_hockey_side(s)]
+    t = s % HOCKEY_PERIM - start
+    return (x0 + dx * t, y0 + dy * t)
+
+
+def _hockey_walk(hub: tuple[float, float], s: float, area: float) -> float:
+    """Идём по борту от s, пока треугольник «центр — пройденный кусок борта» не наберёт нужную площадь."""
+    hx, hy = hub
+    density = (hy / 2, (HOCKEY_W - hx) / 2, (HOCKEY_H - hy) / 2, hx / 2)   # площадь на единицу длины борта
+    while True:
+        i = _hockey_side(s)
+        start, length, _, _ = _HOCKEY_SIDES[i]
+        rest = start + length - s % HOCKEY_PERIM
+        if area <= rest * density[i]:
+            return s + area / density[i]
+        area -= rest * density[i]
+        s += rest
+
+
+def hockey_layout(amounts: Sequence[int], seed: Any = None) -> dict:
+    """Зоны игроков в порядке ставок: многоугольники [центр, точка борта, углы…, точка борта]."""
+    rng = random.Random(f"hockey-{seed}")
+    hub = (round(rng.uniform(28.0, 72.0), 3), round(rng.uniform(45.0, 115.0), 3))
+    s0 = rng.uniform(0.0, HOCKEY_PERIM)
+    total = sum(amounts) or 1
+    field = HOCKEY_W * HOCKEY_H
+    zones, labels, s = [], [], s0
     for i, amount in enumerate(amounts):
-        y1 = HOCKEY_H if i == len(amounts) - 1 else y + HOCKEY_H * amount / total
-        zones.append((y, y1))
-        y = y1
-    return zones
+        area = field * amount / total
+        end = s0 + HOCKEY_PERIM if i == len(amounts) - 1 else _hockey_walk(hub, s, area)
+        corners = sorted(k * HOCKEY_PERIM + start for k in range(int(s // HOCKEY_PERIM), int(end // HOCKEY_PERIM) + 1)
+                         for start, _, _, _ in _HOCKEY_SIDES)
+        rim = [s] + [c for c in corners if s < c < end] + [end]
+        zones.append([list(hub)] + [[round(v, 3) for v in _hockey_point(x)] for x in rim])
+        mx, my = _hockey_point(_hockey_walk(hub, s, area / 2))       # подпись — на середине зоны по площади
+        labels.append([round(hub[0] + (mx - hub[0]) * 0.6, 3), round(hub[1] + (my - hub[1]) * 0.6, 3)])
+        s = end
+    return {"hub": list(hub), "zones": zones, "labels": labels}
+
+
+def hockey_target(zone: Sequence[Sequence[float]], rng: random.Random = RNG) -> tuple[float, float]:
+    """Случайная точка внутри зоны, не у самой границы: зона режется на треугольники от центра."""
+    hub, rim = zone[0], zone[1:]
+    tris = [(hub, a, b) for a, b in zip(rim, rim[1:])]
+    areas = [abs((a[0] - h[0]) * (b[1] - h[1]) - (b[0] - h[0]) * (a[1] - h[1])) / 2 for h, a, b in tris]
+    h, a, b = rng.choices(tris, weights=areas)[0]
+    u, v = rng.random(), rng.random()
+    if u + v > 1:
+        u, v = 1 - u, 1 - v
+    px, py = h[0] + u * (a[0] - h[0]) + v * (b[0] - h[0]), h[1] + u * (a[1] - h[1]) + v * (b[1] - h[1])
+    cx, cy = (h[0] + a[0] + b[0]) / 3, (h[1] + a[1] + b[1]) / 3
+    return cx + (px - cx) * 0.7, cy + (py - cy) * 0.7                 # ближе к середине треугольника
 
 
 def _fold(v: float, size: float) -> float:
@@ -680,11 +741,8 @@ def _image(t: float, k: int, size: float) -> float:
     return k * size + (t if k % 2 == 0 else size - t)
 
 
-def hockey_shot(zone: tuple[float, float], rng: random.Random = RNG) -> dict:
-    y0, y1 = zone
-    margin = min(3.0, (y1 - y0) / 4)
-    tx = rng.uniform(6.0, HOCKEY_W - 6.0)
-    ty = rng.uniform(y0 + margin, y1 - margin)
+def hockey_shot(zone: Sequence[Sequence[float]], rng: random.Random = RNG) -> dict:
+    tx, ty = hockey_target(zone, rng)
     sx, sy = HOCKEY_START
     candidates = []
     for i in range(-6, 7):
