@@ -406,11 +406,10 @@ async def test_pvp_hockey_round(casino, monkeypatch):
     assert [r["game"] for r in res] == ["hockey"]
     last = (await casino.pvp_state(1, "hockey"))["last"]
     detail = last["detail"]
-    assert detail["zones"] == idle["zones"] and detail["hub"] == idle["hub"]   # те же зоны, что до удара
+    assert detail["zones"] == idle["zones"]   # те же зоны, что до удара
     areas = [abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(z, z[1:] + z[:1]))) / 2 for z in detail["zones"]]
-    field = 16000 - 3.14159265 * g.HOCKEY_HUB_R ** 2
-    assert areas == pytest.approx([field * 30 / 80, field * 50 / 80], abs=1.0)   # 30 и 50 из 80
-    assert detail["points"][0] == detail["hub"]            # шайба вылетает из круга вбрасывания
+    field = g.HOCKEY_W * g.HOCKEY_H
+    assert areas == pytest.approx([field * 30 / 80, field * 50 / 80], abs=0.1)   # 30 и 50 из 80
     assert len(detail["points"]) >= 2
     assert await balance(casino, 2) == 100 - 10 - 50 + 76
     with pytest.raises(GameError):

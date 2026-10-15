@@ -282,9 +282,9 @@ main { padding: 0 16px; max-width: 520px; margin: 0 auto; }
 .phase-bar { position: absolute; left: 14px; right: 14px; bottom: 12px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .06); overflow: hidden; }
 .phase-bar i { display: block; height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 
-.rink { margin-top: 12px; border-radius: 26px; overflow: hidden; border: 2px solid rgba(245, 185, 60, .5);
-  box-shadow: 0 20px 50px -20px var(--accent-glow); background: #0F0E12; }
-#hockey-canvas { display: block; width: 100%; aspect-ratio: 100 / 160; max-height: 62vh; margin: 0 auto; }
+.rink { margin-top: 12px; border-radius: 18px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .08);
+  background: #1A1820; }
+#hockey-canvas { display: block; width: 100%; aspect-ratio: 130 / 100; margin: 0 auto; }
 
 .strip.spin { filter: blur(2.5px); }
 .reel { transition: box-shadow .2s; }

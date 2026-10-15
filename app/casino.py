@@ -1484,7 +1484,7 @@ class Casino:
                         if rnd["game"] == "hockey":
                             layout = g.hockey_layout([b["amount"] for b in bets], rnd["id"])
                             winner_idx = next(i for i, b in enumerate(bets) if b["user_id"] == winner)
-                            detail = {**layout, **g.hockey_shot(layout["zones"][winner_idx], start=layout["hub"])}
+                            detail = {**layout, **g.hockey_shot(layout["zones"][winner_idx])}
                         if stars_prize:
                             await self.db.change_balance(c, winner, stars_prize, "pvp_win", str(rnd["id"]), rnd["cur"])
                         prize = stars_prize + gifts_value

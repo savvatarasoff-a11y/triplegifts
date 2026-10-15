@@ -3845,175 +3845,197 @@ function histSoon(delay) {
 }
 
 // ---------- хоккей: поле и шайба ----------
+// Горизонтальное поле, зоны — сочные цвета и прямые разрезы, аватарки — скруглённые квадраты.
+// У шайбы ярлык с ником хозяина зоны под ней; под конец камера приближается к шайбе.
 
-const FIELD = [100, 160];
+const FIELD = [130, 100];
+const HOCKEY_COLORS = ["#8E2BA3", "#3E9B4F", "#A08E3A", "#2F6FD6", "#C2413B", "#1F9C9A", "#D9781E", "#6B4BD8",
+  "#B8327A", "#5E8F2E"];
+const CONFETTI = ["#FF4D6D", "#FFD166", "#06D6A0", "#4CC9F0", "#B5179E", "#FFFFFF", "#F5B93C"];
 
 function hockeyCtx() {
   const c = $("#hockey-canvas");
   const dpr = window.devicePixelRatio || 1;
   const w = Math.round(c.clientWidth * dpr);
   if (c.width !== w) { c.width = w; c.height = Math.round(w * FIELD[1] / FIELD[0]); }
-  const ctx = c.getContext("2d");
-  const k = c.width / FIELD[0];
-  return { c, ctx, k, dpr };
+  return { c, ctx: c.getContext("2d"), k: c.width / FIELD[0] };
 }
 
-// Раскладка зон: веер многоугольников из центра раздачи (с сервера). Старые раунды — горизонтальные полосы.
+// Зоны с сервера; если их нет (или раунд со старым полем) — простые вертикальные полосы по ставкам
 function hockeyLayout(players, d) {
-  if (d && d.zones && d.zones.length && Array.isArray(d.zones[0][0])) return d;
+  if (d && d.zones && d.zones.length === players.length && d.field && d.field[0] === FIELD[0]
+    && d.field[1] === FIELD[1]) return d;
   const total = players.reduce((a, p) => a + p.amount, 0) || 1;
-  let y = 0;
+  let x = 0;
   const zones = [], labels = [];
   players.forEach((p, i) => {
-    const y1 = d && d.zones && d.zones[i] ? d.zones[i][1] : (i === players.length - 1 ? FIELD[1] : y + FIELD[1] * p.amount / total);
-    zones.push([[FIELD[0] / 2, y], [0, y], [0, y1], [FIELD[0], y1], [FIELD[0], y]]);
-    labels.push([FIELD[0] / 2, (y + y1) / 2]);
-    y = y1;
+    const x1 = i === players.length - 1 ? FIELD[0] : x + FIELD[0] * p.amount / total;
+    zones.push([[x, 0], [x1, 0], [x1, FIELD[1]], [x, FIELD[1]]]);
+    labels.push([(x + x1) / 2, FIELD[1] / 2]);
+    x = x1;
   });
-  return { zones, labels, hub: null };
+  return { zones, labels };
 }
 
-function hockeyPath(ctx, zone, k) {
+function hockeyInside(poly, x, y) {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [x1, y1] = poly[i], [x2, y2] = poly[j];
+    if ((y1 > y) !== (y2 > y) && x < x1 + (y - y1) * (x2 - x1) / (y2 - y1)) hit = !hit;
+  }
+  return hit;
+}
+
+function hockeyPath(ctx, zone) {
   ctx.beginPath();
-  zone.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
+  zone.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
   ctx.closePath();
 }
 
-function hockeyDrawField(players, layout, highlight) {
-  const { ctx, k, c } = hockeyCtx();
-  ctx.clearRect(0, 0, c.width, c.height);
-  ctx.fillStyle = "#0F0E12";
-  ctx.fillRect(0, 0, c.width, c.height);
-  const ps = players || [];
-  const { zones, labels, hub, r: hubR } = layout;
-  // разметка площадки — под зонами
-  ctx.strokeStyle = "rgba(245,185,60,.18)";
-  ctx.lineWidth = k * 0.6;
-  if (!hubR) { ctx.beginPath(); ctx.arc(50 * k, 80 * k, 12 * k, 0, 7); ctx.stroke(); }
-  ctx.beginPath(); ctx.moveTo(0, 80 * k); ctx.lineTo(c.width, 80 * k); ctx.stroke();
-  // заливка: свет от центра раздачи к бортам
-  ps.forEach((p, i) => {
-    if (!zones[i]) return;
-    const [bg] = pvpColorFor(p.id);
-    const n = parseInt(bg.slice(1), 16);
-    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
-    // тёмные цвета заливаем плотнее, чтобы зона не терялась на тёмном поле
-    const on = (1 + (1 - lum) * 1.6) * (highlight === undefined ? 1 : highlight === i ? 2 : 0.35);
-    hockeyPath(ctx, zones[i], k);
-    const [hx, hy] = hub || zones[i][0];
-    const g = ctx.createRadialGradient(hx * k, hy * k, 0, hx * k, hy * k, 110 * k);
-    g.addColorStop(0, bg + Math.round(Math.min(255, 70 * on)).toString(16).padStart(2, "0"));
-    g.addColorStop(1, bg + Math.round(Math.min(255, 22 * on)).toString(16).padStart(2, "0"));
-    ctx.fillStyle = g;
-    ctx.fill();
-  });
-  // границы зон: лучи от круга вбрасывания к бортам
-  if (ps.length > 1) {
-    ctx.strokeStyle = "rgba(255,244,220,.55)";
-    ctx.lineWidth = k * 0.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    zones.slice(0, ps.length).forEach((z) => {
-      ctx.beginPath(); ctx.moveTo(z[0][0] * k, z[0][1] * k); ctx.lineTo(z[1][0] * k, z[1][1] * k); ctx.stroke();
-    });
-  }
-  if (highlight !== undefined && zones[highlight]) {   // победная зона — золотая обводка
-    hockeyPath(ctx, zones[highlight], k);
-    ctx.save();
-    ctx.strokeStyle = COLOR.accent;
-    ctx.lineWidth = k * 1.1;
-    ctx.lineJoin = "round";
-    ctx.shadowColor = COLOR.accent;
-    ctx.shadowBlur = 10 * k / 3;
-    ctx.stroke();
-    ctx.restore();
-  }
-  if (hub && hubR) {                                   // круг вбрасывания: отсюда вылетает шайба
-    ctx.save();
-    const glow = ctx.createRadialGradient(hub[0] * k, hub[1] * k, 0, hub[0] * k, hub[1] * k, hubR * k);
-    glow.addColorStop(0, "rgba(245,185,60,.22)");
-    glow.addColorStop(1, "rgba(245,185,60,.06)");
-    ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, hubR * k, 0, 7); ctx.fill();
-    ctx.strokeStyle = "rgba(245,185,60,.7)";
-    ctx.lineWidth = k * 0.7;
-    ctx.shadowColor = COLOR.accent;
-    ctx.shadowBlur = 6 * k / 3;
-    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, hubR * k, 0, 7); ctx.stroke();
-    ctx.restore();
-    ctx.fillStyle = "rgba(245,185,60,.35)";
-    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, 1.2 * k, 0, 7); ctx.fill();
-  } else if (hub && ps.length > 1) {                   // центр веера старых раундов
-    ctx.fillStyle = COLOR.soft;
-    ctx.beginPath(); ctx.arc(hub[0] * k, hub[1] * k, 1.3 * k, 0, 7); ctx.fill();
-  }
-  // аватар и имя в середине зоны
-  ps.forEach((p, i) => {
-    if (!labels[i]) return;
-    const share = p.chance / 100;
-    const r = Math.max(3.2, Math.min(7.5, Math.sqrt(share * FIELD[0] * FIELD[1]) * 0.11)) * k;
-    const [lx, ly] = labels[i];
-    const cx = lx * k, cy = ly * k;
-    const [bg, fg] = pvpColorFor(p.id);
-    const img = avatarImage(p.id);
-    ctx.save();
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.closePath();
-    ctx.fillStyle = bg; ctx.fill();
-    ctx.lineWidth = k * 0.5; ctx.strokeStyle = "rgba(10,10,13,.8)"; ctx.stroke();
-    if (img.ok) { ctx.clip(); ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2); }
-    else {
-      ctx.fillStyle = fg;
-      ctx.font = `800 ${r * 0.8}px Manrope, sans-serif`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(initials(p.name), cx, cy);
-    }
-    ctx.restore();
-    if (share >= 0.06) {
-      ctx.save();
-      ctx.font = `800 ${3.6 * k}px Manrope, sans-serif`;
-      ctx.textAlign = "center"; ctx.textBaseline = "top";
-      ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 3 * k;
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillText(`${p.name} · ${fmtChance(p.chance)}`, cx, cy + r + 1.5 * k);
-      ctx.restore();
-    }
-  });
-  ctx.strokeStyle = "rgba(255,244,220,.25)";
-  ctx.lineWidth = k * 0.6;
-  ctx.strokeRect(k, k, c.width - 2 * k, c.height - 2 * k);
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
-function hockeyPuck(x, y, trail) {
-  const { ctx, k } = hockeyCtx();
+// Камера: при приближении z > 1 держит точку (x, y) в центре, не выходя за поле
+function hockeyView(cam) {
+  const z = cam ? cam.z : 1;
+  if (z <= 1) return { z: 1, ox: 0, oy: 0 };
+  const vw = FIELD[0] / z, vh = FIELD[1] / z;
+  return { z, ox: Math.min(Math.max(cam.x - vw / 2, 0), FIELD[0] - vw),
+    oy: Math.min(Math.max(cam.y - vh / 2, 0), FIELD[1] - vh) };
+}
+
+function hockeyDraw(players, layout, o) {
+  o = o || {};
+  const { ctx, k, c } = hockeyCtx();
+  const ps = players || [];
+  const { zones, labels } = layout;
+  const v = hockeyView(o.cam);
+  const s = k * v.z;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#1A1820";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.setTransform(s, 0, 0, s, -v.ox * s, -v.oy * s);
+  // зоны: заливка цветом игрока и лёгкий блик сверху
+  ps.forEach((p, i) => {
+    if (!zones[i]) return;
+    hockeyPath(ctx, zones[i]);
+    ctx.fillStyle = HOCKEY_COLORS[i % HOCKEY_COLORS.length];
+    ctx.fill();
+  });
+  const shine = ctx.createLinearGradient(0, 0, FIELD[0], FIELD[1]);
+  shine.addColorStop(0, "rgba(255,255,255,.10)");
+  shine.addColorStop(1, "rgba(0,0,0,.12)");
+  ctx.fillStyle = shine;
+  ctx.fillRect(0, 0, FIELD[0], FIELD[1]);
+  if (ps.length > 1) {
+    ctx.strokeStyle = "rgba(0,0,0,.22)";
+    ctx.lineWidth = 0.4;
+    ctx.lineJoin = "round";
+    zones.slice(0, ps.length).forEach((z) => { hockeyPath(ctx, z); ctx.stroke(); });
+  }
+  // аватарки — скруглённые квадраты в середине зоны
+  ps.forEach((p, i) => {
+    if (!labels[i]) return;
+    const side = Math.max(9, Math.min(19, Math.sqrt(p.chance / 100 * FIELD[0] * FIELD[1]) * 0.3));
+    const [lx, ly] = labels[i];
+    const x = lx - side / 2, y = ly - side / 2, r = side * 0.22;
+    const img = avatarImage(p.id);
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,.35)";
+    ctx.shadowBlur = 2.5 * s;
+    ctx.shadowOffsetY = 0.6 * s;
+    roundRect(ctx, x, y, side, side, r);
+    const g = ctx.createLinearGradient(x, y, x, y + side);
+    g.addColorStop(0, "#F08CF5");
+    g.addColorStop(1, "#B648D8");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    roundRect(ctx, x, y, side, side, r);
+    ctx.clip();
+    if (img.ok) ctx.drawImage(img, x, y, side, side);
+    else {
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = `800 ${side * 0.42}px Manrope, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(initials(p.name), lx, ly + side * 0.03);
+    }
+    ctx.restore();
+    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = "rgba(255,255,255,.55)";
+    roundRect(ctx, x, y, side, side, r);
+    ctx.stroke();
+  });
+  // итог: зоны проигравших гаснут
+  if (o.highlight !== undefined && o.highlight >= 0) {
+    ctx.fillStyle = `rgba(10,10,13,${0.62 * (o.dim === undefined ? 1 : o.dim)})`;
+    ps.forEach((p, i) => { if (i !== o.highlight && zones[i]) { hockeyPath(ctx, zones[i]); ctx.fill(); } });
+  }
+  if (o.puck) hockeyPuck(ctx, ps, zones, o.puck, s);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function hockeyPuck(ctx, ps, zones, puck, s) {
+  const { x, y, trail } = puck;
   (trail || []).forEach((p, i) => {
-    ctx.globalAlpha = (i + 1) / trail.length * 0.5;
-    ctx.fillStyle = COLOR.soft;
-    ctx.beginPath(); ctx.arc(p[0] * k, p[1] * k, 2.2 * k * (i + 1) / trail.length, 0, 7); ctx.fill();
+    ctx.globalAlpha = (i + 1) / trail.length * 0.35;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.beginPath(); ctx.arc(p[0], p[1], 2.4 * (i + 1) / trail.length, 0, 7); ctx.fill();
   });
   ctx.globalAlpha = 1;
-  ctx.shadowColor = COLOR.accent;
-  ctx.shadowBlur = 12 * k / 3;
-  ctx.fillStyle = COLOR.white;
-  ctx.beginPath(); ctx.arc(x * k, y * k, 3 * k, 0, 7); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = COLOR.accent;
-  ctx.lineWidth = k * 0.7;
-  ctx.beginPath(); ctx.arc(x * k, y * k, 2 * k, 0, 7); ctx.stroke();
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.45)";
+  ctx.shadowBlur = 2 * s;
+  ctx.shadowOffsetY = 0.5 * s;
+  ctx.fillStyle = "#F4F4F6";
+  ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 7); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = "rgba(0,0,0,.12)";
+  ctx.lineWidth = 0.35;
+  ctx.beginPath(); ctx.arc(x, y, 1.7, 0, 7); ctx.stroke();
+  // ярлык: чья зона под шайбой
+  const i = zones.findIndex((z, n) => n < ps.length && hockeyInside(z, x, y));
+  if (i < 0) return;
+  const name = ps[i].name;
+  ctx.font = "800 3.3px Manrope, sans-serif";
+  const w = ctx.measureText(name).width + 4, h = 5.2;
+  const tx = Math.min(Math.max(x - w / 2, 0.5), FIELD[0] - w - 0.5), ty = Math.max(y - 4.2 - h, 0.5);
+  ctx.fillStyle = "rgba(20,18,26,.72)";
+  roundRect(ctx, tx, ty, w, h, h / 2);
+  ctx.fill();
+  ctx.fillStyle = "#FFFFFF";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(name, tx + w / 2, ty + h / 2 + 0.1);
 }
 
 function hockeyDrawIdle(round) {
   if (pvp.animating) return;
   const players = round ? round.players : [];
-  const layout = hockeyLayout(players, round && round.layout);
-  hockeyDrawField(players, layout);
-  hockeyPuck(...(layout.hub && layout.r ? layout.hub : [50, 80]));
+  hockeyDraw(players, hockeyLayout(players, round && round.layout));
 }
 
-// Шайба едет по траектории с сервера с равномерным торможением
+// точка поля → координаты экрана (для частиц) с учётом камеры
+function hockeyScreen(x, y, cam) {
+  const r = $("#hockey-canvas").getBoundingClientRect();
+  const v = hockeyView(cam);
+  return [r.left + (x - v.ox) * v.z / FIELD[0] * r.width, r.top + (y - v.oy) * v.z / FIELD[1] * r.height];
+}
+
+const smooth = (a, b, t) => { const u = Math.min(1, Math.max(0, (t - a) / (b - a))); return u * u * (3 - 2 * u); };
+
+// Шайба едет по траектории с сервера с плавным торможением; под конец камера приближается
 async function hockeyAnimate(last) {
   const d = last.detail;
   const players = last.players;
-  const zones = hockeyLayout(players, d);
+  const layout = hockeyLayout(players, d);
   const pts = d.points;
   const seg = [];
   let total = 0;
@@ -4022,11 +4044,10 @@ async function hockeyAnimate(last) {
     seg.push([total, len]);
     total += len;
   }
-  const duration = 9000;           // шайба летит долго: длинный путь с отскоками и плавное торможение
+  const duration = 9000;
   const start = performance.now();
   const trail = [];
-  let lastSeg = 0;
-  const canvasEl = $("#hockey-canvas");
+  let lastSeg = 0, x = pts[0][0], y = pts[0][1], cam = { x, y, z: 1 };
   await new Promise((resolve) => {
     const frame = (now) => {
       const t = Math.min(1, (now - start) / duration);
@@ -4035,37 +4056,38 @@ async function hockeyAnimate(last) {
       if (i < 0) i = seg.length - 1;
       const [s0, len] = seg[i];
       const f = len ? (dist - s0) / len : 1;
-      const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f;
-      const y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f;
+      x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f;
+      y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f;
+      cam = { x, y, z: 1 + 1.1 * smooth(0.5, 0.85, t) };
       if (i !== lastSeg) {  // отскок от борта
         lastSeg = i;
         haptic();
-        const r = canvasEl.getBoundingClientRect();
-        fxBurst(r.left + pts[i][0] / FIELD[0] * r.width, r.top + pts[i][1] / FIELD[1] * r.height,
-          { count: 10, speed: 3, gravity: 0 });
+        const [sx, sy] = hockeyScreen(pts[i][0], pts[i][1], cam);
+        fxBurst(sx, sy, { count: 8, speed: 3, gravity: 0 });
       }
       trail.push([x, y]);
-      if (trail.length > 14) trail.shift();
-      hockeyDrawField(players, zones);
-      hockeyPuck(x, y, trail);
+      if (trail.length > 12) trail.shift();
+      hockeyDraw(players, layout, { puck: { x, y, trail }, cam });
       t < 1 ? requestAnimationFrame(frame) : resolve();
     };
     requestAnimationFrame(frame);
   });
   const winnerIdx = players.findIndex((p) => p.id === last.winner.id);
-  const [ex, ey] = pts[pts.length - 1];
-  for (let i = 0; i < 3; i++) {  // зона победителя мигает
-    hockeyDrawField(players, zones, winnerIdx);
-    hockeyPuck(ex, ey);
-    await sleep(220);
-    hockeyDrawField(players, zones);
-    hockeyPuck(ex, ey);
-    await sleep(160);
-  }
-  hockeyDrawField(players, zones, winnerIdx);
-  hockeyPuck(ex, ey);
-  const r = canvasEl.getBoundingClientRect();
-  fxBurst(r.left + ex / FIELD[0] * r.width, r.top + ey / FIELD[1] * r.height, { count: 50, speed: 6 });
+  // зоны проигравших плавно гаснут, камера отъезжает
+  const t0 = performance.now();
+  await new Promise((resolve) => {
+    const frame = (now) => {
+      const t = Math.min(1, (now - t0) / 900);
+      hockeyDraw(players, layout, { puck: { x, y }, cam: { x, y, z: 1 + 1.1 * (1 - smooth(0.3, 1, t)) },
+        highlight: winnerIdx, dim: smooth(0, 0.5, t) });
+      t < 1 ? requestAnimationFrame(frame) : resolve();
+    };
+    requestAnimationFrame(frame);
+  });
+  const r = $("#hockey-canvas").getBoundingClientRect();
+  const [ex, ey] = hockeyScreen(x, y);
+  fxBurst(ex, ey, { count: 60, speed: 7, colors: CONFETTI });
+  fxBurst(r.left + r.width / 2, r.top, { count: 90, speed: 9, colors: CONFETTI, gravity: 0.18 });
   haptic("heavy");
 }
 

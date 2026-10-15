@@ -646,98 +646,91 @@ def upgrade_roll(rng: random.Random = RNG) -> float:
 
 
 # ---------------- PvP-хоккей ----------------
-# Поле 100×160 делится на зоны игроков «веером» вокруг круга вбрасывания в случайной точке поля:
-# от края круга к бортам идут лучи, каждая зона — трапеция (или многоугольник, захватывающий углы поля)
-# без острых вершин. Площадь зоны (без круга) строго пропорциональна ставке. Круг и поворот веера
-# постоянны в течение раунда (зависят от его номера), поэтому зоны не прыгают, когда заходят новые
-# игроки — только меняют размер.
+# Горизонтальное поле 130×100 режется прямыми наклонными линиями на выпуклые зоны игроков: игроки делятся
+# на две группы, поле — разрезом под случайным углом так, чтобы площади частей совпали с долями ставок
+# групп, и так дальше внутри каждой части. Площадь зоны строго пропорциональна ставке. Углы разрезов
+# зависят от номера раунда.
 # Победитель выбирается так же, как в PvP-рулетке (шанс = доля ставки), затем строится
-# честная траектория удара: шайба летит из круга вбрасывания по прямой, отражаясь от бортов,
+# честная траектория удара: шайба летит из центра по прямой, отражаясь от бортов,
 # и останавливается в случайной точке зоны победителя. Длина пути — от 2.5 до 5 длин поля.
 
-HOCKEY_W = 100.0
-HOCKEY_H = 160.0
-HOCKEY_START = (50.0, 80.0)
-HOCKEY_HUB_R = 12.0            # круг вбрасывания: из него вылетает шайба, зоны начинаются от его края
-HOCKEY_ARC_STEP = math.radians(5)
-HOCKEY_MIN_PATH = 2.5 * HOCKEY_H
-HOCKEY_MAX_PATH = 5.0 * HOCKEY_H
-HOCKEY_PERIM = 2 * (HOCKEY_W + HOCKEY_H)
-# борта по часовой стрелке от левого верхнего угла: (начало на периметре, длина, угол-начало, направление)
-_HOCKEY_SIDES = (
-    (0.0, HOCKEY_W, (0.0, 0.0), (1.0, 0.0)),
-    (HOCKEY_W, HOCKEY_H, (HOCKEY_W, 0.0), (0.0, 1.0)),
-    (HOCKEY_W + HOCKEY_H, HOCKEY_W, (HOCKEY_W, HOCKEY_H), (-1.0, 0.0)),
-    (2 * HOCKEY_W + HOCKEY_H, HOCKEY_H, (0.0, HOCKEY_H), (0.0, -1.0)),
-)
-
-
-def _hockey_point(s: float) -> tuple[float, float]:
-    """Точка борта на расстоянии s по периметру (по часовой от левого верхнего угла)."""
-    s %= HOCKEY_PERIM
-    start, _, (x0, y0), (dx, dy) = next(side for side in _HOCKEY_SIDES if s < side[0] + side[1])
-    return (x0 + dx * (s - start), y0 + dy * (s - start))
-
-
-def _hockey_rim(a: float, b: float) -> list[tuple[float, float]]:
-    """Борт от a до b по часовой: концы и углы поля между ними."""
-    corners = sorted(k * HOCKEY_PERIM + side[0] for k in range(int(a // HOCKEY_PERIM), int(b // HOCKEY_PERIM) + 1)
-                     for side in _HOCKEY_SIDES)
-    return [_hockey_point(x) for x in [a] + [c for c in corners if a < c < b] + [b]]
+HOCKEY_W = 130.0
+HOCKEY_H = 100.0
+HOCKEY_START = (65.0, 50.0)
+HOCKEY_MIN_PATH = 2.5 * HOCKEY_W
+HOCKEY_MAX_PATH = 5.0 * HOCKEY_W
 
 
 def _poly_area(pts: Sequence[Sequence[float]]) -> float:
     return abs(sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(pts, list(pts[1:]) + [pts[0]]))) / 2
 
 
-def _hockey_turn(hub: Sequence[float], pts: Sequence[Sequence[float]]) -> float:
-    """На какой угол поворачивается луч из центра, пробегая точки борта по часовой."""
-    angles = [math.atan2(y - hub[1], x - hub[0]) for x, y in pts]
-    return sum((b - a) % (2 * math.pi) for a, b in zip(angles, angles[1:]))
+def _centroid(pts: Sequence[Sequence[float]]) -> tuple[float, float]:
+    a = cx = cy = 0.0
+    for p, q in zip(pts, list(pts[1:]) + [pts[0]]):
+        cross = p[0] * q[1] - q[0] * p[1]
+        a += cross
+        cx += (p[0] + q[0]) * cross
+        cy += (p[1] + q[1]) * cross
+    if abs(a) < 1e-9:
+        return sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+    return cx / (3 * a), cy / (3 * a)
 
 
-def _hockey_net(hub: Sequence[float], a: float, b: float) -> float:
-    """Площадь зоны между лучами в точки борта a и b — без сектора круга вбрасывания."""
-    rim = _hockey_rim(a, b)
-    return _poly_area([hub] + rim) - HOCKEY_HUB_R ** 2 / 2 * _hockey_turn(hub, rim)
+def _clip(poly: Sequence[Sequence[float]], nx: float, ny: float, c: float) -> list[tuple[float, float]]:
+    """Часть выпуклого многоугольника, где nx·x + ny·y ≤ c (Сазерленд — Ходжман)."""
+    out = []
+    for p, q in zip(poly, list(poly[1:]) + [poly[0]]):
+        dp, dq = nx * p[0] + ny * p[1] - c, nx * q[0] + ny * q[1] - c
+        if dp <= 0:
+            out.append((p[0], p[1]))
+        if (dp < 0) != (dq < 0) and dp != dq:
+            t = dp / (dp - dq)
+            out.append((p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t))
+    return out
 
 
-def _hockey_find(hub: Sequence[float], a: float, area: float, limit: float) -> float:
-    """Точка борта b (a < b ≤ limit), при которой зона от a до b набирает нужную площадь."""
-    lo, hi = a, limit
+def _cut(poly: Sequence[Sequence[float]], angle: float, frac: float):
+    """Разрез прямой под углом angle: первая часть — доля frac площади."""
+    nx, ny = math.cos(angle), math.sin(angle)
+    proj = [nx * x + ny * y for x, y in poly]
+    lo, hi = min(proj), max(proj)
+    want = _poly_area(poly) * frac
     for _ in range(60):
         mid = (lo + hi) / 2
-        lo, hi = (mid, hi) if _hockey_net(hub, a, mid) < area else (lo, mid)
-    return (lo + hi) / 2
+        lo, hi = (mid, hi) if _poly_area(_clip(poly, nx, ny, mid)) < want else (lo, mid)
+    c = (lo + hi) / 2
+    return _clip(poly, nx, ny, c), _clip(poly, -nx, -ny, -c)
 
 
 def hockey_layout(amounts: Sequence[int], seed: Any = None) -> dict:
-    """Зоны игроков в порядке ставок. Многоугольник зоны: край круга → борт (с углами поля) → обратно по дуге круга."""
+    """Зоны игроков в порядке ставок (выпуклые многоугольники) и точки для аватарок."""
     rng = random.Random(f"hockey-{seed}")
-    hub = (round(rng.uniform(28.0, 72.0), 3), round(rng.uniform(45.0, 115.0), 3))
-    s0 = rng.uniform(0.0, HOCKEY_PERIM)
-    end_all = s0 + HOCKEY_PERIM
-    total = sum(amounts) or 1
-    field = HOCKEY_W * HOCKEY_H - math.pi * HOCKEY_HUB_R ** 2
-    zones, labels, s = [], [], s0
-    for i, amount in enumerate(amounts):
-        area = field * amount / total
-        end = end_all if i == len(amounts) - 1 else _hockey_find(hub, s, area, end_all)
-        rim = _hockey_rim(s, end)
-        a0 = math.atan2(rim[0][1] - hub[1], rim[0][0] - hub[0])
-        turn = _hockey_turn(hub, rim)
-        n = max(1, math.ceil(turn / HOCKEY_ARC_STEP))
-        arc = [(hub[0] + HOCKEY_HUB_R * math.cos(a0 + turn * k / n), hub[1] + HOCKEY_HUB_R * math.sin(a0 + turn * k / n))
-               for k in range(n, 0, -1)]
-        start = (hub[0] + HOCKEY_HUB_R * math.cos(a0), hub[1] + HOCKEY_HUB_R * math.sin(a0))
-        zones.append([[round(x, 3), round(y, 3)] for x, y in [start] + rim + arc])
-        # подпись — на середине зоны по площади, посередине между кругом и бортом
-        mx, my = _hockey_point(_hockey_find(hub, s, area / 2, end))
-        dist = math.hypot(mx - hub[0], my - hub[1])
-        k = (HOCKEY_HUB_R + (dist - HOCKEY_HUB_R) * 0.5) / dist
-        labels.append([round(hub[0] + (mx - hub[0]) * k, 3), round(hub[1] + (my - hub[1]) * k, 3)])
-        s = end
-    return {"hub": list(hub), "r": HOCKEY_HUB_R, "zones": zones, "labels": labels}
+    zones: list = [None] * len(amounts)
+
+    def split(poly, idx):
+        if len(idx) == 1:
+            zones[idx[0]] = poly
+            return
+        total = sum(amounts[i] for i in idx) or 1
+        acc, k, best = 0, 1, None
+        for n in range(1, len(idx)):                   # делим игроков на две группы поровну по ставкам
+            acc += amounts[idx[n - 1]]
+            if best is None or abs(acc / total - 0.5) < best:
+                best, k = abs(acc / total - 0.5), n
+        frac = sum(amounts[i] for i in idx[:k]) / total
+        xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+        base = 0.0 if max(xs) - min(xs) >= max(ys) - min(ys) else math.pi / 2   # режем поперёк длинной стороны
+        angle = base + rng.uniform(-0.55, 0.55) + (math.pi if rng.random() < 0.5 else 0)
+        first, rest = _cut(poly, angle, frac)
+        split(first, idx[:k])
+        split(rest, idx[k:])
+
+    if amounts:
+        split([(0.0, 0.0), (HOCKEY_W, 0.0), (HOCKEY_W, HOCKEY_H), (0.0, HOCKEY_H)], list(range(len(amounts))))
+    return {"field": [HOCKEY_W, HOCKEY_H],
+            "zones": [[[round(x, 3), round(y, 3)] for x, y in z] for z in zones],
+            "labels": [[round(v, 3) for v in _centroid(z)] for z in zones]}
 
 
 def _inside(poly: Sequence[Sequence[float]], x: float, y: float) -> bool:
