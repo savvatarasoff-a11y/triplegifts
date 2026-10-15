@@ -3993,7 +3993,17 @@ function hockeyDraw(players, layout, o) {
 }
 
 function hockeyPuck(ctx, ps, zones, puck, s) {
-  const { x, y, trail } = puck;
+  const { x, y, trail, aim } = puck;
+  if (aim !== undefined) {                       // прицел: стрелка ходит вокруг шайбы перед ударом
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(aim);
+    ctx.shadowColor = "rgba(0,0,0,.45)";
+    ctx.shadowBlur = 1.5 * s;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.beginPath(); ctx.moveTo(7.6, 0); ctx.lineTo(4.2, -2.4); ctx.lineTo(4.2, 2.4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
   (trail || []).forEach((p, i) => {
     ctx.globalAlpha = (i + 1) / trail.length * 0.35;
     ctx.fillStyle = "#FFFFFF";
@@ -4010,7 +4020,8 @@ function hockeyPuck(ctx, ps, zones, puck, s) {
   ctx.strokeStyle = "rgba(0,0,0,.12)";
   ctx.lineWidth = 0.35;
   ctx.beginPath(); ctx.arc(x, y, 1.7, 0, 7); ctx.stroke();
-  // ярлык: чья зона под шайбой
+  // ярлык: чья зона под шайбой (пока целится — не мешает стрелке)
+  if (aim !== undefined) return;
   const i = zones.findIndex((z, n) => n < ps.length && hockeyInside(z, x, y));
   if (i < 0) return;
   const name = ps[i].name;
@@ -4053,6 +4064,21 @@ async function hockeyAnimate(last) {
     seg.push([total, len]);
     total += len;
   }
+  // прицеливание: стрелка водит туда-сюда с затуханием и замирает на направлении удара
+  const aimTo = Math.atan2(pts[1][1] - pts[0][1], pts[1][0] - pts[0][0]);
+  const aimFrom = performance.now();
+  const swing = (Math.random() < 0.5 ? -1 : 1) * (1.6 + Math.random() * 0.8);
+  await new Promise((resolve) => {
+    const frame = (now) => {
+      const t = Math.min(1, (now - aimFrom) / 2200);
+      const aim = aimTo + swing * Math.cos(t * Math.PI * 2.5) * Math.pow(1 - t, 1.6);
+      hockeyDraw(players, layout, { puck: { x: pts[0][0], y: pts[0][1], aim } });
+      if (t < 1) requestAnimationFrame(frame);
+      else { haptic(); resolve(); }
+    };
+    requestAnimationFrame(frame);
+  });
+  await sleep(250);
   const duration = 9000;
   const start = performance.now();
   const trail = [];
