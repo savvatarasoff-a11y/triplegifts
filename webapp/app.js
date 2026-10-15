@@ -176,7 +176,17 @@ async function guard(fn) {
   }
 }
 
+// Открытая клавиатура (поиск, сумма) прячет окно подтверждения и сообщения об ошибке — сначала убираем её
+async function hideKeyboard() {
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+    el.blur();
+    await sleep(300);
+  }
+}
+
 async function confirmAsk(text) {
+  await hideKeyboard();
   if (tg && tg.showConfirm) return new Promise((resolve) => tg.showConfirm(text, resolve));
   return window.confirm(text);
 }
@@ -1114,6 +1124,11 @@ function shopRender() {
 }
 
 async function shopBuy(t) {
+  await hideKeyboard();
+  if (state.bal.stars < t.price) {
+    toast(`Не хватает ${stars(t.price - state.bal.stars)} — пополните баланс`, true);
+    return;
+  }
   const ok = await confirmAsk(`Купить ${t.title} за ${fmt(t.price)} ★?`);
   if (!ok) return;
   await guard(async () => {
@@ -4158,6 +4173,7 @@ function bind() {
   $("#quest-card").addEventListener("click", questClick);
   let shopTimer = 0;
   $("#shop-q").addEventListener("input", (e) => { shop.query = e.target.value; clearTimeout(shopTimer); shopTimer = setTimeout(shopRender, 150); });
+  $$("#shop-q, #upg-search").forEach((el) => el.addEventListener("keydown", (e) => { if (e.key === "Enter") el.blur(); }));
   $("#ref-copy").addEventListener("click", refCopy);
   $("#ref-share").addEventListener("click", refShare);
   $("#sheet-cancel").addEventListener("click", () => $("#sheet").classList.add("hidden"));

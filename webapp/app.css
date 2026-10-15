@@ -821,3 +821,7 @@ button { -webkit-user-select: none; user-select: none; }
 .newbie-t { display: grid; gap: 2px; }
 .newbie-t b { font-size: 14px; }
 .newbie-t small { color: var(--muted); font-size: 12px; font-weight: 700; }
+
+/* поиск: без системного оформления iOS */
+input[type=search] { -webkit-appearance: none; appearance: none; }
+input[type=search]::-webkit-search-decoration { -webkit-appearance: none; }
