@@ -768,3 +768,6 @@ button { -webkit-user-select: none; user-select: none; }
 .wl-tiers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .wl-tiers span { padding: 3px 8px; border-radius: 8px; background: rgba(255, 255, 255, .05); color: var(--muted); font-size: 11px; font-weight: 700; }
 .wl-tiers span.sel { background: rgba(245, 185, 60, .18); color: var(--accent-pale); }
+.shop-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 4px; }
+.shop-list .upt { padding-top: 10px; }
+.shop-list .note { grid-column: span 2; }

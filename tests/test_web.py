@@ -140,12 +140,7 @@ async def test_me_and_start_bonus(client):
     assert r.status == 200
     data = await r.json()
     assert data["balance"] == 25 and data["user"]["name"] == "Петя"
-    cases = {c["id"]: c for c in data["config"]["cases"]}
-    # NFT-кейсов нет, пока нет NFT с ценой; «Люкс» без NFT-джекпота скрыт: все его подарки дешевле кейса
-    assert set(cases) == {"bear", "rocket", "heart", "party"}
-    bear = cases["bear"]["prizes"]
-    assert {p["emoji"]: p["amount"] for p in bear}["🧸"] == 15    # реальная цена из каталога
-    assert sum(p["chance"] for p in bear) == pytest.approx(100, abs=0.01)
+    assert data["config"]["cases"] == [] and data["config"]["nft_withdraw_fee"] == 30   # кейсы закрыты
     # повторный вход бонус не начисляет
     data = await (await client.get("/api/me", headers=auth())).json()
     assert data["balance"] == 25
@@ -202,25 +197,10 @@ async def test_index_served(client):
 
 async def test_withdraw_api(client):
     r = await client.get("/api/withdraw", headers=auth(3))
-    data = await r.json()
-    ids = [g["id"] for g in data["gifts"]]
-    assert "gp" not in ids and "gsold" not in ids and ids[0] in ("id💝", "id🧸")   # премиум и распроданные скрыты
-    assert data["wager"]["left"] == 25                           # стартовый бонус нужно отыграть
-    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "id🧸"})
-    assert r.status == 400 and "пополнение от 50" in (await r.json())["error"]
-    assert await client.app[CASINO].db.credit_payment("p3", 3, 100)
-    await client.app[CASINO].db.conn.execute("UPDATE users SET wagered=0 WHERE id=3")
-    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "id🧸"})
-    assert r.status == 400 and "отыграйте" in (await r.json())["error"]
-    await client.app[CASINO].db.conn.execute("UPDATE users SET wagered=25, balance=80 WHERE id=3")
-    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "id🎂"})
-    data = await r.json()
-    assert data["amount"] == 50 and data["balance"] == 30
-    assert client.app[BOT].messages[-1][0] == 777 and "Заявка на вывод" in client.app[BOT].messages[-1][1]
-    r = await client.post("/api/withdraw", headers=auth(3), json={"gift_id": "gp"})
-    assert r.status == 400
-    hist = (await (await client.get("/api/withdraw", headers=auth(3))).json())["history"]
-    assert hist[0]["status"] == "pending"
+    assert r.status == 200                                      # список и история ещё открываются
+    for path, payload in (("/api/withdraw", {"gift_id": "id🧸"}), ("/api/ton/withdraw", {"amount": 10**9, "address": "x"})):
+        r = await client.post(path, headers=auth(3), json=payload)
+        assert r.status == 400 and "только NFT" in (await r.json())["error"]   # выводятся только NFT
 
 
 async def test_avatar(client):
@@ -230,46 +210,27 @@ async def test_avatar(client):
     assert (await client.get("/avatar/abc")).status == 404
 
 
-async def test_cases_api_real_prices_and_nft(client, monkeypatch):
-    from app.games import logic as g
+async def test_cases_closed_shop_and_quest(client):
     casino = client.app[CASINO]
-    await client.get("/api/me", headers=auth(8))
-    await casino.db.conn.execute("UPDATE users SET balance=1000 WHERE id=8")
-    r = await client.post("/api/case", headers=auth(8), json={"case": "bear"})
-    data = await r.json()
-    assert data["kind"] == "gift" and data["prize"] in (15, 25, 50, 100)
-    assert (await client.post("/api/case", headers=auth(8), json={"case": "nft"})).status == 400
-
-    # Модель у релейера с ценой с маркета -> NFT-кейс; выигравшему релейер передаёт случайный подарок модели
-    import time as _t
-    from tests.test_nft import FakeRelayer, item
-    relayer = FakeRelayer([item(1, "555", "Plush Pepe", 11, "Frog Prince"), item(2, "555", "Plush Pepe", 12, "Frog Prince"),
-                           item(3, "555", "Plush Pepe", 13, "Other")], known_users=[8])
-    client.app[RELAYER].items = relayer.items
-    client.app[RELAYER].known = relayer.known
+    await client.get("/api/me", headers=auth(3))
+    for path in ("/api/case", "/api/free_case"):
+        r = await client.post(path, headers=auth(3), json={"case": "bear"})
+        assert r.status == 400 and "закрыт" in (await r.json())["error"]
     await casino.db.conn.execute(
-        "INSERT INTO nft_models(collection_id, collection_name, model, rarity, emoji, stock, price, price_at) "
-        "VALUES ('555','Plush Pepe','Frog Prince',1.5,'🐸',2,5000,?)", (_t.time(),))
-    cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(8))).json())["config"]["cases"]}
-    nft_prize = next(p for p in cases["nft"]["prizes"] if p["kind"] == "nft")
-    assert nft_prize["title"] == "Plush Pepe" and nft_prize["amount"] == 5000 and nft_prize["model"] == "Frog Prince"
-    monkeypatch.setattr(g, "pick_weighted", lambda items, weights, rng=None: items[0])
-    r = await client.post("/api/case", headers=auth(8), json={"case": "nft"})
-    data = await r.json()
-    assert data["kind"] == "nft" and data["nft"]["model"] == "Frog Prince" and data["nft"]["in_profile"]
-    gifts = await (await client.get("/api/gifts", headers=auth(8))).json()
-    assert [x["model"] for x in gifts["gifts"]] == ["Frog Prince"]     # выигрыш — в «Мои подарки»
-    assert client.app[RELAYER].transfers == []
-    assert (await casino.db.one("SELECT status FROM nft_wins"))["status"] == "sent"
-    assert (await casino.db.one("SELECT stock, reserved FROM nft_models")) == {"stock": 1, "reserved": 0}
-
-
-async def test_case_disabled_when_real_prices_too_generous(client):
-    client.app[BOT].prices = {"🧸": 60}      # подарок «подорожал» до первого запроса каталога
-    cases = [c["id"] for c in (await (await client.get("/api/me", headers=auth(9))).json())["config"]["cases"]]
-    assert cases == []                       # кейсы с подорожавшим 🧸 убыточны — выключены, «Люкс» без джекпота скрыт
-    r = await client.post("/api/case", headers=auth(9), json={"case": "bear"})
-    assert r.status == 400
+        "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at, test) "
+        "VALUES ('demo:Lol Pop','Lol Pop','Pink','🍭',999,40,?,1)", (time.time(),))
+    shop = await (await client.get("/api/shop", headers=auth(3))).json()
+    item = shop["items"][0]
+    assert item["model"] == "Pink" and shop["fee"] == 30
+    r = await client.post("/api/shop/buy", headers=auth(3), json={"model": item["id"]})
+    assert r.status == 400 and "Недостаточно" in (await r.json())["error"]   # 25 ★ стартовых не хватает
+    await casino.db.conn.execute("UPDATE users SET balance=100 WHERE id=3")
+    r = await (await client.post("/api/shop/buy", headers=auth(3), json={"model": item["id"]})).json()
+    assert r["balance"] == 60 and r["model"] == "Pink"
+    q = await (await client.get("/api/quest", headers=auth(3))).json()
+    assert q["ready"] and q["reward"] == 5 and q["channel"] == "TripleGifts"
+    r = await (await client.post("/api/quest", headers=auth(3))).json()   # проверить подписку нельзя — не блокируем
+    assert r["balance"] == 65 and not r["ready"]
 
 
 async def test_slots_777_nft_via_api(client, monkeypatch):
@@ -309,24 +270,6 @@ async def test_referral_via_start_param_and_pages(client):
     assert (await r.json())["deposited"] == 100
 
 
-async def test_gift_cases_get_nft_jackpot(client):
-    import time as _t
-    casino = client.app[CASINO]
-    await casino.db.conn.execute(
-        "INSERT INTO nft_models(collection_id, collection_name, model, emoji, stock, price, price_at) VALUES "
-        "('1','Lol Pop','Pink','🍭',5,400,?), ('2','Plush Pepe','Frog','🐸',1,9000,?)", (_t.time(), _t.time()))
-    player = (await (await client.get("/api/me", headers=auth(3))).json())["config"]["cases"]
-    assert all("rtp" not in c for c in player)                           # игроки RTP не видят
-    cases = {c["id"]: c for c in (await (await client.get("/api/me", headers=auth(777))).json())["config"]["cases"]}
-    lux = cases["lux"]
-    assert max(p["amount"] for p in lux["prizes"]) > lux["price"]          # есть ради чего открывать
-    jackpot = [p for p in lux["prizes"] if p["kind"] == "nft"]
-    assert {p["model"] for p in jackpot} == {"Pink", "Frog"} and 0 < sum(p["chance"] for p in jackpot) < 5
-    for c in cases.values():
-        assert sum(p["chance"] for p in c["prizes"]) == pytest.approx(100, abs=0.05)
-        assert c["rtp"] <= 0.92
-
-
 async def test_play_requires_channel_subscription(client):
     bot = client.app[BOT]
     status = {"s": "left"}
@@ -336,14 +279,15 @@ async def test_play_requires_channel_subscription(client):
 
     bot.get_chat_member = get_chat_member
     me = await (await client.get("/api/me", headers=auth(31))).json()
-    assert me["subscribed"] is False and me["free_case"]["available"]
-    r = await client.post("/api/free_case", headers=auth(31))
+    assert me["subscribed"] is False
+    r = await client.post("/api/slots", headers=auth(31), json={"bet": 1})
     assert r.status == 403 and (await r.json())["need_sub"] == "TripleGifts"
-    assert (await client.post("/api/slots", headers=auth(31), json={"bet": 1})).status == 403
+    r = await client.post("/api/quest", headers=auth(31))
+    assert r.status == 400 and "подпишитесь" in (await r.json())["error"]  # награда — только подписчикам
     status["s"] = "member"
     assert (await (await client.get("/api/sub", headers=auth(31))).json())["subscribed"] is True
-    r = await client.post("/api/free_case", headers=auth(31))
-    assert r.status == 200 and (await r.json())["prize"] >= 1
+    r = await client.post("/api/quest", headers=auth(31))
+    assert r.status == 200 and (await r.json())["reward"] == 5
 
 
 async def test_cors_for_pages_origin(client):

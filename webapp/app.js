@@ -11,7 +11,7 @@ const state = { me: null, config: null, screen: "home", tab: "home", busy: false
 const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
 const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
-const TITLES = { games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол",
+const TITLES = { shop: "Магазин NFT", games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол",
   cases: "Кейсы", case: "Кейс", free: "Кейс дня", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного золотого и белый: [фон, цвет текста]
 const PVP_COLORS = [["#F5B93C", "#1A1305"], ["#FFFFFF", "#0A0A0D"], ["#9A6508", "#FFFFFF"], ["#FFE3A3", "#0A0A0D"],
@@ -294,7 +294,8 @@ function go(screen) {
   window.scrollTo(0, 0);
   const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
     pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
-    upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, football: footballEnter, free: freeEnter };
+    upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, football: footballEnter, free: freeEnter,
+    shop: shopEnter };
   if (enter[screen]) enter[screen]();
 }
 
@@ -460,8 +461,8 @@ async function loadMe() {
   state.me = me;
   state.config = me.config;
   if (me.subscribed === false) showSubGate(me.config.channel);
-  state.free = me.free_case;
-  freeTick();
+  if (me.config && me.config.nft_withdraw_fee) $$(".nft-fee").forEach((el) => { el.textContent = me.config.nft_withdraw_fee; });
+  loadQuest();
   // картинки NFT из кейсов начинают качаться сразу после входа
   setTimeout(() => nftPreload((me.config.cases || []).flatMap((c) => c.prizes.map(prizePic).filter(Boolean))), 800);
   state.bal = { stars: me.balance, ton: me.ton || 0 };
@@ -972,8 +973,7 @@ function walletTab(tab) {
   $("#tab-out").classList.toggle("hidden", tab !== "out");
   $("#tab-nft").classList.toggle("hidden", tab !== "nft");
   if (tab === "dep" && state.cur === "ton") loadTonDeposit();
-  if (tab === "out" && state.cur === "ton") loadTonWithdraw();
-  if (tab === "out" && state.cur !== "ton") loadWithdraw();
+  if (tab === "out") loadWithdraw();
   if (tab === "nft") loadMyGifts();
 }
 
@@ -1112,59 +1112,118 @@ function renderWithdrawLimit(el, l) {
 }
 
 async function loadWithdraw() {
-  const box = $("#gifts");
-  box.textContent = "Загружаем подарки…";
   try {
     const data = await api("/api/withdraw");
     renderWithdrawLimit($("#wager-limit"), data.limit);
-    const wager = $("#wager");
-    wager.classList.toggle("hidden", !data.wager.left);
-    wager.textContent = data.wager.left
-      ? `Чтобы вывести звёзды из чеков и бонусов, их нужно отыграть: осталось поставить ${stars(data.wager.left)}.`
-      : "";
-    box.innerHTML = "";
-    if (!data.gifts.length) box.textContent = "Подарки сейчас недоступны, попробуйте позже.";
-    const balance = state.me ? state.me.balance : 0;
-    data.gifts.forEach((gift) => {
-      const b = document.createElement("button");
-      b.className = "gift";
-      const em = document.createElement("span");
-      em.className = "em";
-      em.textContent = gift.emoji;
-      const price = document.createElement("b");
-      price.textContent = stars(gift.stars);
-      b.append(em, price);
-      b.disabled = gift.stars > balance || data.wager.left > 0;
-      b.addEventListener("click", () => withdraw(gift));
-      box.append(b);
-    });
-    const hist = $("#wd-history");
-    hist.innerHTML = "";
-    if (!data.history.length) hist.textContent = "Выводов пока не было.";
-    data.history.forEach((w) => {
-      hist.append(historyRow(`${w.emoji || "🎁"} №${w.id} · ${stars(w.amount)}`,
-        WD_STATUS[w.status] || w.status, w.status === "sent"));
-    });
-  } catch (e) {
-    box.textContent = e.message;
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------- ежедневный квест: подписка на канал ----------
+
+let questTimer = 0;
+async function loadQuest() {
+  try {
+    state.quest = await api("/api/quest");
+    state.quest.at = Date.now() / 1000;
+  } catch (e) { return; }
+  questTick();
+}
+
+function questTick() {
+  const q = state.quest;
+  if (!q) return;
+  const left = q.in - (Date.now() / 1000 - q.at);
+  const ready = left <= 0;
+  $("#quest-card").classList.toggle("ready", ready);
+  $("#quest-sub").textContent = ready
+    ? `подпишись на @${q.channel} — ${stars(q.reward)} каждый день`
+    : `следующая награда через ${fmtLeft(left)}`;
+  $("#quest-go").textContent = ready ? (q.subscribed ? `+${stars(q.reward)}` : "Подписаться") : "Скоро";
+  clearTimeout(questTimer);
+  if (!ready) questTimer = setTimeout(questTick, 1000);
+}
+
+async function questClick() {
+  const q = state.quest;
+  if (!q) return;
+  if (q.in - (Date.now() / 1000 - q.at) > 0) { toast("Награду за сегодня вы уже забрали"); return; }
+  if (!q.subscribed) {
+    const link = `https://t.me/${q.channel}`;
+    if (tg && tg.openTelegramLink) tg.openTelegramLink(link); else window.open(link, "_blank");
+    q.subscribed = true;                     // вернётся — нажмёт ещё раз, сервер проверит подписку
+    questTick();
+    return;
+  }
+  await guard(async () => {
+    const r = await api("/api/quest", {});
+    toast(`+${stars(r.reward)} за подписку`);
+    haptic("win");
+    fxBurstAt($("#quest-card"), { count: 30 });
+    state.quest = { ...q, ...r, at: Date.now() / 1000 };
+    questTick();
+  });
+}
+
+// ---------- магазин NFT (для апгрейда) ----------
+
+const shop = { items: [], query: "" };
+const SHOP_SHOW = 60;
+
+async function shopEnter() {
+  const box = $("#shop-list");
+  if (!shop.items.length) box.innerHTML = '<div class="note">Загружаем…</div>';
+  try {
+    const r = await api("/api/shop");
+    shop.items = r.items;
+    shopRender();
+  } catch (e) { box.innerHTML = `<div class="note">${escH(e.message)}</div>`; }
+}
+
+function shopRender() {
+  const box = $("#shop-list");
+  const q = shop.query.trim().toLowerCase();
+  const list = shop.items.filter((t) => !q || `${t.title} ${t.model}`.toLowerCase().includes(q));
+  box.innerHTML = "";
+  if (!list.length) { box.innerHTML = `<div class="note">${q ? "Ничего не найдено" : "Магазин пока пуст"}</div>`; return; }
+  list.slice(0, SHOP_SHOW).forEach((t) => {
+    const b = document.createElement("button");
+    b.className = "upt";
+    const em = document.createElement("span");
+    em.className = "em";
+    em.append(nftIcon(upgTargetNft(t), "nft-inline big"));
+    const ttl = document.createElement("b");
+    ttl.textContent = t.title;
+    const md = document.createElement("small");
+    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
+    const pr = document.createElement("span");
+    pr.className = "pr";
+    pr.textContent = nftPrice(t.price);
+    b.append(em, ttl, md, pr);
+    b.addEventListener("click", () => shopBuy(t));
+    box.append(b);
+  });
+  if (list.length > SHOP_SHOW) {
+    const more = document.createElement("div");
+    more.className = "note";
+    more.textContent = `Показаны ${SHOP_SHOW} из ${list.length} — найдите нужный NFT поиском`;
+    box.append(more);
   }
 }
 
-async function withdraw(gift) {
-  const ok = await confirmAsk(`Вывести ${gift.emoji} за ${gift.stars} ★? Звёзды спишутся сразу, подарок придёт после проверки.`);
+async function shopBuy(t) {
+  const ok = await confirmAsk(`Купить ${t.title} «${t.model}» за ${fmt(t.price)} ★? NFT появится в «Мои подарки» — его можно поставить в апгрейд.`);
   if (!ok) return;
   await guard(async () => {
-    await api("/api/withdraw", { gift_id: gift.id });
-    toast("Заявка отправлена, ждите подарок");
+    await api("/api/shop/buy", { model: t.id });
+    toast(`${t.title} «${t.model}» — в «Мои подарки»`);
     haptic("win");
-    loadWithdraw();
   });
 }
 
 // ---------- мои подарки (прислали релейеру) ----------
 
 const myGifts = { relayer: null, list: [], timer: 0 };
-const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится" };
+const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится", pending: "ждёт подтверждения администратора" };
 
 // ---------- картинки NFT: превью с нашего сервера (ужатые и закэшированные) ----------
 
@@ -1287,7 +1346,7 @@ function giftCard(gift, opts) {
   sub.className = "s";
   const parts = [];
   if (gift.model) parts.push(`модель «${gift.model}»` + (gift.rarity ? ` · ${gift.rarity}%` : ""));
-  if (gift.demo) parts.push("демо");
+  if (gift.demo && gift.status !== "pending") parts.push("для апгрейда");
   if (GIFT_STATUS[gift.status]) parts.push(GIFT_STATUS[gift.status]);
   else if (!gift.priced) parts.push("цена проверяется");
   sub.textContent = parts.join(" · ");
@@ -1323,11 +1382,20 @@ async function loadMyGifts(quiet) {
         sell.textContent = gift.sell ? `Продать за ${stars(gift.sell)}` : "Продать";
         sell.disabled = !gift.sell;
         sell.addEventListener("click", () => sellGift(gift));
-        const out = document.createElement("button");
-        out.className = "btn small";
-        out.textContent = "Вывести";
-        out.addEventListener("click", () => withdrawGift(gift));
-        acts.append(sell, out);
+        acts.append(sell);
+        if (gift.demo) {                     // из магазина/джекпота: вывести можно после апгрейда
+          const up = document.createElement("button");
+          up.className = "btn small";
+          up.textContent = "В апгрейд";
+          up.addEventListener("click", () => go("upgrade"));
+          acts.append(up);
+        } else {
+          const out = document.createElement("button");
+          out.className = "btn small";
+          out.textContent = `Вывести · ${nftFee()} ★`;
+          out.addEventListener("click", () => withdrawGift(gift));
+          acts.append(out);
+        }
         card.append(acts);
       }
       box.append(card);
@@ -1366,8 +1434,10 @@ async function sellGift(gift) {
   });
 }
 
+const nftFee = () => (state.me && state.me.config && state.me.config.nft_withdraw_fee) || 30;
+
 async function withdrawGift(gift) {
-  const ok = await confirmAsk(`Вывести ${gift.title} обратно в ваш Telegram?`);
+  const ok = await confirmAsk(`Вывести ${gift.title} в ваш Telegram? С баланса спишется ${nftFee()} ★.`);
   if (!ok) return;
   await guard(async () => {
     await api("/api/gifts/withdraw", { id: gift.id });
@@ -1551,7 +1621,7 @@ function upgRenderTargets() {
     const ttl = document.createElement("b");
     ttl.textContent = t.title;
     const md = document.createElement("small");
-    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "") + (t.demo ? " · демо" : "");
+    md.textContent = `«${t.model}»` + (t.rarity != null ? ` · ${t.rarity}%` : "");
     const pr = document.createElement("span");
     pr.className = "pr";
     pr.textContent = nftPrice(t.price);
@@ -1662,9 +1732,8 @@ async function upgradeGo() {
       res.className = "result reveal " + (r.won ? "win" : "lose");
       wheel.classList.add(r.won ? "won" : "lost");
       if (r.won) {
-        res.textContent = r.nft.demo
-          ? `Апгрейд! Демо-NFT ${r.nft.title} «${r.nft.model}» — в профиле → «Мои подарки»`
-          : `Апгрейд! ${r.nft.title} «${r.nft.model}» — в профиле → «Мои подарки»`;
+        res.textContent = `Апгрейд! ${r.nft.title} «${r.nft.model}» — администратор проверит и подтвердит, `
+          + "после этого NFT можно вывести из «Мои подарки»";
         haptic("win");
         fxBurstAt(wheel, { count: 80, speed: 7 });
         $("#bigwin-label").textContent = "UPGRADE";
@@ -1772,7 +1841,7 @@ async function slotsSpin() {
         machine.classList.add("won");
         res.className = "result win reveal";
         res.textContent = r.nft.demo
-          ? `ДЖЕКПОТ! Демо-NFT ${r.nft.title} · «${r.nft.model}» — в профиле → «Мои подарки»`
+          ? `ДЖЕКПОТ! NFT ${r.nft.title} · «${r.nft.model}» — в «Мои подарки», поставьте его в апгрейд`
           : `ДЖЕКПОТ! NFT ${r.nft.emoji} ${r.nft.title} · «${r.nft.model}» — в профиле → «Мои подарки»`;
         haptic("win");
         fxBurstAt(machine, { count: 80, speed: 9 });
@@ -3992,8 +4061,9 @@ function bind() {
   }));
   $$("[data-copy]").forEach((b) => b.addEventListener("click", () => copyText($("#" + b.dataset.copy).textContent)));
   $("#ton-open").addEventListener("click", tonOpenWallet);
-  $("#ton-withdraw").addEventListener("click", tonWithdraw);
-  $("#ton-max").addEventListener("click", () => { $("#ton-amount").value = Math.floor(state.bal.ton / NANO * 100) / 100; });
+  $("#quest-card").addEventListener("click", questClick);
+  let shopTimer = 0;
+  $("#shop-q").addEventListener("input", (e) => { shop.query = e.target.value; clearTimeout(shopTimer); shopTimer = setTimeout(shopRender, 150); });
   $("#ref-copy").addEventListener("click", refCopy);
   $("#ref-share").addEventListener("click", refShare);
   $("#sheet-cancel").addEventListener("click", () => $("#sheet").classList.add("hidden"));

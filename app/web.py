@@ -27,7 +27,7 @@ from .nft import deliver as deliver_nft
 from .nftimg import NftImages, render_tgs
 from .relayer import Relayer
 from . import sports as sp
-from .withdraw import GiftCatalog, notify_admins, notify_admins_ton
+from .withdraw import GiftCatalog, notify_admins, notify_admins_ton, notify_upgrade
 
 log = logging.getLogger(__name__)
 
@@ -124,8 +124,9 @@ async def cors(request: web.Request, handler: Handler) -> web.StreamResponse:
 # Игровые действия — только для подписчиков канала (вывод, пополнение и продажа подарков доступны всем)
 SUB_REQUIRED = frozenset({
     "/api/slots", "/api/plinko", "/api/pickaxe", "/api/case", "/api/mines/start", "/api/crash/bet", "/api/pvp/bet",
-    "/api/upgrade", "/api/bonus", "/api/free_case", "/api/sports/bet",
+    "/api/upgrade", "/api/bonus", "/api/free_case", "/api/sports/bet", "/api/shop/buy",
 })
+NO_STARS_WITHDRAW = "Вывод звёзд и TON отключён — выводятся только NFT (Профиль → Мои подарки)"
 SUB_OK_STATUSES = {"member", "administrator", "creator", "restricted"}
 
 
@@ -325,14 +326,8 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
                            "tables": {f"{r}:{k}": t for (r, k), t in g.PLINKO_TABLES.items()}},
                 "pickaxe": {"table": g.PICKAXE_TABLE, "wheel": [list(w) for w in g.PICK_WHEEL], "tiers": g.PICK_TIERS,
                             "g": g.PICK_G, "size": g.PICK_SIZE, "com": list(g.PICK_COM), "top": g.PICK_TOP},
-                "cases": [
-                    {**{k: c[k] for k in ("id", "name", "emoji", "price")},
-                     **({"rtp": c["rtp"]} if is_admin else {}),
-                     "prizes": [{k: p.get(k) for k in ("kind", "emoji", "amount", "chance", "title", "model", "rarity",
-                                                       "demo", "gift_id")}
-                                for p in c["prizes"]]}
-                    for c in await cases.list()
-                ],
+                "cases": [],                          # кейсы закрыты — вместо кейса дня ежедневный квест
+                "nft_withdraw_fee": g.NFT_WITHDRAW_FEE,
                 "mines_min": g.MINES_MIN,
                 "channel": CHANNEL.lstrip("@"),
                 "mines_edge": g.MINES_EDGE,
@@ -461,6 +456,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
     @routes.post("/api/withdraw")
     async def withdraw(request: web.Request) -> web.Response:
+        raise GameError(NO_STARS_WITHDRAW)
         gift_id = (await body(request)).get("gift_id")
         gift = await catalog.get(gift_id) if isinstance(gift_id, str) else None
         if not gift:
@@ -513,6 +509,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
     @routes.post("/api/free_case")
     async def free_case(request: web.Request) -> web.Response:
+        raise GameError("Кейсы закрыты — забирайте ежедневную награду за подписку на канал")
         result = await casino.open_free_case(request[USER_ID])
         if result.get("nft") and result["nft"].get("win_id"):
             await to_profile(result["nft"])
@@ -543,6 +540,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
     @routes.post("/api/case")
     async def open_case(request: web.Request) -> web.Response:
+        raise GameError("Кейсы закрыты")
         data = await body(request)
         case_id = data.get("case")
         case = await cases.get(case_id) if isinstance(case_id, str) else None
@@ -614,6 +612,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
 
     @routes.post("/api/ton/withdraw")
     async def ton_withdraw(request: web.Request) -> web.Response:
+        raise GameError(NO_STARS_WITHDRAW)
         data = await body(request)
         wd = await casino.ton_withdraw_request(request[USER_ID], data.get("amount"), data.get("address"))
         await notify_admins_ton(bot, cfg, casino, wd)
@@ -658,9 +657,31 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def upgrade(request: web.Request) -> web.Response:
         data = await body(request)
         result = await casino.upgrade(request[USER_ID], data.get("gifts"), data.get("target"))
-        if result["nft"] and result["nft"]["win_id"]:
-            await to_profile(result["nft"])
+        if result["nft"] and result["nft"].get("pending"):
+            await notify_upgrade(bot, cfg, casino, result["nft"]["gift_id"])
         return web.json_response(result)
+
+    # ---------- магазин NFT и ежедневный квест ----------
+
+    @routes.get("/api/shop")
+    async def shop(request: web.Request) -> web.Response:
+        return web.json_response({"items": await casino.upgrade_targets(request[USER_ID]),
+                                  "fee": g.NFT_WITHDRAW_FEE})
+
+    @routes.post("/api/shop/buy")
+    async def shop_buy(request: web.Request) -> web.Response:
+        return web.json_response(await casino.shop_buy(request[USER_ID], (await body(request)).get("model")))
+
+    @routes.get("/api/quest")
+    async def quest(request: web.Request) -> web.Response:
+        uid = request[USER_ID]
+        return web.json_response({**await casino.quest_status(uid), "channel": CHANNEL.lstrip("@"),
+                                  "subscribed": await subscribed(uid)})
+
+    @routes.post("/api/quest")
+    async def quest_claim(request: web.Request) -> web.Response:
+        uid = request[USER_ID]
+        return web.json_response(await casino.quest_claim(uid, await subscribed(uid, fresh=True)))
 
     @routes.get("/api/gifts")
     async def my_gifts(request: web.Request) -> web.Response:

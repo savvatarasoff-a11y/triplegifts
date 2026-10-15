@@ -1162,7 +1162,7 @@ class Casino:
     async def gifts(self, user_id: int) -> list[dict]:
         now = time.time()
         rows = await self.db.all("SELECT * FROM user_gifts WHERE user_id=? AND kind='nft' AND status IN "
-                                 "('owned','staked','withdrawing') ORDER BY value DESC, id", user_id)
+                                 "('owned','staked','withdrawing','pending') ORDER BY value DESC, id", user_id)
         return [self._gift_view(r, now) for r in rows]
 
     @staticmethod
@@ -1219,18 +1219,26 @@ class Casino:
             if not row or row["status"] != "owned":
                 raise GameError("Этот подарок уже поставлен или выведен")
             if row["test"]:
-                raise GameError("Демо-NFT нельзя вывести — его можно продать казино или поставить")
+                raise GameError("Этот NFT выводится после апгрейда: улучшите его, админ одобрит — и можно выводить")
             if row["transfer_at"] > time.time():
                 raise GameError("Telegram пока не даёт передать этот подарок — попробуйте позже")
             if row["from_user"] != user_id:                 # свой присланный NFT игрок забирает без лимита
                 await self.require_withdraw_limit(user_id, row["value"] or 0)
+            try:
+                await self.db.change_balance(c, user_id, -g.NFT_WITHDRAW_FEE, "nft_withdraw_fee", str(gift_id))
+            except InsufficientFunds:
+                raise GameError(f"Вывод NFT стоит {g.NFT_WITHDRAW_FEE} ★ — пополните баланс") from None
             await c.execute("UPDATE user_gifts SET status='withdrawing', withdrawn_at=? WHERE id=?", (time.time(), gift_id))
         return dict(row)
 
     async def gift_withdraw_finish(self, gift_id: int, ok: bool) -> None:
         async with self.db.tx() as c:
-            await c.execute("UPDATE user_gifts SET status=? WHERE id=? AND status='withdrawing'",
-                            ("withdrawn" if ok else "owned", gift_id))
+            res = await c.execute("UPDATE user_gifts SET status=? WHERE id=? AND status='withdrawing'",
+                                  ("withdrawn" if ok else "owned", gift_id))
+            if not ok and res.rowcount == 1:                    # не передали — комиссию возвращаем
+                async with c.execute("SELECT user_id FROM user_gifts WHERE id=?", (gift_id,)) as q:
+                    row = await q.fetchone()
+                await self.db.change_balance(c, row["user_id"], g.NFT_WITHDRAW_FEE, "nft_withdraw_refund", str(gift_id))
 
     # ---------- апгрейд NFT ----------
 
@@ -1303,10 +1311,96 @@ class Casino:
             await c.execute("DELETE FROM user_gifts WHERE test=1")
         return res.rowcount
 
+    # ---------- магазин NFT (для апгрейда) ----------
+
+    async def shop_buy(self, user_id: int, model_id: Any) -> dict:
+        """Покупка NFT по цене маркета за звёзды. Купленный NFT — для апгрейда (вывести можно после одобрения)."""
+        if not isinstance(model_id, int) or isinstance(model_id, bool):
+            raise GameError("Выберите NFT")
+        async with self.db.tx() as c:
+            async with c.execute(
+                    "SELECT * FROM nft_models WHERE id=? AND enabled=1 AND stock > reserved AND price > 0 AND price_at > ? "
+                    "AND model GLOB '*[^0-9]*'", (model_id, time.time() - NFT_PRICE_MAX_AGE)) as q:
+                m = await q.fetchone()
+            if not m:
+                raise GameError("Этого NFT сейчас нет в магазине")
+            try:
+                balance = await self.db.change_balance(c, user_id, -m["price"], "shop", str(model_id))
+            except InsufficientFunds:
+                raise GameError("Недостаточно звёзд на балансе") from None
+            gift_id = await self._demo_gift(c, user_id, m["collection_name"], m["model"], m["emoji"], m["rarity"],
+                                            m["price"])
+        return {"gift_id": gift_id, "balance": balance, "title": m["collection_name"], "model": m["model"],
+                "price": m["price"]}
+
+    # ---------- одобрение выигрышей апгрейда админом ----------
+
+    async def upgrade_pending(self) -> list[dict]:
+        return await self.db.all("SELECT * FROM user_gifts WHERE status='pending' ORDER BY id")
+
+    async def upgrade_approve(self, gift_id: int, stock: list[dict]) -> dict:
+        """Привязывает к выигрышу настоящий подарок этой модели с аккаунта релейера (stock — свободные подарки)."""
+        from .nftimg import norm
+        row = await self.db.one("SELECT * FROM user_gifts WHERE id=? AND status='pending'", gift_id)
+        if not row:
+            raise GameError("Заявка уже обработана")
+        used = {r["ref"] for r in await self.db.all(
+            "SELECT ref FROM user_gifts WHERE status IN ('owned','staked','withdrawing','pending')")}
+        match = [i for i in stock if norm(i["collection_name"]) == norm(row["collection_name"])
+                 and norm(i["model"] or "") == norm(row["model"] or "") and str(i["ref"]) not in used]
+        if not match:
+            raise GameError(f"У релейера нет свободного подарка {row['collection_name']} «{row['model']}». "
+                            "Купите его на маркете, отправьте релейеру и нажмите «Одобрить» ещё раз.")
+        item = match[0]
+        ref = str(item["ref"])
+        async with self.db.tx() as c:
+            # прошлые записи этого же подарка (продан/проигран/в запасе) — освобождаем ref, он уникальный
+            await c.execute("UPDATE user_gifts SET ref = ref || ':old' || id WHERE ref=? AND id!=?", (ref, gift_id))
+            await c.execute(
+                "UPDATE user_gifts SET ref=?, collection_id=?, number=?, rarity=COALESCE(?, rarity), "
+                "emoji=COALESCE(?, emoji), transfer_at=?, status='owned', test=0 WHERE id=? AND status='pending'",
+                (ref, item["collection_id"], item.get("number"), item.get("rarity"), item.get("emoji"),
+                 item.get("transfer_at") or 0, gift_id))
+        return dict(await self.db.one("SELECT * FROM user_gifts WHERE id=?", gift_id))
+
+    async def upgrade_reject(self, gift_id: int) -> dict:
+        """Админ отклонил выигрыш: поставленные NFT возвращаются игроку."""
+        async with self.db.tx() as c:
+            async with c.execute("SELECT * FROM user_gifts WHERE id=? AND status='pending'", (gift_id,)) as q:
+                row = await q.fetchone()
+            if not row:
+                raise GameError("Заявка уже обработана")
+            ids = json.loads(row["upgrade_from"] or "[]")
+            if ids:
+                await c.execute(f"UPDATE user_gifts SET status='owned' WHERE user_id=? AND status='lost' AND id IN "
+                                f"({','.join('?' * len(ids))})", (row["user_id"], *ids))
+            await c.execute("DELETE FROM user_gifts WHERE id=?", (gift_id,))
+        return dict(row)
+
+    # ---------- ежедневный квест: подписка на канал ----------
+
+    async def quest_status(self, user_id: int) -> dict:
+        user = await self.db.get_user(user_id) or {}
+        nxt = (user.get("quest_at") or 0) + g.QUEST_EVERY
+        now = time.time()
+        return {"reward": g.QUEST_REWARD, "ready": now >= nxt, "in": max(0, nxt - now)}
+
+    async def quest_claim(self, user_id: int, subscribed: bool) -> dict:
+        if not subscribed:
+            raise GameError("Сначала подпишитесь на канал — потом заберите награду")
+        now = time.time()
+        async with self.db.tx() as c:
+            res = await c.execute("UPDATE users SET quest_at=? WHERE id=? AND quest_at <= ?",
+                                  (now, user_id, now - g.QUEST_EVERY))
+            if res.rowcount != 1:
+                raise GameError("Награду за сегодня вы уже забрали — приходите завтра")
+            balance = await self.db.change_balance(c, user_id, g.QUEST_REWARD, "bonus", "quest")
+        return {"reward": g.QUEST_REWARD, "balance": balance, **(await self.quest_status(user_id))}
+
     async def upgrade(self, user_id: int, gifts: Any, target_id: Any) -> dict:
         """Ставка — только свои NFT, цель — модель казино подороже.
 
-        Выигрыш — NFT цели (передаёт релейер). Поставленные NFT в любом случае уходят казино.
+        Выигрыш — NFT цели: ждёт одобрения админа (он кладёт подарок релейеру). Поставленные NFT уходят казино.
         """
         gift_ids = self._gift_ids(gifts)
         if not gift_ids:
@@ -1336,21 +1430,18 @@ class Casino:
             detail: dict[str, Any] = {"target": target["id"], "model": target["model"], "chance": round(chance, 4),
                                       "roll": round(roll, 4), "gifts": gift_ids}
             nft = None
-            if won and target["test"]:
-                # демо-цель: выигрыш — демо-подарок в профиль (продаётся по флору)
-                gift_id = await self._demo_gift(c, user_id, target["collection_name"], target["model"],
-                                                target["emoji"], target["rarity"], target["price"])
-                nft = {"win_id": None, "demo": True, "title": target["collection_name"], "model": target["model"],
-                       "emoji": target["emoji"] or "💎", "price": target["price"], "gift_id": gift_id}
-            elif won:
-                await c.execute("UPDATE nft_models SET reserved=reserved+1 WHERE id=?", (target["id"],))
-                win = await c.execute(
-                    "INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (?,?,?,?)",
-                    (target["id"], user_id, target["price"], now),
-                )
-                detail["nft_win"] = win.lastrowid
-                nft = {"win_id": win.lastrowid, "title": target["collection_name"], "model": target["model"],
-                       "emoji": target["emoji"] or "💎", "price": target["price"]}
+            if won:
+                # выигрыш ждёт админа: он находит подарок этой модели, кладёт релейеру и одобряет
+                res = await c.execute(
+                    "INSERT INTO user_gifts(user_id, ref, kind, collection_id, collection_name, number, model, emoji, "
+                    "rarity, value, priced_at, status, created_at, test, upgrade_from) "
+                    "VALUES (?,?,'nft',?,?,NULL,?,?,?,?,?,'pending',?,1,?)",
+                    (user_id, f"pending:{secrets.token_hex(8)}", target["collection_id"], target["collection_name"],
+                     target["model"], target["emoji"] or "💎", target["rarity"], target["price"], now, now,
+                     json.dumps(gift_ids)))
+                detail["pending_gift"] = res.lastrowid
+                nft = {"win_id": None, "pending": True, "gift_id": res.lastrowid, "title": target["collection_name"],
+                       "model": target["model"], "emoji": target["emoji"] or "💎", "price": target["price"]}
             await self.db.log_bet(c, user_id, "upgrade", stake, target["price"] if won else 0,
                                   json.dumps(detail, ensure_ascii=False))
         return {"won": won, "chance": chance, "roll": roll, "stake": stake, "target": target["price"], "nft": nft}

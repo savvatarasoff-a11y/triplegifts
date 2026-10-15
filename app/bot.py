@@ -20,16 +20,17 @@ from aiogram.types import (
 )
 
 from .casino import Casino, GameError
+from .games import logic as g
 from .config import Config
 from .web import (DEPOSIT_MAX, DEPOSIT_MIN, deposit_invoice_kwargs, notify_referrer, parse_deposit_payload,
                   parse_referral, referral_link)
 from .db import REFERRAL_RATE
 from .mrkt import STAR_USD
 from .channel import CHANNEL
-from .nft import deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
+from .nft import casino_stock, deliver as deliver_nft, describe as describe_nft, sync as sync_nfts
 from .relayer import Relayer
 from . import broadcast as bc, money, ton
-from .withdraw import admin_keyboard, approve, reject, ton_admin_keyboard, ton_decide
+from .withdraw import admin_keyboard, approve, reject, ton_admin_keyboard, ton_decide, upgrade_keyboard, upgrade_text
 
 log = logging.getLogger(__name__)
 
@@ -227,7 +228,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/user <code>@username или ID</code> — баланс игрока\n"
             "/broadcast — рассылка игрокам (всем, пополнявшим, активным… или своему списку)\n"
             "/take <code>@user|ID сумма|all [ton] [причина]</code> — тихо списать баланс (абуз уязвимостей)\n"
-            "/give <code>@user|ID сумма [ton] [причина]</code> — тихо вернуть/начислить"
+            "/give <code>@user|ID сумма [ton] [причина]</code> — тихо вернуть/начислить\n"
+            "/upgrades — выигрыши апгрейда, ждущие одобрения"
         )
 
     @admin.message(Command("checks"))
@@ -759,6 +761,50 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             try:
                 await query.message.edit_text(f"{query.message.html_text}\n\n<b>{html.escape(text)}</b>",
                                               disable_web_page_preview=True)
+            except Exception:
+                pass
+
+    # ---------- выигрыши апгрейда: админ кладёт подарок релейеру и одобряет ----------
+
+    @admin.message(Command("upgrades"))
+    async def list_upgrades(message: Message) -> None:
+        rows = await casino.upgrade_pending()
+        if not rows:
+            await message.answer("Апгрейдов, ждущих одобрения, нет.")
+            return
+        for gift in rows[:20]:
+            await message.answer(upgrade_text(gift, await casino.db.get_user(gift["user_id"])),
+                                 reply_markup=upgrade_keyboard(gift["id"]))
+
+    @admin.callback_query(F.data.startswith("up:"))
+    async def upgrade_decision(query: CallbackQuery, bot: Bot) -> None:
+        _, action, raw_id = query.data.split(":", 2)
+        gift_id = int(raw_id)
+        try:
+            if action == "ok":
+                if relayer is None or not relayer.ready:
+                    raise GameError("Релейер не подключён — /relayer")
+                gift = await casino.upgrade_approve(gift_id, await casino_stock(casino.db, await relayer.inventory()))
+                result = "✅ Одобрено — NFT в профиле игрока, можно выводить"
+                note = (f"✅ Апгрейд одобрен: {gift['emoji'] or '💎'} {html.escape(gift['collection_name'] or '')} "
+                        f"«{html.escape(gift['model'] or '')}» в профиле → «Мои подарки». Вывод в Telegram — "
+                        f"{g.NFT_WITHDRAW_FEE} ⭐.")
+            else:
+                gift = await casino.upgrade_reject(gift_id)
+                result = "❌ Отклонено — поставленные NFT вернулись игроку"
+                note = (f"Выигрыш апгрейда {html.escape(gift['collection_name'] or '')} «{html.escape(gift['model'] or '')}» "
+                        "отменён администратором. Поставленные NFT вернулись в профиль.")
+        except GameError as e:
+            await query.answer(str(e)[:190], show_alert=True)
+            return
+        await query.answer(result[:190])
+        try:
+            await bot.send_message(gift["user_id"], note)
+        except Exception:
+            pass
+        if isinstance(query.message, Message):
+            try:
+                await query.message.edit_text(f"{query.message.html_text}\n\n<b>{result}</b>")
             except Exception:
                 pass
 

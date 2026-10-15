@@ -270,6 +270,9 @@ class Database:
         await self._add_columns("nft_models", {"seen_at": "REAL"})
         # когда игрок вывел NFT — для недельного лимита вывода
         await self._add_columns("user_gifts", {"withdrawn_at": "REAL"})
+        # выигрыш апгрейда ждёт одобрения админа: какие NFT игрок поставил (вернуть, если админ отклонит)
+        await self._add_columns("user_gifts", {"upgrade_from": "TEXT"})
+        await self._add_columns("users", {"quest_at": "REAL NOT NULL DEFAULT 0"})
         # превью картинок NFT/подарков: хранятся в базе, чтобы не качать их заново после перезапуска
         await self.conn.execute("CREATE TABLE IF NOT EXISTS nft_images (key TEXT PRIMARY KEY, data BLOB NOT NULL, "
                                 "ctype TEXT NOT NULL, ts REAL NOT NULL)")

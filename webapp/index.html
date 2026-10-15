@@ -58,14 +58,14 @@
       <div class="games">
         <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10 000</span><span class="gn">Краш</span></button>
         <button class="game" data-go="pickaxe"><img class="gi px" src="static/mc/pick.png" alt=""><span class="gx">новинка</span><span class="gn">Кирка</span></button>
-        <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT внутри</span><span class="gn">Кейсы</span></button>
+        <button class="game" data-go="shop"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT для апгрейда</span><span class="gn">Магазин</span></button>
         <button class="game accent" data-go="upgrade"><svg class="gi"><use href="#i-upgrade"/></svg><span class="gx">NFT → дороже</span><span class="gn">Апгрейд</span></button>
       </div>
 
-      <button class="free-card" id="free-card" data-go="free">
-        <span class="free-ic">📦</span>
-        <span class="free-t"><b>Бесплатный кейс</b><small id="free-sub">каждый день — для подписчиков канала</small></span>
-        <span class="free-go" id="free-go">Открыть</span>
+      <button class="free-card" id="quest-card">
+        <span class="free-ic">📢</span>
+        <span class="free-t"><b>Ежедневный квест</b><small id="quest-sub">подписка на канал — награда каждый день</small></span>
+        <span class="free-go" id="quest-go">Забрать</span>
       </button>
 
       <div class="bonus-card" id="bonus-card">
@@ -124,7 +124,7 @@
         <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×1000+</span><span class="gn">Мины</span></button>
         <button class="game" data-go="plinko"><svg class="gi"><use href="#i-plinko"/></svg><span class="gx">до ×949</span><span class="gn">Plinko</span></button>
         <button class="game" data-go="pickaxe"><img class="gi px" src="static/mc/pick.png" alt=""><span class="gx">новинка</span><span class="gn">Кирка</span></button>
-        <button class="game" data-go="cases"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">подарки и NFT</span><span class="gn">Кейсы</span></button>
+        <button class="game" data-go="shop"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT для апгрейда</span><span class="gn">Магазин NFT</span></button>
       </div>
       <div class="sec-head"><span>Спорт</span></div>
       <div class="games">
@@ -323,7 +323,7 @@
           <div class="panel-title">Ставьте свои подарки</div>
           <p class="note" id="nft-howto">Отправьте NFT или подарок в Telegram аккаунту казино — он появится здесь через несколько секунд.</p>
           <button class="btn" id="nft-open">Отправить подарок</button>
-          <p class="note">NFT оценивается по полу маркета своей модели: его можно поставить в PvP, краш или апгрейд, продать казино за <span id="nft-rate">90</span>% или вывести обратно. Обычные подарки сразу зачисляются звёздами.</p>
+          <p class="note">NFT оценивается по полу маркета своей модели: его можно поставить в PvP, краш или апгрейд или продать казино за <span id="nft-rate">90</span>%. NFT из магазина — для апгрейда; выигранный в апгрейде и подтверждённый администратором выводится в Telegram за <span class="nft-fee">30</span> ★. Обычные подарки сразу зачисляются звёздами.</p>
         </div>
         <div class="panel">
           <div class="panel-title">Мои подарки</div>
@@ -331,29 +331,15 @@
         </div>
       </div>
       <div class="hidden" id="tab-out">
-        <div class="panel only-ton">
-          <div class="panel-title">Вывод TON на кошелёк</div>
-          <div class="wager hidden" id="ton-wager"></div>
-          <div class="wd-limit hidden" id="ton-wager-limit"></div>
-          <input id="ton-address" placeholder="Адрес TON-кошелька (UQ… или EQ…)" autocomplete="off">
-          <div class="row">
-            <input id="ton-amount" type="number" inputmode="decimal" step="0.01" placeholder="Сумма, TON">
-            <button class="btn" id="ton-max">MAX</button>
-          </div>
-          <button class="btn big" id="ton-withdraw">Вывести TON</button>
-          <p class="note">Заявку проверяет администратор и переводит TON на ваш кошелёк. Минимум <span id="ton-min">0.1</span> TON.</p>
-          <div class="history" id="ton-history"></div>
-        </div>
-        <div class="panel only-stars">
-          <div class="panel-title">Вывод подарком Telegram</div>
-          <p class="note left">Выберите подарок — его стоимость спишется с баланса. После проверки подарок придёт вам в Telegram: его можно оставить или обменять на звёзды в профиле (Telegram начисляет за обмен чуть меньше стоимости).</p>
-          <div class="wager hidden" id="wager"></div>
+        <div class="panel center">
+          <div class="big-star">🎁</div>
+          <div class="panel-title">Вывод — только NFT</div>
+          <p class="note">Купите NFT в магазине и поставьте его в апгрейд. Выигранный NFT администратор проверит и подтвердит — после этого его можно вывести в Telegram из «Мои подарки» за <b><span class="nft-fee">30</span> ★</b>.</p>
           <div class="wd-limit hidden" id="wager-limit"></div>
-          <div class="gifts" id="gifts"></div>
-        </div>
-        <div class="panel only-stars">
-          <div class="panel-title">Мои выводы</div>
-          <div class="history" id="wd-history"></div>
+          <div class="row">
+            <button class="btn" data-go="shop">Магазин NFT</button>
+            <button class="btn" data-wallet="nft">Мои подарки</button>
+          </div>
         </div>
       </div>
     </section>
@@ -464,6 +450,13 @@
     </section>
 
     <!-- Кейсы -->
+    <!-- Магазин NFT: покупка по цене маркета для апгрейда -->
+    <section class="screen" id="shop">
+      <p class="note left">NFT по цене маркета. Купленный NFT ставится в апгрейд — на модель дороже. Выигранный в апгрейде NFT администратор проверит и подтвердит, после этого его можно вывести в Telegram за <span class="nft-fee">30</span> ★.</p>
+      <input id="shop-q" class="ab-q" placeholder="Поиск: коллекция или модель" autocomplete="off">
+      <div class="shop-list" id="shop-list"></div>
+    </section>
+
     <section class="screen" id="free">
       <div class="case-hero"><div class="case-emoji">📦</div>
         <div class="case-meta"><span>раз в 24 часа</span><span>бесплатно</span><span>для подписчиков</span></div></div>

@@ -47,12 +47,37 @@ async def test_upgrade_win(env, monkeypatch):
     monkeypatch.setattr(g, "upgrade_roll", lambda rng=None: 0.0)
     r = await casino.upgrade(42, ids, 1)
     assert r["won"] and r["stake"] == 1500 and r["chance"] == pytest.approx(0.9 * 1500 / 6000)
-    assert r["nft"]["model"] == "Black" and r["nft"]["win_id"] == 1
-    assert (await db.one("SELECT stock, reserved FROM nft_models WHERE id=1")) == {"stock": 1, "reserved": 1}
-    assert await casino.gifts(42) == []                                   # поставленные NFT ушли казино
-    assert {r["status"] for r in await db.all("SELECT status FROM user_gifts")} == {"lost"}
+    assert r["nft"]["model"] == "Black" and r["nft"]["pending"]
+    mine = await casino.gifts(42)                                         # поставленные NFT ушли казино,
+    assert [(x["model"], x["status"]) for x in mine] == [("Black", "pending")]   # выигрыш ждёт админа
     stock = await nft.casino_stock(db, [sent(1, 42), sent(2, 42)])
-    assert len(stock) == 2                                                # и стали запасом для кейсов
+    assert len(stock) == 2                                                # проигранные NFT — запас релейера
+    # админ одобряет: подарка нужной модели у релейера нет → просим купить
+    with pytest.raises(GameError, match="Купите"):
+        await casino.upgrade_approve(r["nft"]["gift_id"], stock)
+    cap = {**sent(5, 7, number=77, model="Black"), "collection_id": "9", "collection_name": "Durov's Cap"}
+    done = await casino.upgrade_approve(r["nft"]["gift_id"], stock + [cap])
+    assert (done["status"], done["test"], done["ref"], done["number"]) == ("owned", 0, "5", 77)
+    with pytest.raises(GameError, match="обработана"):
+        await casino.upgrade_approve(r["nft"]["gift_id"], [cap])
+    # вывод — за 30 ★ с баланса
+    # вывод выигранного и одобренного NFT (уровень вывода VIP — лимит 10 000 ★ в неделю)
+    await db.conn.execute("UPDATE users SET balance=10, deposited=10000 WHERE id=42")
+    await db.credit_payment("p42", 42, 100)
+    claimed = await casino.gift_withdraw_claim(42, done["id"])
+    assert claimed["ref"] == "5" and (await db.get_user(42))["balance"] == 110 - g.NFT_WITHDRAW_FEE
+    await casino.gift_withdraw_finish(done["id"], False)                  # не передали — комиссия вернулась
+    assert (await db.get_user(42))["balance"] == 110
+
+
+async def test_upgrade_win_rejected_returns_stake(env, monkeypatch):
+    db, casino = env
+    ids = [x["id"] for x in await casino.gifts(42)]
+    monkeypatch.setattr(g, "upgrade_roll", lambda rng=None: 0.0)
+    r = await casino.upgrade(42, ids, 1)
+    await casino.upgrade_reject(r["nft"]["gift_id"])
+    assert sorted(x["id"] for x in await casino.gifts(42)) == ids and all(
+        x["status"] == "owned" for x in await casino.gifts(42))
 
 
 async def test_upgrade_lose(env, monkeypatch):
@@ -98,21 +123,51 @@ async def test_demo_nfts_visible_to_all_won_into_profile(env, monkeypatch):
     frog = next(t for t in demo if t["model"] == "Frog")
     before = (await db.get_user(42))["balance"]
     r = await casino.upgrade(42, ids, frog["id"])
-    assert r["won"] and r["nft"]["demo"] and r["nft"]["win_id"] is None
-    won = [x for x in await casino.gifts(42) if x["id"] == r["nft"]["gift_id"]][0]   # демо-NFT — в профиль
-    assert won["demo"] and won["model"] == "Frog" and won["sell"] == 9000
-    assert (await casino.gift_sell(42, won["id"]))["balance"] == before + 9000
-    assert (await db.one("SELECT COUNT(*) n FROM nft_wins"))["n"] == 0            # передавать нечего
-    # дюп админа нельзя вывести, но можно продать
+    assert r["won"] and r["nft"]["pending"] and r["nft"]["win_id"] is None
+    won = [x for x in await casino.gifts(42) if x["id"] == r["nft"]["gift_id"]][0]   # выигрыш ждёт одобрения
+    assert won["status"] == "pending" and won["model"] == "Frog"
+    with pytest.raises(GameError):
+        await casino.gift_sell(42, won["id"])                                    # пока ждёт — не продать
+    assert (await db.one("SELECT COUNT(*) n FROM nft_wins"))["n"] == 0
+    assert (await db.get_user(42))["balance"] == before
+    # дюп админа (не улучшенный) нельзя вывести, но можно продать
     dupe = (await casino.gifts(admin))[0]
     assert dupe["demo"]
-    with pytest.raises(GameError, match="Демо"):
+    with pytest.raises(GameError, match="апгрейда"):
         await casino.gift_withdraw_claim(admin, dupe["id"])
     assert (await casino.gift_sell(admin, dupe["id"]))["amount"] == dupe["value"]
     # синхронизация релейера не обнуляет демо-модели
     await nft.sync(db, FakeRelayer([]))
     assert (await db.one("SELECT MIN(stock) s FROM nft_models WHERE test=1"))["s"] == 999
     assert await casino.demo_clear() == 3
+
+
+async def test_shop_buy_goes_to_inventory(env):
+    db, casino = env
+    await db.conn.execute("UPDATE users SET balance=7000 WHERE id=43")
+    with pytest.raises(GameError, match="нет в магазине"):
+        await casino.shop_buy(43, 2)                                             # цена устарела
+    r = await casino.shop_buy(43, 1)
+    assert r["balance"] == 1000 and r["model"] == "Black"
+    item = (await casino.gifts(43))[0]
+    assert item["status"] == "owned" and item["value"] == 6000 and item["demo"]   # купленный — для апгрейда
+    await db.credit_payment("p43", 43, 100)
+    with pytest.raises(GameError, match="после апгрейда"):
+        await casino.gift_withdraw_claim(43, item["id"])                     # сразу вывести нельзя — только поставить
+    with pytest.raises(GameError, match="Недостаточно"):
+        await casino.shop_buy(43, 1)
+
+
+async def test_daily_quest(env):
+    db, casino = env
+    with pytest.raises(GameError, match="подпишитесь"):
+        await casino.quest_claim(43, False)
+    r = await casino.quest_claim(43, True)
+    assert r["reward"] == g.QUEST_REWARD and r["balance"] == g.QUEST_REWARD and not r["ready"]
+    with pytest.raises(GameError, match="завтра"):
+        await casino.quest_claim(43, True)
+    await db.conn.execute("UPDATE users SET quest_at=quest_at-? WHERE id=43", (g.QUEST_EVERY,))
+    assert (await casino.quest_status(43))["ready"]
 
 
 async def test_demo_nft_from_case_goes_to_profile(env):

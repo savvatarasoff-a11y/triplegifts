@@ -742,6 +742,9 @@ WITHDRAW_TIERS = (
     ("Кит", "🐋", 50_000, 50_000),
 )
 WITHDRAW_WINDOW = 7 * 86400
+NFT_WITHDRAW_FEE = 30          # вывод NFT в Telegram — 30 ★ с баланса (передача подарка платная)
+QUEST_REWARD = 5               # ежедневный квест: подписка на канал — 5 ★ раз в сутки
+QUEST_EVERY = 24 * 3600
 
 
 def withdraw_tier(deposit_points: int) -> int:
