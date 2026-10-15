@@ -10,7 +10,6 @@ from typing import Any, AsyncIterator
 import aiosqlite
 
 from . import money
-from .games import logic as g
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -258,7 +257,7 @@ class Database:
         for table in ("ledger", "bets", "payments", "mines_games", "crash_bets", "pvp_rounds"):
             await self._add_columns(table, {"cur": "TEXT NOT NULL DEFAULT 'stars'"})
         await self._add_columns("crash_bets", {"gifts": "TEXT"})   # JSON: NFT, поставленные в краш
-        # рейкбек копится с каждой ставки: звёзды — в тысячных долях звезды, TON — в nanoTON
+        # рейкбек (убран вместе с VIP): звёзды — в тысячных долях звезды, TON — в nanoTON
         await self._add_columns("users", {"rake_milli": "INTEGER NOT NULL DEFAULT 0",
                                           "rake_ton": "INTEGER NOT NULL DEFAULT 0",
                                           "bonus_at": "REAL NOT NULL DEFAULT 0"})
@@ -278,6 +277,21 @@ class Database:
         # превью картинок NFT/подарков: хранятся в базе, чтобы не качать их заново после перезапуска
         await self.conn.execute("CREATE TABLE IF NOT EXISTS nft_images (key TEXT PRIMARY KEY, data BLOB NOT NULL, "
                                 "ctype TEXT NOT NULL, ts REAL NOT NULL)")
+        await self._payout_rakeback()
+
+    async def _payout_rakeback(self) -> None:
+        """VIP-уровней с рейкбеком больше нет: накопленный и не забранный рейкбек один раз зачисляется на баланс."""
+        async with self.conn.execute("SELECT id, rake_milli, rake_ton FROM users WHERE rake_milli > 0 OR rake_ton > 0") as q:
+            rows = await q.fetchall()
+        if not rows:
+            return
+        async with self.tx() as c:
+            for r in rows:
+                if r["rake_milli"] >= 1000:
+                    await self.change_balance(c, r["id"], r["rake_milli"] // 1000, "rakeback", "vip_end")
+                if r["rake_ton"]:
+                    await self.change_balance(c, r["id"], r["rake_ton"], "rakeback", "vip_end", money.TON)
+            await c.execute("UPDATE users SET rake_milli=0, rake_ton=0 WHERE rake_milli > 0 OR rake_ton > 0")
 
     async def _add_columns(self, table: str, columns: dict[str, str]) -> None:
         async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
@@ -394,16 +408,6 @@ class Database:
         await c.execute(
             f"UPDATE users SET {wagered} = {wagered} + ?, {won} = {won} + ? WHERE id=?", (bet, win, user_id)
         )
-        # рейкбек по VIP-уровню: доля ставки копится и забирается в профиле
-        async with c.execute("SELECT wagered, ton_wagered FROM users WHERE id=?", (user_id,)) as q:
-            row = await q.fetchone()
-        if row:
-            pct = g.LEVELS[g.level_for(g.level_points(row["wagered"], row["ton_wagered"]))][3]
-            if cur == money.STARS:
-                await c.execute("UPDATE users SET rake_milli = rake_milli + ? WHERE id=?",
-                                (int(bet * pct * 1000), user_id))
-            else:
-                await c.execute("UPDATE users SET rake_ton = rake_ton + ? WHERE id=?", (int(bet * pct), user_id))
 
     # ---------- платежи ----------
 

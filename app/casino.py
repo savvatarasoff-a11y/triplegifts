@@ -160,64 +160,6 @@ class Casino:
                       "joined": r["created_at"]} for r in rows],
         }
 
-    # ---------- VIP, рейкбек, ежедневный бонус, лидеры ----------
-
-    async def vip(self, user_id: int) -> dict:
-        user = await self.db.get_user(user_id) or {}
-        points = g.level_points(user.get("wagered", 0), user.get("ton_wagered", 0))
-        lv = g.level_for(points)
-        name, emoji, start, pct = g.LEVELS[lv]
-        nxt = g.LEVELS[lv + 1] if lv + 1 < len(g.LEVELS) else None
-        now = time.time()
-        next_bonus = (user.get("bonus_at") or 0) + g.DAILY_BONUS_EVERY
-        return {
-            "level": lv, "name": name, "emoji": emoji, "rakeback": pct, "points": points,
-            "next": {"name": nxt[0], "emoji": nxt[1], "at": nxt[2], "rakeback": nxt[3]} if nxt else None,
-            "levels": [{"name": n, "emoji": e, "at": a, "rakeback": r} for n, e, a, r in g.LEVELS],
-            "rake": {"stars": (user.get("rake_milli") or 0) // 1000, "ton": user.get("rake_ton") or 0},
-            "bonus": {"ready": now >= next_bonus, "in": max(0, next_bonus - now),
-                      "allowed": (user.get("deposited") or 0) >= g.DAILY_BONUS_MIN_STARS
-                      or (user.get("ton_deposited") or 0) >= g.DAILY_BONUS_MIN_TON,
-                      "table": [{"amount": a, "chance": round(w / sum(x for _, x in g.DAILY_BONUS) * 100, 2)}
-                                for a, w in g.DAILY_BONUS]},
-        }
-
-    async def claim_rakeback(self, user_id: int) -> dict:
-        """Забрать накопленный рейкбек: целые звёзды и TON от 0.01 (остаток копится дальше)."""
-        async with self.db.tx() as c:
-            async with c.execute("SELECT rake_milli, rake_ton FROM users WHERE id=?", (user_id,)) as q:
-                row = await q.fetchone()
-            stars = row["rake_milli"] // 1000
-            ton = row["rake_ton"] if row["rake_ton"] >= money.TON_MIN_BET else 0
-            if not stars and not ton:
-                raise GameError("Рейкбек ещё копится — он растёт с каждой ставкой")
-            await c.execute("UPDATE users SET rake_milli = rake_milli - ?, rake_ton = rake_ton - ? WHERE id=?",
-                            (stars * 1000, ton, user_id))
-            balance = await self.db.change_balance(c, user_id, stars, "rakeback", None) if stars else None
-            if ton:
-                await self.db.change_balance(c, user_id, ton, "rakeback", None, money.TON)
-            if balance is None:
-                balance = await self._balance(c, user_id)
-        return {"stars": stars, "ton": ton, "balance": balance, "cur": money.STARS}
-
-    async def daily_bonus(self, user_id: int) -> dict:
-        """Раз в сутки — случайные звёзды (в среднем ≈ 4 ⭐). Только тем, кто хоть раз пополнял: против фарма."""
-        now = time.time()
-        amount = g.daily_bonus_roll()
-        async with self.db.tx() as c:
-            async with c.execute("SELECT deposited, ton_deposited, bonus_at FROM users WHERE id=?", (user_id,)) as q:
-                row = await q.fetchone()
-            if row["deposited"] < g.DAILY_BONUS_MIN_STARS and row["ton_deposited"] < g.DAILY_BONUS_MIN_TON:
-                raise GameError(f"Ежедневный бонус открывается после пополнения от {g.DAILY_BONUS_MIN_STARS} ⭐ "
-                                "или 0.5 TON")
-            res = await c.execute("UPDATE users SET bonus_at=? WHERE id=? AND bonus_at <= ?",
-                                  (now, user_id, now - g.DAILY_BONUS_EVERY))
-            if res.rowcount != 1:
-                raise GameError("Бонус уже получен — следующий через сутки")
-            balance = await self.db.change_balance(c, user_id, amount, "bonus", "daily")
-        return {"amount": amount, "balance": balance, "cur": money.STARS,
-                "table": [a for a, _ in g.DAILY_BONUS]}
-
     # ---------- ежедневный бесплатный кейс ----------
 
     async def _free_case_nft(self) -> dict | None:

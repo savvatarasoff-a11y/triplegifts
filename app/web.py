@@ -126,7 +126,7 @@ SUB_REQUIRED = frozenset({
     "/api/slots", "/api/plinko", "/api/pickaxe", "/api/case", "/api/mines/start", "/api/crash/bet", "/api/pvp/bet",
     "/api/upgrade", "/api/bonus", "/api/free_case", "/api/sports/bet", "/api/shop/buy",
 })
-NO_STARS_WITHDRAW = "Вывод звёзд и TON отключён — выводятся только NFT (Профиль → Мои подарки)"
+NO_STARS_WITHDRAW = "Вывод звёзд и TON отключён — выводятся только NFT (Инвентарь)"
 SUB_OK_STATUSES = {"member", "administrator", "creator", "restricted"}
 
 
@@ -615,14 +615,6 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         wd = await casino.ton_withdraw_request(request[USER_ID], data.get("amount"), data.get("address"))
         await notify_admins_ton(bot, cfg, casino, wd)
         return web.json_response(wd)
-
-    @routes.get("/api/vip")
-    async def vip(request: web.Request) -> web.Response:
-        return web.json_response(await casino.vip(request[USER_ID]))
-
-    @routes.post("/api/vip/rakeback")
-    async def rakeback(request: web.Request) -> web.Response:
-        return web.json_response(await casino.claim_rakeback(request[USER_ID]))
 
     @routes.post("/api/bonus")
     async def daily_bonus(request: web.Request) -> web.Response:

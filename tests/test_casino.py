@@ -458,43 +458,21 @@ async def test_profile(casino):
     assert p["deposited"] == 100 and p["games"] == 0 and p["best"] is None
 
 
-async def test_vip_rakeback(casino, monkeypatch):
+async def test_no_rakeback_accrued_and_old_rake_paid_out(casino, monkeypatch, tmp_path):
     db = casino.db
-    await fund(casino, 1, 20_000)
-    v = await casino.vip(1)
-    assert v["level"] == 0 and v["rakeback"] == 0.002 and v["next"]["at"] == 2_000
+    await fund(casino, 1, 5000)
     monkeypatch.setattr(g, "plinko_drop", lambda rows, risk, rng=None: ([0] * rows, 0, 0.0))
-    for _ in range(3):
-        await casino.plinko(1, 1000, 8, "low")                     # 3000 ставок: 0.2% → 0.4% после 2000
-    v = await casino.vip(1)
-    assert v["level"] == 1 and v["points"] == 3000
-    # 1000·0.2% + 1000·0.4% (уровень поднялся после 2-й ставки) + 1000·0.4% = 2 + 4 + 4 = 10 ⭐
-    assert v["rake"]["stars"] == 10
-    r = await casino.claim_rakeback(1)
-    assert r["stars"] == 10 and r["balance"] == 20_000 - 3000 + 10
-    with pytest.raises(GameError, match="копится"):
-        await casino.claim_rakeback(1)
-    assert (await casino.wager_status(1))["left"] == 0             # рейкбек не нужно отыгрывать
-    # рейкбек никогда не больше комиссии казино: максимум 1% при минимальной комиссии 5%
-    assert max(lv[3] for lv in g.LEVELS) <= 0.05 / 5
-
-
-async def test_daily_bonus(casino, monkeypatch):
-    with pytest.raises(GameError, match="пополнения"):
-        await casino.daily_bonus(1)                                # без пополнений — нельзя (против фарма)
-    await fund(casino, 1, 10)
-    with pytest.raises(GameError, match="от 50"):
-        await casino.daily_bonus(1)                                # и не с копеечного пополнения
-    await fund(casino, 1, 40)
-    monkeypatch.setattr(g, "daily_bonus_roll", lambda rng=None: 25)
-    r = await casino.daily_bonus(1)
-    assert r["amount"] == 25 and r["balance"] == 75
-    with pytest.raises(GameError, match="уже получен"):
-        await casino.daily_bonus(1)
-    assert (await casino.wager_status(1))["left"] == 25            # бонус нужно отыграть
-    await casino.db.conn.execute("UPDATE users SET bonus_at=0 WHERE id=1")
-    assert (await casino.daily_bonus(1))["amount"] == 25           # через сутки снова
-    assert 3 < g.daily_bonus_ev() < 5
+    await casino.plinko(1, 1000, 8, "low")
+    user = await db.get_user(1)
+    assert user["rake_milli"] == 0 and user["rake_ton"] == 0                 # VIP-рейкбека больше нет
+    # рейкбек, накопленный до отмены VIP, зачисляется на баланс один раз при запуске
+    await db.conn.execute("UPDATE users SET rake_milli=12500, rake_ton=3000000 WHERE id=1")
+    await db._payout_rakeback()
+    user = await db.get_user(1)
+    assert (user["balance"], user["ton"], user["rake_milli"], user["rake_ton"]) == (4000 + 12, 3_000_000, 0, 0)
+    await db._payout_rakeback()
+    assert (await db.get_user(1))["balance"] == 4012
+    assert (await casino.wager_status(1))["left"] == 0                       # отыгрывать не нужно
 
 
 async def test_leaders(casino):

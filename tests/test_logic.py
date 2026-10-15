@@ -206,9 +206,8 @@ def test_nft_cases_share_and_rtp():
     assert rtps == sorted(rtps, reverse=True) and rtps[-1] < rtps[0]
 
 
-def test_house_edge_everywhere_even_with_max_rakeback():
-    """Сводка математики: возврат игроку + максимальный рейкбек (1%) < 100% в каждой игре."""
-    rake = max(lv[3] for lv in g.LEVELS)
+def test_house_edge_everywhere():
+    """Сводка математики: возврат игроку < 100% в каждой игре."""
     rtp = {
         "slots": g.slots_rtp(),                                   # 777 оценён ровно ×40 — NFT не дороже
         "plinko": max(g.plinko_rtp(r, k) for r, k in g.PLINKO_TABLES),
@@ -220,7 +219,7 @@ def test_house_edge_everywhere_even_with_max_rakeback():
         "pvp": 1 - g.PVP_COMMISSION,
     }
     for game, value in rtp.items():
-        assert value + rake < 1, game
+        assert value < 1, game
     # краш: вероятность дожить до ×m у формулы crash_point
     import random
     rng = random.Random(7)
