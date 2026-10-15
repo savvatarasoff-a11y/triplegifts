@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator
 import aiosqlite
 
 from . import money
+from .games import logic as g
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -402,7 +403,18 @@ class Database:
 
     @staticmethod
     async def log_bet(c: aiosqlite.Connection, user_id: int, game: str, bet: int, win: int, detail: str = "",
-                      cur: str = money.STARS) -> None:
+                      cur: str = money.STARS) -> int:
+        """Записывает ставку. Бонус новичка: в первых NEWBIE_GAMES играх к выигрышу +5% сверху (во всех играх,
+        все показанные шансы и множители остаются честными). Возвращает начисленный бонус."""
+        bonus = 0
+        if win > 0 and bet > 0:
+            async with c.execute("SELECT COUNT(*) n FROM bets WHERE user_id=? AND bet > 0", (user_id,)) as q:
+                played = (await q.fetchone())["n"]
+            if played < g.NEWBIE_GAMES:
+                bonus = int(win * g.NEWBIE_BOOST)
+                if bonus:
+                    await Database.change_balance(c, user_id, bonus, "newbie_bonus", game, cur)
+                    win += bonus
         await c.execute(
             "INSERT INTO bets(user_id, game, bet, win, detail, ts, cur) VALUES (?,?,?,?,?,?,?)",
             (user_id, game, bet, win, detail, time.time(), cur),
@@ -411,6 +423,12 @@ class Database:
         await c.execute(
             f"UPDATE users SET {wagered} = {wagered} + ?, {won} = {won} + ? WHERE id=?", (bet, win, user_id)
         )
+        return bonus
+
+    async def newbie_left(self, user_id: int) -> int:
+        """Сколько первых игр с бонусом новичка у игрока осталось."""
+        row = await self.one("SELECT COUNT(*) n FROM bets WHERE user_id=? AND bet > 0", user_id)
+        return max(0, g.NEWBIE_GAMES - row["n"])
 
     # ---------- платежи ----------
 

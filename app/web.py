@@ -313,6 +313,7 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             "balance": user["balance"],
             "ton": user["ton"],
             "history": await casino.db.recent_bets(uid, 15),
+            "newbie": {"left": await casino.db.newbie_left(uid), "boost": g.NEWBIE_BOOST},
             "config": {
                 "min_bet": cfg.min_bet,
                 "max_bet": cfg.max_bet,

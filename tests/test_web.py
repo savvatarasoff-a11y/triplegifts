@@ -377,14 +377,14 @@ async def test_game_history_me_and_all(client):
     for uid in (3, 4):
         await client.get("/api/me", headers=auth(uid))
         assert await casino.db.credit_payment(f"h{uid}", uid, 100)
-    await casino.slots(3, 5)
-    await casino.slots(4, 7)
-    await casino.slots(4, 9)
-    await casino.plinko(3, 5, 8, "low")
+    async with casino.db.tx() as c:
+        for uid, game, bet, win in ((3, "slots", 5, 0), (4, "slots", 7, 14), (4, "slots", 9, 9), (4, "slots", 3, 30),
+                                    (3, "plinko", 5, 8)):
+            await casino.db.log_bet(c, uid, game, bet, win)
     mine = (await (await client.get("/api/history?game=slots", headers=auth(3))).json())["items"]
-    assert [h["bet"] for h in mine] == [5] and mine[0]["uid"] == 3                # только свои ставки в этой игре
+    assert [h["bet"] for h in mine] == [5] and mine[0]["uid"] == 3                # свои ставки, и проигрыши тоже
     every = (await (await client.get("/api/history?game=slots&scope=all", headers=auth(3))).json())["items"]
-    assert [h["bet"] for h in every] == [9, 7, 5]                                 # все игроки, новые сверху
+    assert [(h["bet"], h["x"]) for h in every] == [(3, 10), (7, 2)]              # «Все» — только победы, новые сверху
     assert every[0]["name"] and set(every[0]) >= {"win", "x", "cur", "ts"}
     plinko = (await (await client.get("/api/history?game=plinko&scope=all", headers=auth(4))).json())["items"]
     assert [h["uid"] for h in plinko] == [3]

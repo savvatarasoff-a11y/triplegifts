@@ -813,3 +813,11 @@ button { -webkit-user-select: none; user-select: none; }
   font-weight: 800; flex: none; }
 .gh-x { font-size: 11px; font-weight: 800; color: var(--muted); padding: 2px 6px; border-radius: 6px; background: var(--surface-2); }
 .gh-x.hi { color: var(--accent-soft); background: rgba(245, 185, 60, .14); }
+
+/* ---------- бонус новичка ---------- */
+.newbie { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 14px; border-radius: var(--radius);
+  border: 1px solid rgba(245, 185, 60, .45); background: linear-gradient(110deg, rgba(245, 185, 60, .18), var(--surface) 75%); }
+.newbie-ic { font-size: 24px; }
+.newbie-t { display: grid; gap: 2px; }
+.newbie-t b { font-size: 14px; }
+.newbie-t small { color: var(--muted); font-size: 12px; font-weight: 700; }

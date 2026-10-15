@@ -96,7 +96,8 @@ class Casino:
         balance = None
         if win > 0:
             balance = await self.db.change_balance(c, user_id, win, "win", game, cur)
-        await self.db.log_bet(c, user_id, game, bet, win, json.dumps(detail, ensure_ascii=False), cur)
+        if await self.db.log_bet(c, user_id, game, bet, win, json.dumps(detail, ensure_ascii=False), cur):
+            balance = None                            # начислен бонус новичка — баланс изменился
         if balance is None:
             balance = await self._balance(c, user_id, cur)
         return balance
@@ -260,10 +261,10 @@ class Casino:
     HISTORY_GAMES = frozenset({"slots", "crash", "mines", "plinko", "pickaxe", "football", "pvp", "hockey", "upgrade"})
 
     async def game_history(self, game: Any, user_id: int | None = None, limit: int = 30) -> list[dict]:
-        """История ставок в одной игре, новые сверху: только свои (user_id) или всех игроков."""
+        """История ставок в одной игре, новые сверху: все свои ставки (user_id) или победы всех игроков."""
         if game not in self.HISTORY_GAMES:
             raise GameError("Неизвестная игра")
-        mine = "AND b.user_id=? " if user_id is not None else ""
+        mine = "AND b.user_id=? " if user_id is not None else "AND b.win > b.bet "
         args = (game, user_id) if user_id is not None else (game,)
         rows = await self.db.all(
             "SELECT b.id, b.bet, b.win, b.ts, b.cur, u.id uid, u.first_name, u.username FROM bets b "

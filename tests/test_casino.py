@@ -582,3 +582,25 @@ async def test_admin_take_and_give_silently(casino):
     assert rows[0]["ref"] == "7:абуз краша"
     with pytest.raises(GameError):
         await casino.admin_adjust(7, 999, -1)
+
+
+@pytest.mark.newbie
+async def test_newbie_bonus_first_three_games(casino, monkeypatch):
+    db = casino.db
+    await fund(casino, 1, 1000)
+    assert await db.newbie_left(1) == 3
+    monkeypatch.setattr(g, "plinko_drop", lambda rows, risk, rng=None: ([0] * rows, 0, 2.0))
+    r = await casino.plinko(1, 100, 8, "low")                          # 1-я игра: выигрыш 200 + 5% = 210
+    assert r["win"] == 200 and r["balance"] == 1000 - 100 + 210
+    monkeypatch.setattr(g, "plinko_drop", lambda rows, risk, rng=None: ([0] * rows, 0, 0.0))
+    r = await casino.plinko(1, 100, 8, "low")                          # 2-я — проигрыш: бонуса нет, но игра считается
+    assert r["balance"] == 1010 and await db.newbie_left(1) == 1
+    monkeypatch.setattr(g, "plinko_drop", lambda rows, risk, rng=None: ([0] * rows, 0, 3.0))
+    assert (await casino.plinko(1, 100, 8, "low"))["balance"] == 1010 - 100 + 315     # 3-я: 300 + 15
+    assert (await casino.plinko(1, 100, 8, "low"))["balance"] == 1225 - 100 + 300     # 4-я — уже без бонуса
+    assert await db.newbie_left(1) == 0
+    bonus = await db.all("SELECT delta FROM ledger WHERE user_id=1 AND kind='newbie_bonus'")
+    assert [b["delta"] for b in bonus] == [10, 15]
+    wins = [b["win"] for b in await db.all("SELECT win FROM bets WHERE user_id=1 ORDER BY id")]
+    assert wins == [210, 0, 315, 300]                                   # в истории — выигрыш вместе с бонусом
+    assert (await casino.wager_status(1))["left"] == 0                  # отыгрывать не нужно

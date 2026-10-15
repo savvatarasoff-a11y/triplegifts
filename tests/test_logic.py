@@ -207,10 +207,10 @@ def test_hockey_shot_is_valid_path():
         tx, ty = pts[-1]
         assert _inside(zone, tx, ty)                            # останавливается в зоне победителя
         assert 2 < tx < g.HOCKEY_W - 2 and 2 < ty < g.HOCKEY_H - 2
-        # сильный удар: путь не короче 1.5 длины поля, и длина ломаной совпадает с заявленной
+        # сильный удар: путь от 2.5 до 5 длин поля, и длина ломаной совпадает с заявленной
         length = sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
         assert length == pytest.approx(shot["length"], abs=0.05)
-        assert length >= g.HOCKEY_MIN_PATH - 0.01
+        assert g.HOCKEY_MIN_PATH - 0.01 <= length <= g.HOCKEY_MAX_PATH + 0.01
         for x, y in pts[1:-1]:                                  # каждая промежуточная точка — на борту
             on_wall = min(abs(x), abs(x - g.HOCKEY_W)) < 1e-6 or min(abs(y), abs(y - g.HOCKEY_H)) < 1e-6
             assert on_wall and -1e-6 <= x <= g.HOCKEY_W + 1e-6 and -1e-6 <= y <= g.HOCKEY_H + 1e-6

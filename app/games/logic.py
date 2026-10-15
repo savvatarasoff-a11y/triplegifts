@@ -652,13 +652,13 @@ def upgrade_roll(rng: random.Random = RNG) -> float:
 # поэтому зоны не прыгают, когда заходят новые игроки — только меняют размер.
 # Победитель выбирается так же, как в PvP-рулетке (шанс = доля ставки), затем строится
 # честная траектория удара: шайба летит из центра по прямой, отражаясь от бортов,
-# и останавливается в случайной точке зоны победителя. Длина пути — не меньше 1.5 длины поля.
+# и останавливается в случайной точке зоны победителя. Длина пути — от 2.5 до 5 длин поля.
 
 HOCKEY_W = 100.0
 HOCKEY_H = 160.0
 HOCKEY_START = (50.0, 80.0)
-HOCKEY_MIN_PATH = 1.5 * HOCKEY_H
-HOCKEY_MAX_PATH = 3.5 * HOCKEY_H
+HOCKEY_MIN_PATH = 2.5 * HOCKEY_H
+HOCKEY_MAX_PATH = 5.0 * HOCKEY_H
 HOCKEY_PERIM = 2 * (HOCKEY_W + HOCKEY_H)
 # борта по часовой стрелке от левого верхнего угла: (начало на периметре, длина, угол-начало, направление)
 _HOCKEY_SIDES = (
@@ -745,8 +745,8 @@ def hockey_shot(zone: Sequence[Sequence[float]], rng: random.Random = RNG) -> di
     tx, ty = hockey_target(zone, rng)
     sx, sy = HOCKEY_START
     candidates = []
-    for i in range(-6, 7):
-        for j in range(-5, 6):
+    for i in range(-9, 10):
+        for j in range(-7, 8):
             ix, iy = _image(tx, i, HOCKEY_W), _image(ty, j, HOCKEY_H)
             dist = math.hypot(ix - sx, iy - sy)
             if HOCKEY_MIN_PATH <= dist <= HOCKEY_MAX_PATH:
@@ -778,3 +778,5 @@ WITHDRAW_DEPOSIT_DAYS = 7
 NFT_WITHDRAW_FEE = 30          # вывод NFT в Telegram — 30 ★ с баланса (передача подарка платная)
 QUEST_REWARD = 5               # ежедневный квест: подписка на канал — 5 ★ раз в сутки
 QUEST_EVERY = 24 * 3600
+NEWBIE_GAMES = 3               # бонус новичка: в первых 3 играх выигрыш больше на 5% (RTP выше на 5%)
+NEWBIE_BOOST = 0.05

@@ -466,6 +466,12 @@ async function loadMe() {
   state.me = me;
   state.config = me.config;
   $("#tab-admin").classList.toggle("hidden", !me.admin);
+  const nb = me.newbie || { left: 0 };
+  $("#newbie").classList.toggle("hidden", !nb.left);
+  if (nb.left) {
+    $("#newbie-pct").textContent = Math.round(nb.boost * 100);
+    $("#newbie-left").textContent = `ещё ${nb.left} ${nb.left === 1 ? "игра" : "игры"}`;
+  }
   if (me.subscribed === false) showSubGate(me.config.channel);
   if (me.config && me.config.nft_withdraw_fee) $$(".nft-fee").forEach((el) => { el.textContent = me.config.nft_withdraw_fee; });
   loadQuest();
@@ -3792,7 +3798,7 @@ async function histLoad(screen, quiet) {
     const { items } = await api(`/api/history?game=${HIST_GAMES[screen]}&scope=${hist.scope}`);
     if (seq !== hist.seq || state.screen !== screen) return;
     box.innerHTML = "";
-    if (!items.length) box.innerHTML = `<div class="note">${hist.scope === "me" ? "Вы ещё не играли" : "Ставок пока нет"}</div>`;
+    if (!items.length) box.innerHTML = `<div class="note">${hist.scope === "me" ? "Вы ещё не играли" : "Побед пока нет"}</div>`;
     items.forEach((h) => box.append(histRow(h)));
   } catch (e) {
     if (seq === hist.seq && !quiet) box.innerHTML = "";
@@ -3973,7 +3979,7 @@ async function hockeyAnimate(last) {
     seg.push([total, len]);
     total += len;
   }
-  const duration = 5200;
+  const duration = 9000;           // шайба летит долго: длинный путь с отскоками и плавное торможение
   const start = performance.now();
   const trail = [];
   let lastSeg = 0;
@@ -3981,7 +3987,7 @@ async function hockeyAnimate(last) {
   await new Promise((resolve) => {
     const frame = (now) => {
       const t = Math.min(1, (now - start) / duration);
-      const dist = total * (1 - Math.pow(1 - t, 2.2));
+      const dist = total * (1 - Math.pow(1 - t, 2.6));
       let i = seg.findIndex(([s0, len]) => dist <= s0 + len);
       if (i < 0) i = seg.length - 1;
       const [s0, len] = seg[i];
