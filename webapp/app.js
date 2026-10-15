@@ -10,8 +10,8 @@ const state = { me: null, config: null, screen: "games", tab: "games", busy: fal
   cur: "stars", bal: { stars: 0, ton: 0 } };
 const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
-const TABS = ["games", "ref", "profile"];   // страницы нижнего меню
-const TITLES = { shop: "Магазин NFT", games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол",
+const TABS = ["games", "inv", "ref", "profile", "admin"];   // страницы нижнего меню («Админ» — только админам)
+const TITLES = { shop: "Магазин NFT", games: "Игры", inv: "Инвентарь", admin: "Админ", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол",
   cases: "Кейсы", case: "Кейс", free: "Кейс дня", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного золотого и белый: [фон, цвет текста]
 const PVP_COLORS = [["#F5B93C", "#1A1305"], ["#FFFFFF", "#0A0A0D"], ["#9A6508", "#FFFFFF"], ["#FFE3A3", "#0A0A0D"],
@@ -155,7 +155,7 @@ function setCurrency(cur) {
   const enter = { pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), cases: renderCases,
     case: () => currentCase && caseSetCount(caseCount), mines: () => minesRender(minesGame),
     wallet: () => walletTab($("#wallet-tabs button.sel") ? $("#wallet-tabs button.sel").dataset.tab : "dep"),
-    profile: profileEnter, home: () => renderHistory(state.me && state.me.history), ref: refEnter };
+    profile: profileEnter, home: () => renderHistory(state.me && state.me.history), ref: refEnter, inv: () => loadMyGifts(true) };
   if (enter[state.screen]) enter[state.screen]();
 }
 
@@ -295,7 +295,7 @@ function go(screen) {
   const enter = { games: gamesEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
     pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
     upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, football: footballEnter, free: freeEnter,
-    shop: shopEnter };
+    shop: shopEnter, inv: () => loadMyGifts(), admin: adminEnter };
   if (enter[screen]) enter[screen]();
 }
 
@@ -359,9 +359,6 @@ function refShare() {
 async function profileEnter() {
   loadVip();
   loadMyChecks();
-  const admin = !!(state.me && state.me.admin);
-  $("#admin-panels").classList.toggle("hidden", !admin);
-  if (admin) { loadAllBets(); loadAdminUsers(); }
   try {
     const [p, me] = await Promise.all([api("/api/profile"), loadMe()]);
     const av = $("#prof-av");
@@ -463,6 +460,7 @@ async function loadMe() {
   const me = await api("/api/me");
   state.me = me;
   state.config = me.config;
+  $("#tab-admin").classList.toggle("hidden", !me.admin);
   if (me.subscribed === false) showSubGate(me.config.channel);
   if (me.config && me.config.nft_withdraw_fee) $$(".nft-fee").forEach((el) => { el.textContent = me.config.nft_withdraw_fee; });
   loadQuest();
@@ -609,6 +607,11 @@ async function loadLeaders() {
     });
     $("#lb-me").textContent = lb.me ? `вы #${lb.me.place}` : "";
   } catch (e) { /* не критично */ }
+}
+
+function adminEnter() {
+  loadAllBets();
+  loadAdminUsers();
 }
 
 // История ставок всех игроков с поиском по буквам (имя/ник игрока или название игры)
@@ -972,10 +975,7 @@ async function revokeCheck(c) {
 function walletTab(tab) {
   $$("#wallet-tabs button").forEach((b) => b.classList.toggle("sel", b.dataset.tab === tab));
   $("#tab-dep").classList.toggle("hidden", tab !== "dep");
-  $("#tab-out").classList.toggle("hidden", tab !== "out");
-  $("#tab-nft").classList.toggle("hidden", tab !== "nft");
   if (tab === "dep" && state.cur === "ton") loadTonDeposit();
-  if (tab === "nft") loadMyGifts();
 }
 
 function walletEnter() {
@@ -1444,7 +1444,7 @@ function openRelayer() {
   clearInterval(myGifts.timer);
   let n = 0;
   myGifts.timer = setInterval(() => {
-    if (++n > 30 || $("#tab-nft").classList.contains("hidden") || state.screen !== "wallet") {
+    if (++n > 30 || state.screen !== "inv") {
       clearInterval(myGifts.timer);
       return;
     }
@@ -4069,6 +4069,7 @@ function bind() {
   }));
   $$("[data-wallet]").forEach((b) => b.addEventListener("click", () => {
     haptic();
+    if (b.dataset.wallet === "nft") { go("inv"); return; }
     go("wallet");
     walletTab(b.dataset.wallet);
   }));
