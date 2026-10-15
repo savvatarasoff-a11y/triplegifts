@@ -26,8 +26,8 @@ TON_ADDRESS_RE = re.compile(r"^(?:[A-Za-z0-9_-]{48}|-?[0-9]:[0-9a-fA-F]{64})$")
 LEADERS_SINCE_KEY = "leaders:since"   # сброс таблицы лидеров: ставки раньше этого момента не считаются
 USER_CHECK_MIN = 1
 USER_CHECK_MAX_ACTIVATIONS = 100
-GIFT_SELL_RATE = 0.9        # казино выкупает NFT игрока за 90% пола маркета
-DEMO_SELL_RATE = 1.0        # выигранный демо-NFT — по полному флору (как выплата, заложенная в RTP игр)
+GIFT_SELL_RATE = 0.95       # продажа NFT казино — 95% пола маркета (комиссия 5%)
+DEMO_SELL_RATE = 0.95       # купленный или выбитый NFT — тоже с комиссией 5%
 MAX_GIFTS_PER_BET = 20
 CASE_MAX_COUNT = 5          # сколько кейсов можно открыть за раз
 
@@ -538,46 +538,10 @@ class Casino:
             balance = await self.db.change_balance(c, user_id, delta, kind, ref, cur)
         return {"delta": delta, "balance": balance, "cur": cur}
 
-    async def withdraw_limit(self, user_id: int) -> dict:
-        """Рейтинг вывода: уровень по сумме пополнений и сколько ещё можно вывести за последние 7 дней (в ★)."""
-        user = await self.db.get_user(user_id) or {}
-        points = (user.get("deposited") or 0) + (user.get("ton_deposited") or 0) * g.LEVEL_TON_STARS // money.NANO
-        lv = g.withdraw_tier(points)
-        name, emoji, _, limit = g.WITHDRAW_TIERS[lv]
-        since = time.time() - g.WITHDRAW_WINDOW
-        stars_out = (await self.db.one(
-            "SELECT COALESCE(SUM(amount),0) s FROM withdrawals WHERE user_id=? AND status!='rejected' AND created_at>?",
-            user_id, since))["s"]
-        ton_out = (await self.db.one(
-            "SELECT COALESCE(SUM(amount),0) s FROM ton_withdrawals WHERE user_id=? AND status!='rejected' AND created_at>?",
-            user_id, since))["s"]
-        nft_out = (await self.db.one(
-            "SELECT COALESCE(SUM(value),0) s FROM user_gifts WHERE user_id=? AND status IN ('withdrawing','withdrawn') "
-            # выведенные до появления withdrawn_at — по времени, когда NFT попал в профиль
-            "AND COALESCE(withdrawn_at, created_at)>? AND COALESCE(from_user, 0)!=?", user_id, since, user_id))["s"]
-        used = stars_out + ton_out * g.LEVEL_TON_STARS // money.NANO + nft_out
-        nxt = g.WITHDRAW_TIERS[lv + 1] if lv + 1 < len(g.WITHDRAW_TIERS) else None
-        admin = user_id in self.cfg.admin_ids
-        return {"level": lv, "name": name, "emoji": emoji, "deposited": points, "limit": limit, "used": used,
-                "left": max(0, limit - used), "unlimited": admin,
-                "next": {"name": nxt[0], "emoji": nxt[1], "at": nxt[2], "limit": nxt[3], "need": nxt[2] - points}
-                if nxt else None,
-                "tiers": [{"name": n, "emoji": e, "at": a, "limit": lim} for n, e, a, lim in g.WITHDRAW_TIERS]}
-
-    async def require_withdraw_limit(self, user_id: int, stars: int) -> None:
-        lim = await self.withdraw_limit(user_id)
-        if lim["unlimited"] or stars <= lim["left"]:
-            return
-        more = (f" Пополните ещё {lim['next']['need']} ★ — уровень {lim['next']['emoji']} {lim['next']['name']}: "
-                f"до {lim['next']['limit']} ★ в неделю." if lim["next"] else "")
-        raise GameError(f"Лимит вывода для уровня {lim['emoji']} {lim['name']} — {lim['limit']} ★ за 7 дней, "
-                        f"сейчас доступно {lim['left']} ★.{more}")
-
     async def withdraw_request(self, user_id: int, gift_id: str, price: int, emoji: str | None) -> dict:
         if price < 1:
             raise GameError("Подарок недоступен")
         await self.require_recent_deposit(user_id)
-        await self.require_withdraw_limit(user_id, price)
         wager = await self.wager_status(user_id)
         if wager["left"] > 0:
             raise GameError(f"Сначала отыграйте бонусные звёзды: осталось поставить {wager['left']} ⭐")
@@ -658,7 +622,6 @@ class Casino:
             raise GameError("Некорректный адрес TON-кошелька")
         address = address.strip()
         await self.require_recent_deposit(user_id)
-        await self.require_withdraw_limit(user_id, amount * g.LEVEL_TON_STARS // money.NANO)
         wager = await self.wager_status(user_id, money.TON)
         if wager["left"] > 0:
             raise GameError(f"Сначала поставьте в играх пополнения и бонусы хотя бы раз: осталось "
@@ -1155,8 +1118,9 @@ class Casino:
         return {"id": r["id"], "kind": r["kind"], "title": cls.gift_title(r), "collection": r["collection_name"],
                 "number": r["number"], "model": r["model"], "emoji": r["emoji"] or "🎁", "rarity": r["rarity"],
                 "value": r["value"],
-                "priced": fresh, "status": r["status"], "demo": bool(r.get("test")),
-                "sell": int(r["value"] * cls.sell_rate(r)) if fresh else None,
+                "priced": fresh, "status": r["status"], "upgraded": bool(r.get("upgraded")),
+                "real": not r.get("test"),                # настоящий подарок у релейера — можно вывести
+                "sell": int(r["value"] * cls.sell_rate(r)) if fresh and not r.get("upgraded") else None,
                 "locked_until": r["transfer_at"] if r["transfer_at"] > now else None}
 
     async def gifts(self, user_id: int) -> list[dict]:
@@ -1184,6 +1148,8 @@ class Casino:
                 row = await q.fetchone()
             if not row or row["status"] != "owned":
                 raise GameError("Этот подарок уже поставлен или выведен")
+            if row["upgraded"]:
+                raise GameError("Улучшенный NFT можно только вывести")
             if not row["value"] or now - (row["priced_at"] or 0) >= NFT_PRICE_MAX_AGE:
                 raise GameError(f"Цена {self.gift_title(dict(row))} ещё проверяется на маркете — попробуйте позже")
             await c.execute("UPDATE user_gifts SET status='staked', round_id=? WHERE id=?", (round_id, gift_id))
@@ -1201,6 +1167,8 @@ class Casino:
                 row = await q.fetchone()
             if not row or row["status"] != "owned":
                 raise GameError("Этот подарок уже поставлен или выведен")
+            if row["upgraded"]:
+                raise GameError("Улучшенный NFT можно только вывести")
             if not row["value"] or now - (row["priced_at"] or 0) >= NFT_PRICE_MAX_AGE:
                 raise GameError("Цена подарка ещё проверяется на маркете — попробуйте позже")
             amount = int(row["value"] * self.sell_rate(dict(row)))
@@ -1211,7 +1179,6 @@ class Casino:
     async def gift_withdraw_claim(self, user_id: int, gift_id: Any) -> dict:
         if not isinstance(gift_id, int) or isinstance(gift_id, bool):
             raise GameError("Подарок не найден")
-        await self.require_recent_deposit(user_id)
         async with self.db.tx() as c:
             async with c.execute("SELECT * FROM user_gifts WHERE id=? AND user_id=? AND kind='nft'",
                                  (gift_id, user_id)) as q:
@@ -1219,11 +1186,11 @@ class Casino:
             if not row or row["status"] != "owned":
                 raise GameError("Этот подарок уже поставлен или выведен")
             if row["test"]:
-                raise GameError("Этот NFT выводится после апгрейда: улучшите его, админ одобрит — и можно выводить")
+                raise GameError("Сначала улучшите NFT: администратор найдёт этот подарок на маркете, "
+                                "после этого его можно вывести")
+            await self.require_recent_deposit(user_id)
             if row["transfer_at"] > time.time():
                 raise GameError("Telegram пока не даёт передать этот подарок — попробуйте позже")
-            if row["from_user"] != user_id:                 # свой присланный NFT игрок забирает без лимита
-                await self.require_withdraw_limit(user_id, row["value"] or 0)
             try:
                 await self.db.change_balance(c, user_id, -g.NFT_WITHDRAW_FEE, "nft_withdraw_fee", str(gift_id))
             except InsufficientFunds:
@@ -1314,7 +1281,7 @@ class Casino:
     # ---------- магазин NFT (для апгрейда) ----------
 
     async def shop_buy(self, user_id: int, model_id: Any) -> dict:
-        """Покупка NFT по цене маркета за звёзды. Купленный NFT — для апгрейда (вывести можно после одобрения)."""
+        """Покупка NFT по цене маркета за звёзды: поставить, продать (−5%) или улучшить до настоящего и вывести."""
         if not isinstance(model_id, int) or isinstance(model_id, bool):
             raise GameError("Выберите NFT")
         async with self.db.tx() as c:
@@ -1333,7 +1300,21 @@ class Casino:
         return {"gift_id": gift_id, "balance": balance, "title": m["collection_name"], "model": m["model"],
                 "price": m["price"]}
 
-    # ---------- одобрение выигрышей апгрейда админом ----------
+    # ---------- улучшение NFT: игрок жмёт «Улучшить», админ находит подарок на маркете ----------
+
+    async def improve_request(self, user_id: int, gift_id: Any) -> dict:
+        if not isinstance(gift_id, int) or isinstance(gift_id, bool):
+            raise GameError("Подарок не найден")
+        async with self.db.tx() as c:
+            async with c.execute("SELECT * FROM user_gifts WHERE id=? AND user_id=? AND kind='nft'",
+                                 (gift_id, user_id)) as q:
+                row = await q.fetchone()
+            if not row or row["status"] != "owned":
+                raise GameError("Этот подарок уже поставлен, выводится или улучшается")
+            if not row["test"]:
+                raise GameError("Этот NFT уже настоящий — его можно вывести")
+            await c.execute("UPDATE user_gifts SET status='pending' WHERE id=?", (gift_id,))
+        return {**dict(row), "status": "pending"}
 
     async def upgrade_pending(self) -> list[dict]:
         return await self.db.all("SELECT * FROM user_gifts WHERE status='pending' ORDER BY id")
@@ -1358,23 +1339,20 @@ class Casino:
             await c.execute("UPDATE user_gifts SET ref = ref || ':old' || id WHERE ref=? AND id!=?", (ref, gift_id))
             await c.execute(
                 "UPDATE user_gifts SET ref=?, collection_id=?, number=?, rarity=COALESCE(?, rarity), "
-                "emoji=COALESCE(?, emoji), transfer_at=?, status='owned', test=0 WHERE id=? AND status='pending'",
+                "emoji=COALESCE(?, emoji), transfer_at=?, status='owned', test=0, upgraded=1 "
+                "WHERE id=? AND status='pending'",
                 (ref, item["collection_id"], item.get("number"), item.get("rarity"), item.get("emoji"),
                  item.get("transfer_at") or 0, gift_id))
         return dict(await self.db.one("SELECT * FROM user_gifts WHERE id=?", gift_id))
 
     async def upgrade_reject(self, gift_id: int) -> dict:
-        """Админ отклонил выигрыш: поставленные NFT возвращаются игроку."""
+        """Админ не нашёл подарок: NFT остаётся у игрока обычным (продать, поставить или улучшить позже)."""
         async with self.db.tx() as c:
             async with c.execute("SELECT * FROM user_gifts WHERE id=? AND status='pending'", (gift_id,)) as q:
                 row = await q.fetchone()
             if not row:
                 raise GameError("Заявка уже обработана")
-            ids = json.loads(row["upgrade_from"] or "[]")
-            if ids:
-                await c.execute(f"UPDATE user_gifts SET status='owned' WHERE user_id=? AND status='lost' AND id IN "
-                                f"({','.join('?' * len(ids))})", (row["user_id"], *ids))
-            await c.execute("DELETE FROM user_gifts WHERE id=?", (gift_id,))
+            await c.execute("UPDATE user_gifts SET status='owned' WHERE id=?", (gift_id,))
         return dict(row)
 
     # ---------- ежедневный квест: подписка на канал ----------
@@ -1400,7 +1378,7 @@ class Casino:
     async def upgrade(self, user_id: int, gifts: Any, target_id: Any) -> dict:
         """Ставка — только свои NFT, цель — модель казино подороже.
 
-        Выигрыш — NFT цели: ждёт одобрения админа (он кладёт подарок релейеру). Поставленные NFT уходят казино.
+        Выигрыш — NFT цели в инвентарь (обычный: продать, поставить или улучшить). Поставленные NFT уходят казино.
         """
         gift_ids = self._gift_ids(gifts)
         if not gift_ids:
@@ -1430,17 +1408,11 @@ class Casino:
             detail: dict[str, Any] = {"target": target["id"], "model": target["model"], "chance": round(chance, 4),
                                       "roll": round(roll, 4), "gifts": gift_ids}
             nft = None
-            if won:
-                # выигрыш ждёт админа: он находит подарок этой модели, кладёт релейеру и одобряет
-                res = await c.execute(
-                    "INSERT INTO user_gifts(user_id, ref, kind, collection_id, collection_name, number, model, emoji, "
-                    "rarity, value, priced_at, status, created_at, test, upgrade_from) "
-                    "VALUES (?,?,'nft',?,?,NULL,?,?,?,?,?,'pending',?,1,?)",
-                    (user_id, f"pending:{secrets.token_hex(8)}", target["collection_id"], target["collection_name"],
-                     target["model"], target["emoji"] or "💎", target["rarity"], target["price"], now, now,
-                     json.dumps(gift_ids)))
-                detail["pending_gift"] = res.lastrowid
-                nft = {"win_id": None, "pending": True, "gift_id": res.lastrowid, "title": target["collection_name"],
+            if won:                                     # выигрыш — обычный NFT в инвентарь
+                gift_id = await self._demo_gift(c, user_id, target["collection_name"], target["model"],
+                                                target["emoji"], target["rarity"], target["price"])
+                detail["gift"] = gift_id
+                nft = {"win_id": None, "gift_id": gift_id, "title": target["collection_name"],
                        "model": target["model"], "emoji": target["emoji"] or "💎", "price": target["price"]}
             await self.db.log_bet(c, user_id, "upgrade", stake, target["price"] if won else 0,
                                   json.dumps(detail, ensure_ascii=False))

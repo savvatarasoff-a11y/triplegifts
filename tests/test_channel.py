@@ -72,7 +72,7 @@ async def test_post_big_wins_and_nft(db):
     assert await channel.post_wins(bot, db) == 2
     texts = [c[1][1] for c in bot.calls]
     assert "2 500 ⭐" in texts[0] and "Краш" in texts[0]
-    assert "Plush Pepe «Frog»" in texts[1] and "демо" in texts[1]
+    assert "Plush Pepe «Frog»" in texts[1] and "демо" not in texts[1]
     assert await channel.post_wins(bot, db) == 0                        # повторно не постит
     await db.kv_set(channel.WINS_ON_KEY, "off")
     await bet("crash", 100, 5000, {})

@@ -273,6 +273,8 @@ class Database:
         # выигрыш апгрейда ждёт одобрения админа: какие NFT игрок поставил (вернуть, если админ отклонит)
         await self._add_columns("user_gifts", {"upgrade_from": "TEXT"})
         await self._add_columns("users", {"quest_at": "REAL NOT NULL DEFAULT 0"})
+        # улучшенный NFT: админ нашёл настоящий подарок на маркете — его можно только вывести
+        await self._add_columns("user_gifts", {"upgraded": "INTEGER NOT NULL DEFAULT 0"})
         # превью картинок NFT/подарков: хранятся в базе, чтобы не качать их заново после перезапуска
         await self.conn.execute("CREATE TABLE IF NOT EXISTS nft_images (key TEXT PRIMARY KEY, data BLOB NOT NULL, "
                                 "ctype TEXT NOT NULL, ts REAL NOT NULL)")

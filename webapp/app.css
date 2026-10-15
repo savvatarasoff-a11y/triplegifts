@@ -771,3 +771,16 @@ button { -webkit-user-select: none; user-select: none; }
 .shop-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 4px; }
 .shop-list .upt { padding-top: 10px; }
 .shop-list .note { grid-column: span 2; }
+/* квест и бонус дня — две карточки в ряд на главной вкладке «Игры» */
+.daily { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 4px; }
+.daily-card { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 12px 12px;
+  border-radius: var(--radius); border: 1px solid var(--line); text-align: left; color: var(--text);
+  background: radial-gradient(120% 90% at 100% 0%, rgba(245, 185, 60, .18), transparent 60%), var(--surface); }
+.daily-card.ready, .daily-card.on { border-color: var(--accent); box-shadow: 0 10px 30px -18px var(--accent-glow); }
+.daily-ic { font-size: 26px; line-height: 1; margin-bottom: 6px; }
+.daily-card b { font-family: var(--font-head); font-size: 15px; font-weight: 800; }
+.daily-card small { color: var(--muted); font-size: 11.5px; font-weight: 700; min-height: 30px; }
+.daily-go { margin-top: 8px; align-self: stretch; padding: 8px 10px; border-radius: 12px; font-weight: 800; font-size: 13px;
+  text-align: center; background: var(--surface-3); color: var(--text); border: 0; }
+.daily-card.ready .daily-go, .daily-card.on .daily-go { background: var(--grad); color: var(--on-accent); }
+.mg .acts .btn { flex: 1; }

@@ -74,7 +74,7 @@ async def test_scan_credits_nft_and_regular_gifts(env):
     assert sorted(c["ref"] for c in credited) == [1, 2]
     assert await balance(db, 42) == 85                # обычный подарок — звёздами по курсу обмена
     mine = await casino.gifts(42)
-    assert [(g["title"], g["value"], g["priced"], g["sell"]) for g in mine] == [("Plush Pepe #1", 9000, True, 8100)]
+    assert [(g["title"], g["value"], g["priced"], g["sell"]) for g in mine] == [("Plush Pepe #1", 9000, True, 8550)]   # продажа −5%
     assert await casino.gifts(43) == []
     assert await gifts.scan(db, cfg, relayer) == []   # повторно не зачисляется
     assert await balance(db, 42) == 85

@@ -587,41 +587,6 @@ async def test_all_bets_history_with_search(casino):
     assert await casino.all_bets("никого") == []
 
 
-async def test_withdraw_limit_by_deposit_tier(casino):
-    from app.games import logic as g
-    await casino.db.conn.execute("INSERT OR IGNORE INTO users(id, created_at, last_seen) VALUES (8, 0, 0)")
-    await fund(casino, 8, 300)                                      # «Новичок»: 150 ★ за 7 дней
-    lim = await casino.withdraw_limit(8)
-    assert (lim["name"], lim["limit"], lim["left"], lim["next"]["need"]) == ("Новичок", 150, 150, 200)
-    wd = await casino.withdraw_request(8, "g1", 100, "🧸")
-    with pytest.raises(GameError, match="доступно 50"):
-        await casino.withdraw_request(8, "g2", 100, "🧸")
-    await casino.withdraw_reject(wd["id"], 7)                       # отклонённый не считается
-    assert (await casino.withdraw_limit(8))["left"] == 150
-    await casino.db.conn.execute("UPDATE withdrawals SET created_at=? WHERE user_id=8",
-                                 (time.time() - g.WITHDRAW_WINDOW - 1,))
-    await fund(casino, 8, 250)                                      # всего 550 → «Игрок»: 500 ★
-    lim = await casino.withdraw_limit(8)
-    assert (lim["name"], lim["limit"]) == ("Игрок", 500)
-    assert (await casino.withdraw_request(8, "g3", 400, "🧸"))["status"] == "pending"
-    assert (await casino.withdraw_limit(7))["unlimited"]            # админ — без лимита
-
-
-async def test_withdraw_limit_counts_past_withdrawals(casino):
-    """Выводы до введения лимита тоже считаются: звёзды/TON — по заявкам, NFT без withdrawn_at — по дате попадания в профиль."""
-    db = casino.db
-    await db.conn.execute("INSERT OR IGNORE INTO users(id, created_at, last_seen) VALUES (9, 0, 0)")
-    await fund(casino, 9, 300)
-    now = time.time()
-    await db.conn.execute("INSERT INTO withdrawals(user_id, amount, gift_id, status, created_at) VALUES (9, 50, 'g', 'sent', ?)",
-                          (now - 86400,))
-    await db.conn.execute("INSERT INTO user_gifts(user_id, ref, kind, value, status, created_at) "
-                          "VALUES (9, 'old-nft', 'nft', 40, 'withdrawn', ?)", (now - 2 * 86400,))
-    await db.conn.execute("INSERT INTO user_gifts(user_id, ref, kind, value, status, created_at) "
-                          "VALUES (9, 'ancient', 'nft', 999, 'withdrawn', ?)", (now - 30 * 86400,))
-    assert (await casino.withdraw_limit(9))["used"] == 90
-
-
 async def test_admin_take_and_give_silently(casino):
     await fund(casino, 1, 300)
     r = await casino.admin_adjust(7, 1, -100, reason="абуз краша")

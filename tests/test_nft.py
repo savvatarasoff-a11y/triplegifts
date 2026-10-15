@@ -124,7 +124,7 @@ async def test_won_nft_goes_to_profile(env):
     assert "Мои подарки" in bot.messages[-1][1]
     casino = Casino(db, cfg)
     gift = (await casino.gifts(42))[0]
-    assert gift["model"] == "Frog" and not gift["demo"] and gift["sell"] == int(9000 * 0.9)
+    assert gift["model"] == "Frog" and gift["real"] and gift["sell"] == int(9000 * 0.95)
     assert not (await nft.deliver(bot, db, cfg, relayer, 1))[0]   # повторная выдача невозможна
     # подарков модели не осталось -> админу уведомление с командой повтора
     await db.conn.execute("INSERT INTO nft_wins(model_id, user_id, price, created_at) VALUES (1, 42, 9000, 0)")

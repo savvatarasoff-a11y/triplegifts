@@ -47,22 +47,34 @@ async def test_upgrade_win(env, monkeypatch):
     monkeypatch.setattr(g, "upgrade_roll", lambda rng=None: 0.0)
     r = await casino.upgrade(42, ids, 1)
     assert r["won"] and r["stake"] == 1500 and r["chance"] == pytest.approx(0.9 * 1500 / 6000)
-    assert r["nft"]["model"] == "Black" and r["nft"]["pending"]
+    assert r["nft"]["model"] == "Black"
     mine = await casino.gifts(42)                                         # поставленные NFT ушли казино,
-    assert [(x["model"], x["status"]) for x in mine] == [("Black", "pending")]   # выигрыш ждёт админа
+    assert [(x["model"], x["status"], x["real"]) for x in mine] == [("Black", "owned", False)]   # выбитый — обычный
     stock = await nft.casino_stock(db, [sent(1, 42), sent(2, 42)])
     assert len(stock) == 2                                                # проигранные NFT — запас релейера
-    # админ одобряет: подарка нужной модели у релейера нет → просим купить
+    won = mine[0]
+    assert won["sell"] == int(6000 * 0.95)                                # продать можно с комиссией 5%
+    with pytest.raises(GameError, match="улучшите"):
+        await casino.gift_withdraw_claim(42, won["id"])                   # вывести — только после улучшения
+    # «Улучшить» → админ ищет подарок на маркете и одобряет
+    await casino.improve_request(42, won["id"])
+    assert (await casino.gifts(42))[0]["status"] == "pending"
+    with pytest.raises(GameError):
+        await casino.gift_sell(42, won["id"])                             # пока улучшается — не продать
     with pytest.raises(GameError, match="Купите"):
-        await casino.upgrade_approve(r["nft"]["gift_id"], stock)
+        await casino.upgrade_approve(won["id"], stock)
     cap = {**sent(5, 7, number=77, model="Black"), "collection_id": "9", "collection_name": "Durov's Cap"}
-    done = await casino.upgrade_approve(r["nft"]["gift_id"], stock + [cap])
-    assert (done["status"], done["test"], done["ref"], done["number"]) == ("owned", 0, "5", 77)
+    done = await casino.upgrade_approve(won["id"], stock + [cap])
+    assert (done["status"], done["test"], done["upgraded"], done["ref"], done["number"]) == ("owned", 0, 1, "5", 77)
     with pytest.raises(GameError, match="обработана"):
-        await casino.upgrade_approve(r["nft"]["gift_id"], [cap])
+        await casino.upgrade_approve(won["id"], [cap])
+    view = (await casino.gifts(42))[0]
+    assert view["upgraded"] and view["sell"] is None                      # улучшенный — только вывести
+    for action in (casino.gift_sell(42, won["id"]), casino.upgrade(42, [won["id"]], 1)):
+        with pytest.raises(GameError, match="только вывести"):
+            await action
     # вывод — за 30 ★ с баланса
-    # вывод выигранного и одобренного NFT (уровень вывода VIP — лимит 10 000 ★ в неделю)
-    await db.conn.execute("UPDATE users SET balance=10, deposited=10000 WHERE id=42")
+    await db.conn.execute("UPDATE users SET balance=10 WHERE id=42")
     await db.credit_payment("p42", 42, 100)
     claimed = await casino.gift_withdraw_claim(42, done["id"])
     assert claimed["ref"] == "5" and (await db.get_user(42))["balance"] == 110 - g.NFT_WITHDRAW_FEE
@@ -70,14 +82,15 @@ async def test_upgrade_win(env, monkeypatch):
     assert (await db.get_user(42))["balance"] == 110
 
 
-async def test_upgrade_win_rejected_returns_stake(env, monkeypatch):
+async def test_improve_rejected_keeps_regular_nft(env, monkeypatch):
     db, casino = env
     ids = [x["id"] for x in await casino.gifts(42)]
     monkeypatch.setattr(g, "upgrade_roll", lambda rng=None: 0.0)
     r = await casino.upgrade(42, ids, 1)
+    await casino.improve_request(42, r["nft"]["gift_id"])
     await casino.upgrade_reject(r["nft"]["gift_id"])
-    assert sorted(x["id"] for x in await casino.gifts(42)) == ids and all(
-        x["status"] == "owned" for x in await casino.gifts(42))
+    [item] = await casino.gifts(42)
+    assert item["status"] == "owned" and not item["real"] and item["sell"]   # остался обычным
 
 
 async def test_upgrade_lose(env, monkeypatch):
@@ -123,19 +136,17 @@ async def test_demo_nfts_visible_to_all_won_into_profile(env, monkeypatch):
     frog = next(t for t in demo if t["model"] == "Frog")
     before = (await db.get_user(42))["balance"]
     r = await casino.upgrade(42, ids, frog["id"])
-    assert r["won"] and r["nft"]["pending"] and r["nft"]["win_id"] is None
-    won = [x for x in await casino.gifts(42) if x["id"] == r["nft"]["gift_id"]][0]   # выигрыш ждёт одобрения
-    assert won["status"] == "pending" and won["model"] == "Frog"
-    with pytest.raises(GameError):
-        await casino.gift_sell(42, won["id"])                                    # пока ждёт — не продать
+    assert r["won"] and r["nft"]["win_id"] is None
+    won = [x for x in await casino.gifts(42) if x["id"] == r["nft"]["gift_id"]][0]   # выбитый NFT — в инвентарь
+    assert won["status"] == "owned" and won["model"] == "Frog" and won["sell"] == int(9000 * 0.95)
+    assert (await casino.gift_sell(42, won["id"]))["balance"] == before + int(9000 * 0.95)
     assert (await db.one("SELECT COUNT(*) n FROM nft_wins"))["n"] == 0
-    assert (await db.get_user(42))["balance"] == before
-    # дюп админа (не улучшенный) нельзя вывести, но можно продать
+    # не улучшенный NFT вывести нельзя, продать можно (−5%)
     dupe = (await casino.gifts(admin))[0]
-    assert dupe["demo"]
-    with pytest.raises(GameError, match="апгрейда"):
+    assert not dupe["real"]
+    with pytest.raises(GameError, match="улучшите"):
         await casino.gift_withdraw_claim(admin, dupe["id"])
-    assert (await casino.gift_sell(admin, dupe["id"]))["amount"] == dupe["value"]
+    assert (await casino.gift_sell(admin, dupe["id"]))["amount"] == int(dupe["value"] * 0.95)
     # синхронизация релейера не обнуляет демо-модели
     await nft.sync(db, FakeRelayer([]))
     assert (await db.one("SELECT MIN(stock) s FROM nft_models WHERE test=1"))["s"] == 999
@@ -150,10 +161,10 @@ async def test_shop_buy_goes_to_inventory(env):
     r = await casino.shop_buy(43, 1)
     assert r["balance"] == 1000 and r["model"] == "Black"
     item = (await casino.gifts(43))[0]
-    assert item["status"] == "owned" and item["value"] == 6000 and item["demo"]   # купленный — для апгрейда
+    assert item["status"] == "owned" and item["value"] == 6000 and not item["real"]   # купленный — обычный
     await db.credit_payment("p43", 43, 100)
-    with pytest.raises(GameError, match="после апгрейда"):
-        await casino.gift_withdraw_claim(43, item["id"])                     # сразу вывести нельзя — только поставить
+    with pytest.raises(GameError, match="улучшите"):
+        await casino.gift_withdraw_claim(43, item["id"])                     # сразу вывести нельзя
     with pytest.raises(GameError, match="Недостаточно"):
         await casino.shop_buy(43, 1)
 
@@ -180,7 +191,7 @@ async def test_demo_nft_from_case_goes_to_profile(env):
     assert r["kind"] == "nft" and r["nft"]["demo"] and r["nft"]["win_id"] is None
     assert r["balance"] == 1000 - 100                                   # не звёздами, а подарком в профиль
     gift = (await casino.gifts(42))[0]
-    assert gift["id"] == r["nft"]["gift_id"] and gift["demo"] and gift["value"] == 5000 and gift["sell"] == 5000
+    assert gift["id"] == r["nft"]["gift_id"] and not gift["real"] and gift["value"] == 5000 and gift["sell"] == 4750
 
 
 async def test_top_up_demo_skips_models_without_upgrades(env):

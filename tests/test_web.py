@@ -227,6 +227,11 @@ async def test_cases_closed_shop_and_quest(client):
     await casino.db.conn.execute("UPDATE users SET balance=100 WHERE id=3")
     r = await (await client.post("/api/shop/buy", headers=auth(3), json={"model": item["id"]})).json()
     assert r["balance"] == 60 and r["model"] == "Pink"
+    r = await client.post("/api/gifts/improve", headers=auth(3), json={"id": r["gift_id"]})
+    assert r.status == 200                                                # «Улучшить» → заявка админу
+    assert client.app[BOT].messages[-1][0] == 777 and "Улучшение NFT" in client.app[BOT].messages[-1][1]
+    gifts = (await (await client.get("/api/gifts", headers=auth(3))).json())["gifts"]
+    assert gifts[0]["status"] == "pending"
     q = await (await client.get("/api/quest", headers=auth(3))).json()
     assert q["ready"] and q["reward"] == 5 and q["channel"] == "TripleGifts"
     r = await (await client.post("/api/quest", headers=auth(3))).json()   # проверить подписку нельзя — не блокируем

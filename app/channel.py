@@ -106,8 +106,7 @@ def win_text(r: dict[str, Any]) -> str | None:
     model = detail.get("model") or detail.get("demo_nft")
     if model and (detail.get("nft_win") or detail.get("demo_nft")):
         title = detail.get("title") or "NFT"
-        demo = " (демо)" if detail.get("demo_nft") else ""
-        return f"💎 <b>{name}</b> выбил NFT <b>{html.escape(title)} «{html.escape(str(model))}»</b>{demo} — {game}!"
+        return f"💎 <b>{name}</b> выбил NFT <b>{html.escape(title)} «{html.escape(str(model))}»</b> — {game}!"
     if r["cur"] != "stars":
         return None
     x = r["win"] / r["bet"] if r["bet"] else 0

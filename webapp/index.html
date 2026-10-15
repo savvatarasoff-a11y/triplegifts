@@ -50,35 +50,48 @@
   </header>
 
   <main id="app">
-    <!-- Главная -->
-    <section class="screen active" id="home">
+    <!-- Игры — главная вкладка -->
+    <section class="screen active" id="games">
       <div class="ticker" id="ticker"><div class="ticker-track" id="ticker-track"></div></div>
 
-      <div class="sec-head"><span>Популярное</span><button data-go="games">Все игры ›</button></div>
+      <div class="daily">
+        <button class="daily-card" id="quest-card">
+          <span class="daily-ic">📢</span>
+          <b>Квест дня</b>
+          <small id="quest-sub">подписка на канал</small>
+          <span class="daily-go" id="quest-go">Забрать</span>
+        </button>
+        <div class="daily-card" id="bonus-card">
+          <span class="daily-ic" id="bonus-ic">🎁</span>
+          <b>Бонус дня</b>
+          <small id="bonus-sub">до 100 ★ раз в сутки</small>
+          <button class="daily-go" id="bonus-btn">Забрать</button>
+        </div>
+      </div>
+
+      <div class="sec-head"><span>NFT</span></div>
       <div class="games">
+        <button class="game accent" data-go="upgrade"><svg class="gi"><use href="#i-upgrade"/></svg><span class="gx">NFT → дороже</span><span class="gn">Апгрейд</span></button>
+        <button class="game" data-go="shop"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">по цене маркета</span><span class="gn">Магазин</span></button>
+      </div>
+      <div class="sec-head"><span>Казино</span></div>
+      <div class="games">
+        <button class="game" data-go="slots"><svg class="gi"><use href="#i-slots"/></svg><span class="gx">777 — NFT ×40</span><span class="gn">Слоты</span></button>
         <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10 000</span><span class="gn">Краш</span></button>
         <button class="game" data-go="pickaxe"><img class="gi px" src="static/mc/pick.png" alt=""><span class="gx">новинка</span><span class="gn">Кирка</span></button>
-        <button class="game" data-go="shop"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT для апгрейда</span><span class="gn">Магазин</span></button>
-        <button class="game accent" data-go="upgrade"><svg class="gi"><use href="#i-upgrade"/></svg><span class="gx">NFT → дороже</span><span class="gn">Апгрейд</span></button>
+        <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×1000+</span><span class="gn">Мины</span></button>
+        <button class="game wide" data-go="plinko"><svg class="gi"><use href="#i-plinko"/></svg><span class="gx">до ×949</span><span class="gn">Plinko</span></button>
+      </div>
+      <div class="sec-head"><span>Спорт</span></div>
+      <div class="games">
+        <button class="game wide" data-go="football"><img class="gi ball" src="static/mc/ball.png" alt=""><span class="gx">АПЛ · Ла Лига · ЛЧ</span><span class="gn">Ставки на футбол</span></button>
+      </div>
+      <div class="sec-head"><span>PvP — против игроков</span></div>
+      <div class="games">
+        <button class="game" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">ставки подарками</span><span class="gn">Рулетка</span></button>
+        <button class="game" data-go="hockey"><svg class="gi"><use href="#i-hockey"/></svg><span class="gx">ставки подарками</span><span class="gn">Хоккей</span></button>
       </div>
 
-      <button class="free-card" id="quest-card">
-        <span class="free-ic">📢</span>
-        <span class="free-t"><b>Ежедневный квест</b><small id="quest-sub">подписка на канал — награда каждый день</small></span>
-        <span class="free-go" id="quest-go">Забрать</span>
-      </button>
-
-      <div class="bonus-card" id="bonus-card">
-        <div class="bonus-ic" id="bonus-ic">🎁</div>
-        <div class="bonus-t"><b>Ежедневный бонус</b><small id="bonus-sub">до 100 ★ раз в сутки</small></div>
-        <button class="btn small" id="bonus-btn">Забрать</button>
-      </div>
-
-      <button class="promo" data-go="ref">
-        <span class="promo-x">10%</span>
-        <span class="promo-t"><b>Приглашай друзей</b><small>и получай 10% от их пополнений</small></span>
-        <span class="promo-go">›</span>
-      </button>
       <button class="promo slim" id="channel-btn">
         <span class="promo-x">📢</span>
         <span class="promo-t"><b>Наш канал</b><small>новости, раздачи чеков и крупные выигрыши</small></span>
@@ -90,56 +103,7 @@
         <div class="plist" id="leaders"></div>
       </div>
 
-      <div id="admin-panels" class="hidden">
-        <div class="panel">
-          <div class="panel-head"><div class="panel-title">👥 Пользователи</div><span class="muted" id="au-count"></span></div>
-          <input id="au-q" class="ab-q" placeholder="Поиск: имя, @ник или id" autocomplete="off">
-          <div class="ab-list" id="au-list"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-title">📜 Все ставки</div>
-          <input id="ab-q" class="ab-q" placeholder="Поиск: имя игрока или игра" autocomplete="off">
-          <div class="ab-list" id="ab-list"></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-title">Активировать чек</div>
-        <div class="row">
-          <input id="check-code" placeholder="Код или ссылка на чек" autocomplete="off">
-          <button class="btn" id="check-btn">Забрать</button>
-        </div>
-      </div>
-
-      <p class="note">Пополнение — Telegram Stars, вывод — подарками Telegram. Играйте ответственно. 18+</p>
-    </section>
-
-    <!-- Игры -->
-    <section class="screen" id="games">
-      <div class="page-head"><h1>Игры</h1><p>Ставки в звёздах или TON — выигрыш сразу на баланс.</p></div>
-      <div class="sec-head"><span>Казино</span></div>
-      <div class="games">
-        <button class="game" data-go="slots"><svg class="gi"><use href="#i-slots"/></svg><span class="gx">777 — NFT ×40</span><span class="gn">Слоты</span></button>
-        <button class="game" data-go="crash"><svg class="gi"><use href="#i-crash"/></svg><span class="gx">до ×10 000</span><span class="gn">Краш</span></button>
-        <button class="game" data-go="mines"><svg class="gi"><use href="#i-mines"/></svg><span class="gx">до ×1000+</span><span class="gn">Мины</span></button>
-        <button class="game" data-go="plinko"><svg class="gi"><use href="#i-plinko"/></svg><span class="gx">до ×949</span><span class="gn">Plinko</span></button>
-        <button class="game" data-go="pickaxe"><img class="gi px" src="static/mc/pick.png" alt=""><span class="gx">новинка</span><span class="gn">Кирка</span></button>
-        <button class="game" data-go="shop"><svg class="gi"><use href="#i-cases"/></svg><span class="gx">NFT для апгрейда</span><span class="gn">Магазин NFT</span></button>
-      </div>
-      <div class="sec-head"><span>Спорт</span></div>
-      <div class="games">
-        <button class="game wide" data-go="football"><img class="gi ball" src="static/mc/ball.png" alt=""><span class="gx">АПЛ · Ла Лига · ЛЧ</span><span class="gn">Ставки на футбол</span></button>
-      </div>
-      <div class="sec-head"><span>NFT</span></div>
-      <div class="games">
-        <button class="game wide accent" data-go="upgrade"><svg class="gi"><use href="#i-upgrade"/></svg><span class="gx">NFT → NFT дороже</span><span class="gn">Апгрейд</span></button>
-      </div>
-      <div class="sec-head"><span>PvP — против игроков</span></div>
-      <div class="games">
-        <button class="game accent" data-go="pvp"><svg class="gi"><use href="#i-pvp"/></svg><span class="gx">ставки подарками</span><span class="gn">Рулетка</span></button>
-        <button class="game accent" data-go="hockey"><svg class="gi"><use href="#i-hockey"/></svg><span class="gx">ставки подарками</span><span class="gn">Хоккей</span></button>
-      </div>
-      <p class="note">В PvP шанс пропорционален ставке, казино берёт лишь комиссию 5%.</p>
+      <p class="note">Пополнение — Telegram Stars и TON, вывод — NFT-подарками. В PvP казино берёт комиссию 5%. Играйте ответственно. 18+</p>
     </section>
 
     <!-- Апгрейд NFT -->
@@ -287,6 +251,18 @@
         <div class="panel-title">Мои игры</div>
         <div id="history" class="history"></div>
       </div>
+      <div id="admin-panels" class="hidden">
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">👥 Пользователи</div><span class="muted" id="au-count"></span></div>
+          <input id="au-q" class="ab-q" placeholder="Поиск: имя, @ник или id" autocomplete="off">
+          <div class="ab-list" id="au-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">📜 Все ставки</div>
+          <input id="ab-q" class="ab-q" placeholder="Поиск: имя игрока или игра" autocomplete="off">
+          <div class="ab-list" id="ab-list"></div>
+        </div>
+      </div>
       <p class="note">Играйте ответственно. 18+</p>
     </section>
 
@@ -323,7 +299,7 @@
           <div class="panel-title">Ставьте свои подарки</div>
           <p class="note" id="nft-howto">Отправьте NFT или подарок в Telegram аккаунту казино — он появится здесь через несколько секунд.</p>
           <button class="btn" id="nft-open">Отправить подарок</button>
-          <p class="note">NFT оценивается по полу маркета своей модели: его можно поставить в PvP, краш или апгрейд или продать казино за <span id="nft-rate">90</span>%. NFT из магазина — для апгрейда; выигранный в апгрейде и подтверждённый администратором выводится в Telegram за <span class="nft-fee">30</span> ★. Обычные подарки сразу зачисляются звёздами.</p>
+          <p class="note">NFT оценивается по полу маркета своей модели. Обычный NFT можно поставить в игры, продать казино за <span id="nft-rate">95</span>% или улучшить — администратор найдёт его на маркете. Улучшенный NFT можно только вывести в Telegram (<span class="nft-fee">30</span> ★). Обычные подарки сразу зачисляются звёздами.</p>
         </div>
         <div class="panel">
           <div class="panel-title">Мои подарки</div>
@@ -334,7 +310,7 @@
         <div class="panel center">
           <div class="big-star">🎁</div>
           <div class="panel-title">Вывод — только NFT</div>
-          <p class="note">Купите NFT в магазине и поставьте его в апгрейд. Выигранный NFT администратор проверит и подтвердит — после этого его можно вывести в Telegram из «Мои подарки» за <b><span class="nft-fee">30</span> ★</b>.</p>
+          <p class="note">Купите NFT в магазине или выбейте в играх, затем нажмите «Улучшить» в «Мои подарки»: администратор найдёт этот подарок на маркете. Улучшенный NFT выводится в Telegram за <b><span class="nft-fee">30</span> ★</b>.</p>
           <div class="wd-limit hidden" id="wager-limit"></div>
           <div class="row">
             <button class="btn" data-go="shop">Магазин NFT</button>
@@ -452,7 +428,7 @@
     <!-- Кейсы -->
     <!-- Магазин NFT: покупка по цене маркета для апгрейда -->
     <section class="screen" id="shop">
-      <p class="note left">NFT по цене маркета. Купленный NFT ставится в апгрейд — на модель дороже. Выигранный в апгрейде NFT администратор проверит и подтвердит, после этого его можно вывести в Telegram за <span class="nft-fee">30</span> ★.</p>
+      <p class="note left">NFT по цене маркета. Купленный NFT можно поставить в апгрейд или игры, продать (−5%) или улучшить — администратор найдёт его на маркете, после этого NFT выводится в Telegram за <span class="nft-fee">30</span> ★.</p>
       <input id="shop-q" class="ab-q" placeholder="Поиск: коллекция или модель" autocomplete="off">
       <div class="shop-list" id="shop-list"></div>
     </section>
@@ -542,8 +518,7 @@
   </div>
 
   <nav class="tabbar" id="tabbar">
-    <button data-tab="home" class="sel"><svg><use href="#i-home"/></svg><span>Главная</span></button>
-    <button data-tab="games"><svg><use href="#i-games"/></svg><span>Игры</span></button>
+    <button data-tab="games" class="sel"><svg><use href="#i-games"/></svg><span>Игры</span></button>
     <button data-tab="ref"><svg><use href="#i-ref"/></svg><span>Друзья</span></button>
     <button data-tab="profile"><svg><use href="#i-user"/></svg><span>Профиль</span></button>
   </nav>

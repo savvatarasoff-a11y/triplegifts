@@ -66,12 +66,12 @@ def upgrade_keyboard(gift_id: int) -> InlineKeyboardMarkup:
 
 def upgrade_text(gift: dict, user: dict | None) -> str:
     username = f" @{html.escape(user['username'])}" if user and user.get("username") else ""
-    return (f"⬆️ <b>Апгрейд ждёт одобрения</b> (№{gift['id']})\n"
+    return (f"⬆️ <b>Улучшение NFT</b> (№{gift['id']})\n"
             f"Игрок: {html.escape(display_name(user))}{username} (<code>{gift['user_id']}</code>)\n"
-            f"Выиграл: {gift.get('emoji') or '💎'} <b>{html.escape(gift['collection_name'] or '')}</b> "
+            f"Подарок: {gift.get('emoji') or '💎'} <b>{html.escape(gift['collection_name'] or '')}</b> "
             f"«{html.escape(gift['model'] or '')}» — {gift['value']} ⭐\n"
-            "Купите подарок этой модели на маркете, отправьте релейеру и нажмите «Одобрить». "
-            "«Отклонить» — поставленные NFT вернутся игроку.")
+            "Найдите этот подарок на маркете, отправьте релейеру и нажмите «Одобрить» — NFT станет настоящим, "
+            "игрок сможет его вывести. «Отклонить» — NFT останется у игрока обычным.")
 
 
 async def notify_upgrade(bot: Bot, cfg: Config, casino: Casino, gift_id: int) -> None:

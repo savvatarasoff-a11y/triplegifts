@@ -229,7 +229,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/broadcast — рассылка игрокам (всем, пополнявшим, активным… или своему списку)\n"
             "/take <code>@user|ID сумма|all [ton] [причина]</code> — тихо списать баланс (абуз уязвимостей)\n"
             "/give <code>@user|ID сумма [ton] [причина]</code> — тихо вернуть/начислить\n"
-            "/upgrades — выигрыши апгрейда, ждущие одобрения"
+            "/upgrades — заявки на улучшение NFT (найти подарок на маркете и одобрить)"
         )
 
     @admin.message(Command("checks"))
@@ -770,7 +770,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     async def list_upgrades(message: Message) -> None:
         rows = await casino.upgrade_pending()
         if not rows:
-            await message.answer("Апгрейдов, ждущих одобрения, нет.")
+            await message.answer("Заявок на улучшение NFT нет.")
             return
         for gift in rows[:20]:
             await message.answer(upgrade_text(gift, await casino.db.get_user(gift["user_id"])),
@@ -785,15 +785,16 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                 if relayer is None or not relayer.ready:
                     raise GameError("Релейер не подключён — /relayer")
                 gift = await casino.upgrade_approve(gift_id, await casino_stock(casino.db, await relayer.inventory()))
-                result = "✅ Одобрено — NFT в профиле игрока, можно выводить"
-                note = (f"✅ Апгрейд одобрен: {gift['emoji'] or '💎'} {html.escape(gift['collection_name'] or '')} "
-                        f"«{html.escape(gift['model'] or '')}» в профиле → «Мои подарки». Вывод в Telegram — "
+                result = "✅ Одобрено — NFT улучшен, игрок может его вывести"
+                note = (f"✅ NFT улучшен: {gift['emoji'] or '💎'} {html.escape(gift['collection_name'] or '')} "
+                        f"«{html.escape(gift['model'] or '')}» — в профиле → «Мои подарки». Вывод в Telegram — "
                         f"{g.NFT_WITHDRAW_FEE} ⭐.")
             else:
                 gift = await casino.upgrade_reject(gift_id)
-                result = "❌ Отклонено — поставленные NFT вернулись игроку"
-                note = (f"Выигрыш апгрейда {html.escape(gift['collection_name'] or '')} «{html.escape(gift['model'] or '')}» "
-                        "отменён администратором. Поставленные NFT вернулись в профиль.")
+                result = "❌ Отклонено — NFT остался у игрока обычным"
+                note = (f"Улучшить {html.escape(gift['collection_name'] or '')} «{html.escape(gift['model'] or '')}» "
+                        "сейчас не получилось — подарка нет на маркете. NFT остался в «Мои подарки»: его можно "
+                        "продать, поставить или попробовать улучшить позже.")
         except GameError as e:
             await query.answer(str(e)[:190], show_alert=True)
             return

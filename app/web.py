@@ -446,7 +446,6 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
         return web.json_response({
             "gifts": gifts,
             "wager": await casino.wager_status(uid),
-            "limit": await casino.withdraw_limit(uid),
             "history": [
                 {"id": w["id"], "amount": w["amount"], "emoji": w["gift_emoji"], "status": w["status"],
                  "created_at": w["created_at"]}
@@ -605,7 +604,6 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
             "wallet": address, "comment": comment,
             "link": ton.transfer_link(address, comment) if address else None,
             "min_withdraw": money.TON_MIN_WITHDRAW, "wager": await casino.wager_status(uid, money.TON),
-            "limit": await casino.withdraw_limit(uid),
             "history": [{"id": w["id"], "amount": w["amount"], "address": w["address"], "status": w["status"],
                          "created_at": w["created_at"]} for w in await casino.ton_withdrawals(user_id=uid, limit=10)],
         })
@@ -649,17 +647,14 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def upgrade_info(request: web.Request) -> web.Response:
         return web.json_response({
             "targets": await casino.upgrade_targets(request[USER_ID]),
-            "gifts": [x for x in await casino.gifts(request[USER_ID]) if x["status"] == "owned"],
+            "gifts": [x for x in await casino.gifts(request[USER_ID]) if x["status"] == "owned" and not x["upgraded"]],
             "edge": g.UPGRADE_EDGE, "max_chance": g.UPGRADE_MAX_CHANCE, "min_chance": g.UPGRADE_MIN_CHANCE,
         })
 
     @routes.post("/api/upgrade")
     async def upgrade(request: web.Request) -> web.Response:
         data = await body(request)
-        result = await casino.upgrade(request[USER_ID], data.get("gifts"), data.get("target"))
-        if result["nft"] and result["nft"].get("pending"):
-            await notify_upgrade(bot, cfg, casino, result["nft"]["gift_id"])
-        return web.json_response(result)
+        return web.json_response(await casino.upgrade(request[USER_ID], data.get("gifts"), data.get("target")))
 
     # ---------- магазин NFT и ежедневный квест ----------
 
@@ -697,6 +692,13 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     @routes.post("/api/gifts/sell")
     async def gift_sell(request: web.Request) -> web.Response:
         return web.json_response(await casino.gift_sell(request[USER_ID], (await body(request)).get("id")))
+
+    @routes.post("/api/gifts/improve")
+    async def gift_improve(request: web.Request) -> web.Response:
+        """«Улучшить»: администратор найдёт этот подарок на маркете и сделает NFT настоящим (можно вывести)."""
+        gift = await casino.improve_request(request[USER_ID], (await body(request)).get("id"))
+        await notify_upgrade(bot, cfg, casino, gift["id"])
+        return web.json_response({"ok": True, "id": gift["id"]})
 
     @routes.post("/api/gifts/withdraw")
     async def gift_withdraw(request: web.Request) -> web.Response:

@@ -6,11 +6,11 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const STAR = "★";
-const state = { me: null, config: null, screen: "home", tab: "home", busy: false, refLink: null,
+const state = { me: null, config: null, screen: "games", tab: "games", busy: false, refLink: null,
   cur: "stars", bal: { stars: 0, ton: 0 } };
 const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
-const TABS = ["home", "games", "ref", "profile"];   // страницы нижнего меню
+const TABS = ["games", "ref", "profile"];   // страницы нижнего меню
 const TITLES = { shop: "Магазин NFT", games: "Игры", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол",
   cases: "Кейсы", case: "Кейс", free: "Кейс дня", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
 // Оттенки фирменного золотого и белый: [фон, цвет текста]
@@ -277,12 +277,12 @@ function celebrate(bet, win, el) {
 function go(screen) {
   if (screen !== "pvp" && screen !== "hockey") pvpLeave();
   if (screen !== "crash") crashLeave();
-  if (screen !== "home") tickerStop();
+  if (screen !== "games") tickerStop();
   state.screen = screen;
   const isTab = TABS.includes(screen);
   if (isTab) state.tab = screen;
   $$(".screen").forEach((s) => s.classList.toggle("active", s.id === screen));
-  const isHome = screen === "home";
+  const isHome = screen === "games";
   $("#brand").classList.toggle("hidden", !isHome);
   $("#title").classList.toggle("hidden", isHome);
   $("#title").textContent = TITLES[screen] || "";
@@ -292,7 +292,7 @@ function go(screen) {
   document.body.classList.toggle("has-tabbar", isTab);
   $$("#tabbar button").forEach((b) => b.classList.toggle("sel", b.dataset.tab === state.tab));
   window.scrollTo(0, 0);
-  const enter = { home: homeEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
+  const enter = { games: gamesEnter, crash: crashEnter, mines: minesEnter, cases: renderCases, wallet: walletEnter,
     pvp: () => pvpEnter("roulette"), hockey: () => pvpEnter("hockey"), ref: refEnter, profile: profileEnter,
     upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, football: footballEnter, free: freeEnter,
     shop: shopEnter };
@@ -302,7 +302,7 @@ function go(screen) {
 function goBack() {
   if (!$("#sheet").classList.contains("hidden")) { $("#sheet").classList.add("hidden"); return; }
   if (!$("#fb-sheet").classList.contains("hidden")) { $("#fb-sheet").classList.add("hidden"); return; }
-  go(state.screen === "case" ? "cases" : (state.tab || "home"));
+  go(state.screen === "case" ? "cases" : (state.tab || "games"));
 }
 
 // ---------- друзья (реферальная программа) ----------
@@ -359,6 +359,9 @@ function refShare() {
 async function profileEnter() {
   loadVip();
   loadMyChecks();
+  const admin = !!(state.me && state.me.admin);
+  $("#admin-panels").classList.toggle("hidden", !admin);
+  if (admin) { loadAllBets(); loadAdminUsers(); }
   try {
     const [p, me] = await Promise.all([api("/api/profile"), loadMe()]);
     const av = $("#prof-av");
@@ -472,14 +475,12 @@ async function loadMe() {
   return me;
 }
 
-async function homeEnter() {
+async function gamesEnter() {
   try { await loadMe(); } catch (e) { toast(e.message, true); }
   loadTicker();
   loadVip();
   loadLeaders();
-  const admin = !!(state.me && state.me.admin);
-  $("#admin-panels").classList.toggle("hidden", !admin);
-  if (admin) { loadAllBets(); loadAdminUsers(); }
+  loadQuest();
 }
 
 // ---------- VIP-уровень, рейкбек, ежедневный бонус ----------
@@ -501,14 +502,14 @@ function renderBonus() {
   card.classList.toggle("ready", b.allowed && b.ready);
   btn.disabled = !b.allowed || !b.ready;
   if (!b.allowed) {
-    $("#bonus-sub").textContent = "Откроется после пополнения от 50 ★ или 0.5 TON";
+    $("#bonus-sub").textContent = "после пополнения от 50 ★ или 0.5 TON";
     btn.textContent = "🔒";
   } else if (b.ready) {
-    $("#bonus-sub").textContent = "До 100 ★ — забирайте каждый день";
+    $("#bonus-sub").textContent = "до 100 ★ каждый день";
     btn.textContent = "Забрать";
   } else {
     const left = b.in - (performance.now() - vipState.at) / 1000;
-    $("#bonus-sub").textContent = `Следующий через ${hms(left)}`;
+    $("#bonus-sub").textContent = `через ${hms(left)}`;
     btn.textContent = "Ждём";
     if (left <= 0) { b.ready = true; renderBonus(); }
   }
@@ -547,7 +548,7 @@ async function loadVip() {
     renderBonus();
     renderVip();
     clearInterval(vipState.timer);
-    vipState.timer = setInterval(() => { if (state.screen === "home") renderBonus(); }, 1000);
+    vipState.timer = setInterval(() => { if (state.screen === "games") renderBonus(); }, 1000);
   } catch (e) { /* не критично */ }
 }
 
@@ -752,7 +753,7 @@ async function loadTicker() {
       track.append(el);
     });
   } catch (e) { /* лента не критична */ }
-  if (state.screen === "home") tickerTimer = setTimeout(loadTicker, 20000);
+  if (state.screen === "games") tickerTimer = setTimeout(loadTicker, 20000);
 }
 
 function tickerStop() {
@@ -1009,7 +1010,7 @@ async function deposit(amount) {
         }
         fxBurstAt($("#balance-btn"), { count: 50 });
         haptic("win");
-        go("home");
+        go("games");
       } else if (status === "failed") {
         toast("Оплата не прошла", true);
       }
@@ -1135,9 +1136,7 @@ function questTick() {
   const left = q.in - (Date.now() / 1000 - q.at);
   const ready = left <= 0;
   $("#quest-card").classList.toggle("ready", ready);
-  $("#quest-sub").textContent = ready
-    ? `подпишись на @${q.channel} — ${stars(q.reward)} каждый день`
-    : `следующая награда через ${fmtLeft(left)}`;
+  $("#quest-sub").textContent = ready ? `подписка на @${q.channel} — ${stars(q.reward)} в день` : `через ${fmtLeft(left)}`;
   $("#quest-go").textContent = ready ? (q.subscribed ? `+${stars(q.reward)}` : "Подписаться") : "Скоро";
   clearTimeout(questTimer);
   if (!ready) questTimer = setTimeout(questTick, 1000);
@@ -1211,7 +1210,7 @@ function shopRender() {
 }
 
 async function shopBuy(t) {
-  const ok = await confirmAsk(`Купить ${t.title} «${t.model}» за ${fmt(t.price)} ★? NFT появится в «Мои подарки» — его можно поставить в апгрейд.`);
+  const ok = await confirmAsk(`Купить ${t.title} «${t.model}» за ${fmt(t.price)} ★? NFT появится в «Мои подарки»: поставьте его в апгрейд или улучшите и выведите.`);
   if (!ok) return;
   await guard(async () => {
     await api("/api/shop/buy", { model: t.id });
@@ -1223,7 +1222,7 @@ async function shopBuy(t) {
 // ---------- мои подарки (прислали релейеру) ----------
 
 const myGifts = { relayer: null, list: [], timer: 0 };
-const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится", pending: "ждёт подтверждения администратора" };
+const GIFT_STATUS = { staked: "в игре", withdrawing: "выводится", pending: "администратор ищет на маркете…" };
 
 // ---------- картинки NFT: превью с нашего сервера (ужатые и закэшированные) ----------
 
@@ -1346,7 +1345,7 @@ function giftCard(gift, opts) {
   sub.className = "s";
   const parts = [];
   if (gift.model) parts.push(`модель «${gift.model}»` + (gift.rarity ? ` · ${gift.rarity}%` : ""));
-  if (gift.demo && gift.status !== "pending") parts.push("для апгрейда");
+  if (gift.upgraded) parts.push("✨ улучшен");
   if (GIFT_STATUS[gift.status]) parts.push(GIFT_STATUS[gift.status]);
   else if (!gift.priced) parts.push("цена проверяется");
   sub.textContent = parts.join(" · ");
@@ -1377,25 +1376,20 @@ async function loadMyGifts(quiet) {
       if (gift.status === "owned") {
         const acts = document.createElement("div");
         acts.className = "acts";
-        const sell = document.createElement("button");
-        sell.className = "btn";
-        sell.textContent = gift.sell ? `Продать за ${stars(gift.sell)}` : "Продать";
-        sell.disabled = !gift.sell;
-        sell.addEventListener("click", () => sellGift(gift));
-        acts.append(sell);
-        if (gift.demo) {                     // из магазина/джекпота: вывести можно после апгрейда
-          const up = document.createElement("button");
-          up.className = "btn small";
-          up.textContent = "В апгрейд";
-          up.addEventListener("click", () => go("upgrade"));
-          acts.append(up);
-        } else {
-          const out = document.createElement("button");
-          out.className = "btn small";
-          out.textContent = `Вывести · ${nftFee()} ★`;
-          out.addEventListener("click", () => withdrawGift(gift));
-          acts.append(out);
+        const btn = (text, cls, fn) => {
+          const x = document.createElement("button");
+          x.className = cls;
+          x.textContent = text;
+          x.addEventListener("click", fn);
+          acts.append(x);
+          return x;
+        };
+        if (!gift.upgraded) {                // обычный: продать (−5%), а не купленный в магазине — ещё и вывести
+          const sell = btn(gift.sell ? `Продать · ${stars(gift.sell)}` : "Продать", "btn ghost", () => sellGift(gift));
+          sell.disabled = !gift.sell;
         }
+        if (gift.real) btn(`Вывести · ${nftFee()} ★`, "btn", () => withdrawGift(gift));
+        else btn("✨ Улучшить", "btn", () => improveGift(gift));
         card.append(acts);
       }
       box.append(card);
@@ -1423,13 +1417,25 @@ function openRelayer() {
 }
 
 async function sellGift(gift) {
-  const ok = await confirmAsk(`Продать ${gift.title} казино за ${gift.sell} ★?`);
+  const ok = await confirmAsk(`Продать ${gift.title} казино за ${gift.sell} ★ (комиссия 5%)?`);
   if (!ok) return;
   await guard(async () => {
     const r = await api("/api/gifts/sell", { id: gift.id });
     toast(`+${stars(r.amount)}`);
     fxBurstAt($("#balance-btn"), { count: 30 });
     haptic("win");
+    loadMyGifts(true);
+  });
+}
+
+async function improveGift(gift) {
+  const ok = await confirmAsk(`Улучшить ${gift.title} «${gift.model}»? Администратор найдёт этот подарок на маркете. `
+    + `Улучшенный NFT можно только вывести в Telegram (${nftFee()} ★) — продать или поставить его будет нельзя.`);
+  if (!ok) return;
+  await guard(async () => {
+    await api("/api/gifts/improve", { id: gift.id });
+    toast("Заявка отправлена — администратор ищет подарок на маркете");
+    haptic();
     loadMyGifts(true);
   });
 }
@@ -1475,7 +1481,7 @@ async function giftSheet(title, onPick) {
     const data = await api("/api/gifts");
     myGifts.relayer = data.relayer;
     $("#sheet .panel-title").textContent = title;
-    const usable = data.gifts.filter((g) => g.status === "owned");
+    const usable = data.gifts.filter((g) => g.status === "owned" && !g.upgraded);   // улучшенные — только вывод
     const list = $("#sheet-list");
     list.innerHTML = "";
     const chosen = new Set();
@@ -1732,8 +1738,7 @@ async function upgradeGo() {
       res.className = "result reveal " + (r.won ? "win" : "lose");
       wheel.classList.add(r.won ? "won" : "lost");
       if (r.won) {
-        res.textContent = `Апгрейд! ${r.nft.title} «${r.nft.model}» — администратор проверит и подтвердит, `
-          + "после этого NFT можно вывести из «Мои подарки»";
+        res.textContent = `Апгрейд! ${r.nft.title} «${r.nft.model}» — в «Мои подарки»: продайте, поставьте или улучшите`;
         haptic("win");
         fxBurstAt(wheel, { count: 80, speed: 7 });
         $("#bigwin-label").textContent = "UPGRADE";
@@ -1841,7 +1846,7 @@ async function slotsSpin() {
         machine.classList.add("won");
         res.className = "result win reveal";
         res.textContent = r.nft.demo
-          ? `ДЖЕКПОТ! NFT ${r.nft.title} · «${r.nft.model}» — в «Мои подарки», поставьте его в апгрейд`
+          ? `ДЖЕКПОТ! NFT ${r.nft.title} · «${r.nft.model}» — в «Мои подарки»`
           : `ДЖЕКПОТ! NFT ${r.nft.emoji} ${r.nft.title} · «${r.nft.model}» — в профиле → «Мои подарки»`;
         haptic("win");
         fxBurstAt(machine, { count: 80, speed: 9 });
@@ -3476,7 +3481,7 @@ function openCaseScreen(c) {
       ttl.textContent = p.title;
       const model = document.createElement("small");
       model.textContent = `модель «${p.model || "—"}»` + (p.rarity != null ? ` · ${p.rarity}%` : "")
-        + (p.demo ? " · демо" : "");
+        + "";
       d.append(e, ttl, model, document.createTextNode("флор " + nftPrice(p.amount)), sm);
     } else {
       d.append(e, document.createTextNode(casePriceText(p.amount)), sm);
@@ -3954,11 +3959,10 @@ async function hockeyAnimate(last) {
 function bind() {
   $$("[data-go]").forEach((b) => b.addEventListener("click", () => { haptic(); go(b.dataset.go); }));
   $("#back").addEventListener("click", goBack);
-  $("#brand").addEventListener("click", () => go("home"));
+  $("#brand").addEventListener("click", () => go("games"));
   $("#balance-btn").addEventListener("click", () => go("wallet"));
   $$("#wallet-tabs button").forEach((b) => b.addEventListener("click", () => { walletTab(b.dataset.tab); haptic(); }));
   $("#dep-btn").addEventListener("click", () => deposit(parseInt($("#dep-amount").value, 10)));
-  $("#check-btn").addEventListener("click", activateCheck);
   $("#chk-create").addEventListener("click", createCheck);
   $("#free-btn").addEventListener("click", openFree);
   $("#gate-open").addEventListener("click", gateOpenChannel);
@@ -4087,7 +4091,7 @@ async function init() {
     return;
   }
   document.body.classList.add("has-tabbar");
-  await homeEnter();
+  await gamesEnter();
   if (store("cur") === "ton") {
     $$("#cur-switch button").forEach((x) => x.classList.toggle("sel", x.dataset.cur === "ton"));
     setCurrency("ton");
