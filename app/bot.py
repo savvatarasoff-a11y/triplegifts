@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import os
 import time
 from urllib.parse import quote
 
@@ -230,7 +231,8 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/take <code>@user|ID сумма|all [ton] [причина]</code> — тихо списать баланс (абуз уязвимостей)\n"
             "/give <code>@user|ID сумма [ton] [причина]</code> — тихо вернуть/начислить\n"
             "/upgrades — заявки на улучшение NFT (найти подарок на маркете и одобрить)\n"
-            "/clearhistory — очистить историю ставок у игроков (статистика остаётся)"
+            "/clearhistory — очистить историю ставок у игроков (статистика остаётся)\n"
+            "/getgems <code>КЛЮЧ</code> — брать цены подарков с Getgems (/getgems — статус)"
         )
 
     @admin.message(Command("checks"))
@@ -506,6 +508,36 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
     async def dupe_clear(message: Message) -> None:
         count = await casino.demo_clear()
         await message.answer(f"🧹 Удалено демо-моделей: {count}, дюпы из «Моих подарков» тоже убраны.")
+
+    @admin.message(Command("getgems"))
+    async def getgems_cmd(message: Message, command: CommandObject) -> None:
+        """Ключ публичного API Getgems: каталог цен подарков берётся оттуда. /getgems off — вернуться на маркет Telegram."""
+        import json
+        import time as _time
+        from .getgems import KEY_KV, STATUS_KV
+        arg = (command.args or "").strip()
+        if arg:
+            try:
+                await message.delete()                    # ключ не оставляем в переписке
+            except Exception:
+                pass
+            if arg.lower() == "off":
+                await casino.db.kv_set(KEY_KV, "")
+                await message.answer("Getgems выключен — цены снова с маркета Telegram.")
+            else:
+                await casino.db.kv_set(KEY_KV, arg)
+                await message.answer("🔑 Ключ Getgems сохранён. Каталог обновится в течение 10 минут — проверьте /getgems.")
+            return
+        key = await casino.db.kv_get(KEY_KV) or os.environ.get("GETGEMS_API_KEY", "")
+        raw = await casino.db.kv_get(STATUS_KV)
+        st = json.loads(raw) if raw else None
+        text = ("<b>Getgems</b>\n" + ("Ключ: задан ✅" if key else "Ключ: не задан — цены с маркета Telegram") + "\n"
+                "Задать: <code>/getgems КЛЮЧ</code> · выключить: <code>/getgems off</code>")
+        if st:
+            ago = int((_time.time() - st["at"]) / 60)
+            text += (f"\n\nПоследнее обновление {ago} мин назад: коллекций {st['collections']}, "
+                     f"с ценой {st['priced']}, курс {st['rate']:.0f} ⭐ за 1 TON")
+        await message.answer(text)
 
     @admin.message(Command("clearhistory"))
     async def clear_history(message: Message) -> None:

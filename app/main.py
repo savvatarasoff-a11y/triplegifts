@@ -19,6 +19,7 @@ from .config import Config, ConfigError
 from .db import Database
 from .logging_setup import setup_logging
 from .gifts import notify_deposits, scan as gifts_scan
+from .getgems import Getgems, catalog_from_getgems
 from .nftimg import NftImages
 from .mrkt import emoji_for
 from .nft import catalog_keep_fresh, catalog_store, deliver_waiting, reprice_demo, sync as sync_nfts
@@ -58,6 +59,7 @@ ADMIN_COMMANDS = PLAYER_COMMANDS + [
     ("give", "Начислить баланс игроку"),
     ("upgrades", "Заявки на улучшение NFT"),
     ("clearhistory", "Очистить историю ставок"),
+    ("getgems", "Цены подарков с Getgems"),
 ]
 
 
@@ -160,7 +162,16 @@ async def catalog_loop(casino: Casino, relayer: Relayer) -> None:
     """Каталог NFT: по кругу обходит все коллекции на маркете Telegram и обновляет их флор (один запрос на коллекцию —
     полный круг занимает минуты, цены не успевают устареть)."""
     await asyncio.sleep(60)
+    gems = Getgems(casino.db)
     while True:
+        if await gems.key():                     # есть ключ Getgems — цены коллекций оттуда
+            try:
+                st = await catalog_from_getgems(casino.db, relayer, gems)
+                log.info("Каталог NFT (Getgems): %s коллекций, с ценой %s", st["collections"], st["priced"])
+            except Exception as e:
+                log.warning("Каталог Getgems не обновлён: %s", e)
+            await asyncio.sleep(600)
+            continue
         if not relayer.ready:
             await asyncio.sleep(300)
             continue
