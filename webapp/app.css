@@ -803,3 +803,13 @@ button { -webkit-user-select: none; user-select: none; }
 .mygifts.pick .mg.nc { padding-bottom: 8px; }
 .na.plain { background: radial-gradient(circle at 50% 40%, #3A3B42 0%, #24252B 80%); }
 .na.plain .na-img { width: 68%; height: 68%; }
+
+/* ---------- история ставок в играх: Я / Все ---------- */
+.gh-tabs { display: flex; gap: 4px; padding: 3px; border-radius: 12px; background: var(--surface-3); }
+.gh-tabs button { padding: 5px 14px; border-radius: 9px; font-size: 13px; font-weight: 800; color: var(--muted); }
+.gh-tabs button.sel { background: var(--accent); color: var(--on-accent); }
+.gh-list { display: flex; flex-direction: column; gap: 6px; max-height: 380px; overflow-y: auto; }
+.gh-row .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 11px;
+  font-weight: 800; flex: none; }
+.gh-x { font-size: 11px; font-weight: 800; color: var(--muted); padding: 2px 6px; border-radius: 6px; background: var(--surface-2); }
+.gh-x.hi { color: var(--accent-soft); background: rgba(245, 185, 60, .14); }

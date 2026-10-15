@@ -247,7 +247,7 @@ class Casino:
         """Лента крупных выигрышей всех игроков (от ×5)."""
         rows = await self.db.all(
             "SELECT b.game, b.bet, b.win, b.ts, b.cur, u.id, u.first_name, u.username FROM bets b "
-            "LEFT JOIN users u ON u.id = b.user_id WHERE b.win >= b.bet * 5 AND b.win > 0 "
+            "LEFT JOIN users u ON u.id = b.user_id WHERE b.win >= b.bet * 5 AND b.win > 0 AND b.bet > 0 "
             "ORDER BY b.id DESC LIMIT ?",
             limit,
         )
@@ -256,6 +256,22 @@ class Casino:
              "name": display_name({"id": r["id"], "first_name": r["first_name"], "username": r["username"]})}
             for r in rows
         ]
+
+    HISTORY_GAMES = frozenset({"slots", "crash", "mines", "plinko", "pickaxe", "football", "pvp", "hockey", "upgrade"})
+
+    async def game_history(self, game: Any, user_id: int | None = None, limit: int = 30) -> list[dict]:
+        """История ставок в одной игре, новые сверху: только свои (user_id) или всех игроков."""
+        if game not in self.HISTORY_GAMES:
+            raise GameError("Неизвестная игра")
+        mine = "AND b.user_id=? " if user_id is not None else ""
+        args = (game, user_id) if user_id is not None else (game,)
+        rows = await self.db.all(
+            "SELECT b.id, b.bet, b.win, b.ts, b.cur, u.id uid, u.first_name, u.username FROM bets b "
+            f"LEFT JOIN users u ON u.id = b.user_id WHERE b.game=? {mine}ORDER BY b.id DESC LIMIT ?", *args, limit)
+        return [{"id": r["id"], "uid": r["uid"], "bet": r["bet"], "win": r["win"], "cur": r["cur"], "ts": r["ts"],
+                 "x": round(r["win"] / r["bet"], 2) if r["bet"] else None,
+                 "name": display_name({"id": r["uid"], "first_name": r["first_name"], "username": r["username"]})}
+                for r in rows]
 
     async def all_bets(self, query: str = "", limit: int = 50) -> list[dict]:
         """История ставок всех игроков, новые сверху. Поиск — по имени/нику игрока или названию игры (любой регистр)."""

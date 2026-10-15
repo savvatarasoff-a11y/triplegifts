@@ -370,3 +370,23 @@ async def test_admin_only_users_and_all_bets(client):
     assert (await (await client.get("/api/admin/users?q=никого", headers=auth(777))).json())["users"] == []
     bets = (await (await client.get("/api/bets/all", headers=auth(777))).json())["bets"]
     assert bets[0]["game"] == "slots"
+
+
+async def test_game_history_me_and_all(client):
+    casino = client.app[CASINO]
+    for uid in (3, 4):
+        await client.get("/api/me", headers=auth(uid))
+        assert await casino.db.credit_payment(f"h{uid}", uid, 100)
+    await casino.slots(3, 5)
+    await casino.slots(4, 7)
+    await casino.slots(4, 9)
+    await casino.plinko(3, 5, 8, "low")
+    mine = (await (await client.get("/api/history?game=slots", headers=auth(3))).json())["items"]
+    assert [h["bet"] for h in mine] == [5] and mine[0]["uid"] == 3                # только свои ставки в этой игре
+    every = (await (await client.get("/api/history?game=slots&scope=all", headers=auth(3))).json())["items"]
+    assert [h["bet"] for h in every] == [9, 7, 5]                                 # все игроки, новые сверху
+    assert every[0]["name"] and set(every[0]) >= {"win", "x", "cur", "ts"}
+    plinko = (await (await client.get("/api/history?game=plinko&scope=all", headers=auth(4))).json())["items"]
+    assert [h["uid"] for h in plinko] == [3]
+    r = await client.get("/api/history?game=withdraw", headers=auth(3))
+    assert r.status == 400

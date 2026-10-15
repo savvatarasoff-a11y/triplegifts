@@ -242,6 +242,9 @@ class Database:
             if "referrer_id" not in {r["name"] for r in await cur.fetchall()}:
                 await self.conn.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
         await self.conn.execute("CREATE INDEX IF NOT EXISTS users_referrer ON users(referrer_id)")
+        # история ставок в каждой игре: свои и всех игроков
+        await self.conn.execute("CREATE INDEX IF NOT EXISTS idx_bets_game ON bets(game, id)")
+        await self.conn.execute("CREATE INDEX IF NOT EXISTS idx_bets_user_game ON bets(user_id, game, id)")
         for table in ("user_gifts", "nft_models"):   # test=1 — демо-NFT (нет на релейере, выигрыш платится звёздами)
             async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
                 if "test" not in {r["name"] for r in await cur.fetchall()}:

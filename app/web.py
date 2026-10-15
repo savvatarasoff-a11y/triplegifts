@@ -427,6 +427,12 @@ def build_app(cfg: Config, casino: Casino, bot: Bot, relayer: Relayer | None = N
     async def feed(_: web.Request) -> web.Response:
         return web.json_response({"wins": await casino.big_wins()})
 
+    @routes.get("/api/history")
+    async def game_history(request: web.Request) -> web.Response:
+        mine = request.query.get("scope") != "all"
+        items = await casino.game_history(request.query.get("game"), request[USER_ID] if mine else None)
+        return web.json_response({"items": items})
+
     @routes.post("/api/deposit")
     async def deposit(request: web.Request) -> web.Response:
         amount = (await body(request)).get("amount")

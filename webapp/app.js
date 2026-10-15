@@ -10,6 +10,9 @@ const state = { me: null, config: null, screen: "games", tab: "games", busy: fal
   cur: "stars", bal: { stars: 0, ton: 0 } };
 const GAME_NAMES = { slots: "Слоты", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол", mines: "Мины", crash: "Краш", case: "Кейс",
   pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд" };
+// экраны игр с историей ставок «Я / Все» → название игры в истории
+const HIST_GAMES = { slots: "slots", crash: "crash", mines: "mines", plinko: "plinko", pickaxe: "pickaxe",
+  football: "football", pvp: "pvp", hockey: "hockey", upgrade: "upgrade" };
 const TABS = ["games", "inv", "ref", "profile", "admin"];   // страницы нижнего меню («Админ» — только админам)
 const TITLES = { shop: "Магазин NFT", games: "Игры", inv: "Инвентарь", admin: "Админ", ref: "Друзья", profile: "Профиль", wallet: "Кошелёк", slots: "Слоты", crash: "Краш", mines: "Мины", plinko: "Plinko", pickaxe: "Кирка", football: "Футбол",
   cases: "Кейсы", case: "Кейс", free: "Кейс дня", pvp: "PvP-рулетка", hockey: "PvP-хоккей", upgrade: "Апгрейд NFT" };
@@ -131,6 +134,7 @@ function setBalance(value, cur) {
   cur = cur || "stars";
   state.bal[cur] = value;
   if (state.me) state.me.balance = state.bal.stars;
+  if (HIST_GAMES[state.screen]) histSoon();      // результат ставки — в историю игры
   if (cur !== state.cur) return;
   renderBalance();
   const el = $("#balance");
@@ -297,6 +301,8 @@ function go(screen) {
     upgrade: upgradeEnter, plinko: plinkoEnter, pickaxe: pickaxeEnter, football: footballEnter, free: freeEnter,
     shop: shopEnter, inv: () => loadMyGifts(), admin: adminEnter };
   if (enter[screen]) enter[screen]();
+  clearTimeout(hist.timer);
+  if (HIST_GAMES[screen]) histLoad(screen);
 }
 
 function goBack() {
@@ -3717,6 +3723,96 @@ async function pvpBet(game, gifts) {
   });
 }
 
+// ---------- история ставок в каждой игре: мои / все ----------
+
+const hist = { scope: store("hist-scope") === "all" ? "all" : "me", timer: 0, soon: 0, seq: 0 };
+
+function histMount() {
+  Object.keys(HIST_GAMES).forEach((screen) => {
+    const sec = $(`#${screen}`);
+    if (!sec) return;
+    const panel = document.createElement("div");
+    panel.className = "panel gh";
+    panel.innerHTML = '<div class="panel-head"><div class="panel-title">История</div>'
+      + '<div class="gh-tabs"><button data-scope="me">Я</button><button data-scope="all">Все</button></div></div>'
+      + '<div class="gh-list"></div>';
+    panel.querySelectorAll(".gh-tabs button").forEach((b) => b.addEventListener("click", () => {
+      if (hist.scope === b.dataset.scope) return;
+      hist.scope = b.dataset.scope;
+      store("hist-scope", hist.scope);
+      haptic();
+      histLoad(screen);
+    }));
+    sec.append(panel);
+  });
+}
+
+const histTime = (ts) => {
+  const d = new Date(ts * 1000);
+  const time = d.toTimeString().slice(0, 5);
+  return d.toDateString() === new Date().toDateString() ? time
+    : `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} ${time}`;
+};
+
+function histRow(h) {
+  const row = document.createElement("div");
+  row.className = "ab gh-row";
+  if (hist.scope === "all") row.append(avatarEl({ id: h.uid, name: h.name }, "av", PVP_COLORS[(h.uid || 0) % PVP_COLORS.length]));
+  const who = document.createElement("span");
+  who.className = "ab-who";
+  const title = document.createElement("b");
+  title.textContent = hist.scope === "all" ? h.name : `Ставка ${money(h.bet, h.cur)}`;
+  const meta = document.createElement("small");
+  meta.textContent = hist.scope === "all" ? `${money(h.bet, h.cur)} · ${histTime(h.ts)}` : histTime(h.ts);
+  who.append(title, meta);
+  row.append(who);
+  const won = h.win > 0;
+  if (won && h.x) {
+    const x = document.createElement("span");
+    x.className = "gh-x" + (h.x >= 2 ? " hi" : "");
+    x.textContent = fmtX(h.x);
+    row.append(x);
+  }
+  const res = document.createElement("span");
+  res.className = "ab-res " + (won ? "win" : "lose");
+  res.textContent = won ? "+" + money(h.win, h.cur) : "−" + money(h.bet, h.cur);
+  row.append(res);
+  return row;
+}
+
+async function histLoad(screen, quiet) {
+  const panel = $(`#${screen} .gh`);
+  if (!panel || !HIST_GAMES[screen]) return;
+  panel.querySelectorAll(".gh-tabs button").forEach((b) => b.classList.toggle("sel", b.dataset.scope === hist.scope));
+  const box = panel.querySelector(".gh-list");
+  const seq = ++hist.seq;
+  if (!quiet) box.innerHTML = '<div class="note">Загружаем…</div>';
+  clearTimeout(hist.timer);
+  try {
+    const { items } = await api(`/api/history?game=${HIST_GAMES[screen]}&scope=${hist.scope}`);
+    if (seq !== hist.seq || state.screen !== screen) return;
+    box.innerHTML = "";
+    if (!items.length) box.innerHTML = `<div class="note">${hist.scope === "me" ? "Вы ещё не играли" : "Ставок пока нет"}</div>`;
+    items.forEach((h) => box.append(histRow(h)));
+  } catch (e) {
+    if (seq === hist.seq && !quiet) box.innerHTML = "";
+  }
+  // ставки других игроков подтягиваются сами; во время розыгрыша PvP не обновляем, чтобы не выдать итог
+  if (seq === hist.seq) {
+    hist.timer = setTimeout(() => {
+      if (state.screen === screen && !pvp.animating) histLoad(screen, true);
+      else if (state.screen === screen) histSoon(3000);
+    }, 10000);
+  }
+}
+
+function histSoon(delay) {
+  clearTimeout(hist.soon);
+  hist.soon = setTimeout(() => {
+    if (HIST_GAMES[state.screen] && !pvp.animating) histLoad(state.screen, true);
+  }, delay || 900);
+}
+
 // ---------- хоккей: поле и шайба ----------
 
 const FIELD = [100, 160];
@@ -3927,6 +4023,7 @@ async function hockeyAnimate(last) {
 // ---------- запуск ----------
 
 function bind() {
+  histMount();
   $$("[data-go]").forEach((b) => b.addEventListener("click", () => { haptic(); go(b.dataset.go); }));
   $("#back").addEventListener("click", goBack);
   $("#brand").addEventListener("click", () => go("games"));
