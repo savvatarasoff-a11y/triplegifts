@@ -229,6 +229,7 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "/user <code>@username или ID</code> — баланс игрока\n"
             "/broadcast — рассылка игрокам (всем, пополнявшим, активным… или своему списку)\n"
             "/take <code>@user|ID сумма|all [ton] [причина]</code> — тихо списать баланс (абуз уязвимостей)\n"
+            "/take <code>@user|ID nft [причина]</code> — тихо забрать все NFT из инвентаря\n"
             "/give <code>@user|ID сумма [ton] [причина]</code> — тихо вернуть/начислить\n"
             "/upgrades — заявки на улучшение NFT (найти подарок на маркете и одобрить)\n"
             "/clearhistory — очистить историю ставок у игроков (статистика остаётся)\n"
@@ -873,13 +874,23 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         parts = (command.args or "").split()
         if len(parts) < 2:
             await message.answer(f"Формат: <code>/{name} @username|ID сумма|all [ton] [причина]</code>\n"
-                                 f"Например: <code>/{name} @vasya 500 абуз краша</code> или <code>/{name} 123 1.5 ton</code>")
+                                 + ("Все NFT игрока: <code>/take @username nft [причина]</code>\n" if sign < 0 else "")
+                                 + f"Например: <code>/{name} @vasya 500 абуз краша</code> или <code>/{name} 123 1.5 ton</code>")
             return
         user = await casino.db.find_user(parts[0])
         if not user:
             await message.answer("Игрок не найден")
             return
         rest = parts[2:]
+        if sign < 0 and parts[1].lower() in ("nft", "нфт"):          # /take @user nft — забрать все NFT
+            res = await casino.admin_take_nfts(message.from_user.id, user["id"], " ".join(rest))
+            who = html.escape(user["first_name"] or user["username"] or str(user["id"]))
+            text = (f"🎁 Забрали у {who} {res['count']} NFT на {res['value']} ⭐ (игрок не уведомлён)."
+                    if res["count"] else f"У {who} нет свободных NFT.")
+            if res["busy"]:
+                text += f"\nЕщё {res['busy']} NFT сейчас в ставках или на выводе — их не трогали."
+            await message.answer(text)
+            return
         cur = money.STARS
         if rest and rest[0].lower() == "ton":
             cur, rest = money.TON, rest[1:]

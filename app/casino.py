@@ -515,6 +515,28 @@ class Casino:
             balance = await self.db.change_balance(c, user_id, delta, kind, ref, cur)
         return {"delta": delta, "balance": balance, "cur": cur}
 
+    async def admin_take_nfts(self, admin_id: int, user_id: int, reason: str = "") -> dict:
+        """Админ забирает у игрока все NFT из инвентаря (свободные и ждущие улучшения) — казино, без уведомления.
+        NFT в идущих ставках и на выводе не трогаем. В журнале остаётся запись: кто, что и за что."""
+        async with self.db.tx() as c:
+            async with c.execute("SELECT id, value FROM user_gifts WHERE user_id=? AND kind='nft' "
+                                 "AND status IN ('owned','pending')", (user_id,)) as q:
+                rows = [dict(r) for r in await q.fetchall()]
+            async with c.execute("SELECT COUNT(*) n FROM user_gifts WHERE user_id=? AND kind='nft' "
+                                 "AND status IN ('staked','withdrawing')", (user_id,)) as q:
+                busy = (await q.fetchone())["n"]
+            ids = [r["id"] for r in rows]
+            if ids:
+                await c.execute(f"UPDATE user_gifts SET status='lost', round_id=NULL WHERE id IN "
+                                f"({','.join('?' * len(ids))})", ids)
+                async with c.execute("SELECT balance FROM users WHERE id=?", (user_id,)) as q:
+                    bal = (await q.fetchone())["balance"]
+                await c.execute(
+                    "INSERT INTO ledger(user_id, delta, kind, ref, balance_after, ts, cur) VALUES (?,0,?,?,?,?,?)",
+                    (user_id, "admin_take_nft", f"{admin_id}:{(reason or '').strip()[:150]}:{','.join(map(str, ids))}"[:400],
+                     bal, time.time(), money.STARS))
+        return {"count": len(ids), "value": sum(r["value"] or 0 for r in rows), "busy": busy}
+
     async def withdraw_request(self, user_id: int, gift_id: str, price: int, emoji: str | None) -> dict:
         if price < 1:
             raise GameError("Подарок недоступен")

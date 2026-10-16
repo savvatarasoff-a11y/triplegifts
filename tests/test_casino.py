@@ -651,3 +651,20 @@ async def test_pvp_state_points_to_bet_in_other_currency(casino):
     assert (await casino.pvp_state(1, "hockey", "ton"))["elsewhere"] == "stars"
     assert (await casino.pvp_state(1, "hockey", "stars"))["elsewhere"] is None
     assert (await casino.pvp_state(2, "hockey", "ton"))["elsewhere"] is None
+
+
+async def test_admin_take_all_nfts(casino):
+    db = casino.db
+    await db.touch_user(1, "u1", "U1")
+    now = time.time()
+    for gid, status in ((1, "owned"), (2, "pending"), (3, "staked"), (4, "withdrawing"), (5, "sold")):
+        await db.conn.execute(
+            "INSERT INTO user_gifts(id, user_id, ref, kind, collection_name, value, priced_at, status, created_at, test) "
+            "VALUES (?, 1, ?, 'nft', 'Lol Pop', 40, ?, ?, ?, 1)", (gid, f"g{gid}", now, status, now))
+    res = await casino.admin_take_nfts(7, 1, "абуз")
+    assert res == {"count": 2, "value": 80, "busy": 2}
+    status = {r["id"]: r["status"] for r in await db.all("SELECT id, status FROM user_gifts")}
+    assert status == {1: "lost", 2: "lost", 3: "staked", 4: "withdrawing", 5: "sold"}
+    log = await db.one("SELECT delta, ref FROM ledger WHERE kind='admin_take_nft'")
+    assert log["delta"] == 0 and log["ref"].startswith("7:абуз:")
+    assert (await casino.admin_take_nfts(7, 1))["count"] == 0
