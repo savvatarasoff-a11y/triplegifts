@@ -270,6 +270,8 @@ class Database:
         await self._add_columns("checks", {"paid": "INTEGER NOT NULL DEFAULT 0"})
         # условие активации чека админа: ref | dep | bet | quest | new и число (см. Casino.CHECK_CONDS)
         await self._add_columns("checks", {"cond": "TEXT", "cond_n": "INTEGER NOT NULL DEFAULT 0"})
+        # инлайн-чек (@бот сумма в любом чате): черновик, звёзды игрока списываются при первой активации
+        await self._add_columns("checks", {"draft": "INTEGER NOT NULL DEFAULT 0"})
         await self._add_columns("users", {"free_case_at": "REAL NOT NULL DEFAULT 0"})
         # каталог всех моделей с маркета Telegram: когда у модели последний раз был лот на продаже
         await self._add_columns("nft_models", {"seen_at": "REAL"})
@@ -507,7 +509,7 @@ class Database:
             "SELECT COALESCE(SUM(CASE WHEN status='sent' THEN amount END),0) sent, "
             "COALESCE(SUM(CASE WHEN status='pending' THEN amount END),0) pending FROM ton_withdrawals")
         checks = await self.one(
-            "SELECT COALESCE(SUM(amount*left),0) liab, COUNT(*) n FROM checks WHERE active=1 AND left>0 AND paid=0"
+            "SELECT COALESCE(SUM(amount*left),0) liab, COUNT(*) n FROM checks WHERE active=1 AND left>0 AND paid=0 AND draft=0"
         )
         issued = await self.one("SELECT COALESCE(SUM(l.delta),0) s FROM ledger l JOIN checks c ON c.code=l.ref "
                                 "WHERE l.kind='check' AND c.paid=0")

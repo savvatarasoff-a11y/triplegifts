@@ -706,3 +706,27 @@ async def test_admin_checks_with_conditions(casino):
         await casino.activate_check(4, quest)
     assert (await casino.activate_check(5, quest))[0] == 5
     assert "друзей" in casino.check_cond_text("ref", 1)
+
+
+async def test_inline_check_draft_paid_on_first_activation(casino):
+    db = casino.db
+    for u in (1, 2, 3):
+        await db.touch_user(u, f"u{u}", f"U{u}")
+    await fund(casino, 1, 100)
+    code = await casino.inline_check(1, 10, 2, paid=True)
+    assert await casino.inline_check(1, 10, 2, paid=True) == code          # набор того же запроса — тот же чек
+    assert await casino.inline_check(1, 10, 3, paid=True) != code
+    assert await balance(casino, 1) == 100                                 # пока никто не забрал — не списано
+    assert await casino.my_checks(1) == []                                 # черновики не видны в списках
+    assert (await casino.activate_check(2, code))[0] == 10
+    assert await balance(casino, 1) == 100 - 20                            # оплачен весь чек при первой активации
+    assert await casino.inline_check(1, 10, 2, paid=True) != code          # начатый чек больше не переиспользуем
+    assert (await casino.activate_check(3, code))[0] == 10
+    # у отправителя не хватает звёзд — чек не оплачивается и не выдаётся
+    poor = await casino.inline_check(3, 500, 1, paid=True)
+    with pytest.raises(GameError, match="не хватает"):
+        await casino.activate_check(2, poor)
+    assert await balance(casino, 2) == 10
+    # чек админа из инлайна — бесплатный
+    free = await casino.inline_check(7, 50, 1, paid=False)
+    assert (await casino.activate_check(2, free))[0] == 50

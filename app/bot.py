@@ -16,6 +16,9 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
     Message,
     PreCheckoutQuery,
     WebAppInfo,
@@ -90,6 +93,48 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
             "Все игры, кошелёк, кейсы и NFT — в мини-приложении. Жмите кнопку ниже 👇",
             reply_markup=play_keyboard(cfg),
         )
+
+    # ---------- инлайн-чеки: «@бот 10» или «@бот 10 5» в любом чате ----------
+
+    @router.inline_query()
+    async def inline_checks(query: InlineQuery, bot: Bot) -> None:
+        u = query.from_user
+        await casino.register(u.id, u.username, u.first_name)
+        is_admin = u.id in cfg.admin_ids
+        parts = (query.query or "").replace("⭐", " ").split()
+        me = await bot.me()
+
+        def article(rid: str, title: str, desc: str, text: str, markup=None) -> InlineQueryResultArticle:
+            return InlineQueryResultArticle(id=rid, title=title, description=desc, reply_markup=markup,
+                                            input_message_content=InputTextMessageContent(message_text=text))
+        if not parts or not all(p.isdigit() for p in parts[:2]):
+            res = article("help", "Как создать чек", "Введите сумму, например: 500 или 500 10 (на 10 человек)",
+                          f"🎁 Чеки Triple Gifts: напишите <code>@{me.username} 100</code> в любом чате.")
+            await query.answer([res], cache_time=0, is_personal=True)
+            return
+        amount = int(parts[0])
+        activations = int(parts[1]) if len(parts) > 1 else 1
+        total = amount * activations
+        user = await casino.db.get_user(u.id)
+        if not is_admin and (user or {}).get("balance", 0) < total:
+            res = article("nofunds", "Недостаточно средств", f"Нужно {total} ⭐",
+                          f"Для чека нужно {total} ⭐ — пополните баланс в @{me.username}")
+            await query.answer([res], cache_time=0, is_personal=True)
+            return
+        try:
+            code = await casino.inline_check(u.id, amount, activations, paid=not is_admin)
+        except GameError as e:
+            res = article("err", "Чек не создать", str(e)[:100], f"⚠️ {html.escape(str(e))}")
+            await query.answer([res], cache_time=0, is_personal=True)
+            return
+        link = f"https://t.me/{me.username}?start=c_{code}"
+        who = f" на {activations} чел." if activations > 1 else ""
+        res = article(
+            code, f"Чек на {amount} ⭐{who}",
+            "Звёзды спишутся, когда чек начнут забирать" if not is_admin else "Чек админа — бесплатно",
+            f"🎁 <b>Чек на {amount} ⭐</b>" + (f"\nАктиваций: {activations}" if activations > 1 else ""),
+            InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Получить", url=link)]]))
+        await query.answer([res], cache_time=0, is_personal=True)
 
     @router.message(Command("paysupport"))
     async def paysupport(message: Message) -> None:

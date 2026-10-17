@@ -431,8 +431,19 @@ class Casino:
             return None if at > since else "этот чек — только для новых игроков"
         return None
 
+    async def inline_check(self, creator_id: int, amount: int, activations: int, paid: bool) -> str:
+        """Чек из инлайн-режима: черновик (без списания), один и тот же на одинаковые сумму и активации,
+        пока его не начали активировать. Списание с игрока — при первой активации."""
+        row = await self.db.one(
+            "SELECT code FROM checks WHERE created_by=? AND amount=? AND total=? AND draft=1 AND left=total "
+            "AND active=1 AND created_at > ? ORDER BY created_at DESC LIMIT 1",
+            creator_id, amount, activations, time.time() - 6 * 3600)
+        if row:
+            return row["code"]
+        return await self.create_check(creator_id, amount, activations, paid=paid, draft=True)
+
     async def create_check(self, creator_id: int, amount: int, activations: int, paid: bool = False,
-                           cond: str | None = None, cond_n: int | None = None) -> str:
+                           cond: str | None = None, cond_n: int | None = None, draft: bool = False) -> str:
         """Чек админа — бесплатный, может быть с условием активации; чек игрока (paid) сразу списывает
         сумму × активации с его баланса."""
         if not isinstance(amount, int) or not isinstance(activations, int):
@@ -455,21 +466,22 @@ class Casino:
                 raise GameError("Активаций — от 1 до 10 000")
         code = secrets.token_hex(6)
         async with self.db.tx() as c:
-            if paid:
+            if paid and not draft:
                 try:
                     await self.db.change_balance(c, creator_id, -amount * activations, "check_out", code)
                 except InsufficientFunds:
                     raise GameError(f"Недостаточно звёзд: чек стоит {amount * activations} ⭐") from None
             await c.execute(
-                "INSERT INTO checks(code, amount, total, left, created_by, created_at, paid, cond, cond_n) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
-                (code, amount, activations, activations, creator_id, time.time(), int(paid), cond, cond_n or 0),
+                "INSERT INTO checks(code, amount, total, left, created_by, created_at, paid, cond, cond_n, draft) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (code, amount, activations, activations, creator_id, time.time(), int(paid), cond, cond_n or 0,
+                 int(draft)),
             )
         return code
 
     async def my_checks(self, user_id: int) -> list[dict]:
         return await self.db.all("SELECT code, amount, total, left, created_at FROM checks WHERE created_by=? "
-                                 "AND active=1 AND left>0 ORDER BY created_at DESC LIMIT 30", user_id)
+                                 "AND active=1 AND left>0 AND draft=0 ORDER BY created_at DESC LIMIT 30", user_id)
 
     async def activate_check(self, user_id: int, code: str) -> tuple[int, int]:
         """Возвращает (сумма, новый баланс)."""
@@ -491,6 +503,14 @@ class Casino:
             need = await self._check_cond_left(c, check, user_id)
             if need:
                 raise GameError(f"Чтобы забрать чек на {check['amount']} ⭐, {need}. Потом откройте чек снова.")
+            if check["draft"]:                           # инлайн-чек: оплачиваем при первой активации
+                if check["paid"]:
+                    try:
+                        await self.db.change_balance(c, check["created_by"], -check["amount"] * check["total"],
+                                                     "check_out", code)
+                    except InsufficientFunds:
+                        raise GameError("У отправителя чека не хватает звёзд — чек не оплачен") from None
+                await c.execute("UPDATE checks SET draft=0 WHERE code=?", (code,))
             cur = await c.execute(
                 "INSERT OR IGNORE INTO check_uses(code, user_id, ts) VALUES (?,?,?)", (code, user_id, time.time())
             )
@@ -501,7 +521,8 @@ class Casino:
         return check["amount"], balance
 
     async def list_checks(self) -> list[dict]:
-        return await self.db.all("SELECT * FROM checks WHERE active=1 AND left>0 ORDER BY created_at DESC LIMIT 50")
+        return await self.db.all("SELECT * FROM checks WHERE active=1 AND left>0 AND draft=0 "
+                                 "ORDER BY created_at DESC LIMIT 50")
 
     async def revoke_check(self, code: str, by_user: int | None = None) -> int | None:
         """Отзывает чек. Игрок — только свой. Неактивированный остаток чека игрока возвращается ему.
@@ -515,7 +536,7 @@ class Casino:
             if not check or (by_user is not None and check["created_by"] != by_user):
                 return None
             await c.execute("UPDATE checks SET active=0 WHERE code=?", (code,))
-            refund = check["amount"] * check["left"] if check["paid"] else 0
+            refund = check["amount"] * check["left"] if check["paid"] and not check["draft"] else 0
             if refund:
                 await self.db.change_balance(c, check["created_by"], refund, "check_refund", code)
         return refund
