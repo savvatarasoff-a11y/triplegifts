@@ -668,3 +668,41 @@ async def test_admin_take_all_nfts(casino):
     log = await db.one("SELECT delta, ref FROM ledger WHERE kind='admin_take_nft'")
     assert log["delta"] == 0 and log["ref"].startswith("7:абуз:")
     assert (await casino.admin_take_nfts(7, 1))["count"] == 0
+
+
+async def test_admin_checks_with_conditions(casino):
+    db = casino.db
+    for u in (1, 2, 3, 4):
+        await db.touch_user(u, f"u{u}", f"U{u}")
+    await db.conn.execute("UPDATE users SET created_at=created_at-100")      # старые игроки
+    ref = await casino.create_check(7, 30, 5, cond="ref")
+    dep = await casino.create_check(7, 20, 5, cond="dep", cond_n=100)
+    new = await casino.create_check(7, 10, 5, cond="new")
+    quest = await casino.create_check(7, 5, 5, cond="quest")
+    with pytest.raises(GameError, match="только у чеков админа"):
+        await casino.create_check(1, 5, 1, paid=True, cond="ref")
+    # ref: нужен приглашённый после выпуска чека друг, который забрал квест дня
+    with pytest.raises(GameError, match="готово 0 из 1"):
+        await casino.activate_check(1, ref)
+    await db.touch_user(5, "u5", "U5")
+    await db.conn.execute("UPDATE users SET referrer_id=1 WHERE id=5")
+    with pytest.raises(GameError, match="квест"):
+        await casino.activate_check(1, ref)                                 # друг ещё не забрал квест
+    await casino.quest_claim(5, True)
+    assert (await casino.activate_check(1, ref))[0] == 30
+    with pytest.raises(GameError, match="уже активировали"):
+        await casino.activate_check(1, ref)
+    # dep: платёж от 100 ⭐ после выпуска чека
+    await db.credit_payment("small", 2, 50)
+    with pytest.raises(GameError, match="от 100"):
+        await casino.activate_check(2, dep)
+    await db.credit_payment("big", 2, 150)
+    assert (await casino.activate_check(2, dep))[0] == 20
+    # new: только зашедшим после выпуска; quest: забрать квест сегодня
+    with pytest.raises(GameError, match="новых"):
+        await casino.activate_check(3, new)
+    assert (await casino.activate_check(5, new))[0] == 10
+    with pytest.raises(GameError, match="квест"):
+        await casino.activate_check(4, quest)
+    assert (await casino.activate_check(5, quest))[0] == 5
+    assert "друзей" in casino.check_cond_text("ref", 1)

@@ -268,6 +268,8 @@ class Database:
         await self.conn.executescript(TON_SCHEMA)
         # чеки игроков оплачены из их баланса (paid=1), чеки админа — бесплатные
         await self._add_columns("checks", {"paid": "INTEGER NOT NULL DEFAULT 0"})
+        # условие активации чека админа: ref | dep | bet | quest | new и число (см. Casino.CHECK_CONDS)
+        await self._add_columns("checks", {"cond": "TEXT", "cond_n": "INTEGER NOT NULL DEFAULT 0"})
         await self._add_columns("users", {"free_case_at": "REAL NOT NULL DEFAULT 0"})
         # каталог всех моделей с маркета Telegram: когда у модели последний раз был лот на продаже
         await self._add_columns("nft_models", {"seen_at": "REAL"})

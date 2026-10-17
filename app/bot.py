@@ -5,6 +5,7 @@ import asyncio
 import html
 import logging
 import os
+import re
 import time
 from urllib.parse import quote
 
@@ -77,7 +78,12 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
                 amount, balance = await casino.activate_check(user["id"], arg[2:])
                 await message.answer(f"🎁 Чек активирован: <b>+{amount} ⭐</b>\nБаланс: {balance} ⭐")
             except GameError as e:
-                await message.answer(f"⚠️ {html.escape(str(e))}")
+                text = f"⚠️ {html.escape(str(e))}"
+                if "«Друзья»" in str(e):                    # чек за приглашение — сразу даём свою ссылку
+                    link = referral_link((await message.bot.me()).username, user["id"])
+                    if link:
+                        text += f"\n\nВаша ссылка для друзей:\n{link}"
+                await message.answer(text)
             user = await casino.db.get_user(user["id"])
         await message.answer(
             "🎰 <b>Triple Gifts</b> — казино на подарках Telegram.\n\n"
@@ -151,17 +157,28 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         await register(message)
         is_admin = message.from_user.id in cfg.admin_ids
         args = (command.args or "").split()
-        if not args or not all(a.isdigit() for a in args[:2]):
+        cond_m = re.fullmatch(r"([a-z]+)(\d*)", args[2].lower()) if is_admin and len(args) > 2 else None
+        if not args or not all(a.isdigit() for a in args[:2]) or (len(args) > 2 and not cond_m):
             await message.answer(
                 "🎁 <b>Чеки</b>\nФормат: <code>/check сумма [активаций]</code>, например <code>/check 100 5</code> — "
                 "5 человек получат по 100 ⭐."
-                + ("" if is_admin else "\nСумма × активации сразу списывается с вашего баланса. "
+                + ("\n\n<b>Чеки с условием</b>: <code>/check сумма активаций условие</code>\n"
+                   "<code>ref</code>, <code>ref3</code> — пригласить 1 (3) друзей, которые заберут квест дня\n"
+                   "<code>dep100</code> — пополнить одним платежом от 100 ⭐\n"
+                   "<code>bet500</code> — поставить в играх 500 ⭐\n"
+                   "<code>quest</code> — забрать квест дня (подписка на канал)\n"
+                   "<code>new</code> — только новым игрокам\n"
+                   "Например: <code>/check 50 20 ref</code>" if is_admin else
+                   "\nСумма × активации сразу списывается с вашего баланса. "
                    "Неактивированное можно вернуть: /mychecks, /revoke код."))
             return
         amount = int(args[0])
         activations = int(args[1]) if len(args) > 1 else 1
+        cond = cond_m.group(1) if cond_m else None
+        cond_n = int(cond_m.group(2)) if cond_m and cond_m.group(2) else None
         try:
-            code = await casino.create_check(message.from_user.id, amount, activations, paid=not is_admin)
+            code = await casino.create_check(message.from_user.id, amount, activations, paid=not is_admin,
+                                             cond=cond, cond_n=cond_n)
         except GameError as e:
             await message.answer(f"⚠️ {html.escape(str(e))}")
             return
@@ -169,8 +186,11 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         link = f"https://t.me/{me.username}?start=c_{code}"
         log.info("%s %s создал чек на %s ⭐ × %s", "Админ" if is_admin else "Игрок", message.from_user.id,
                  amount, activations)
+        check = await casino.db.one("SELECT cond, cond_n FROM checks WHERE code=?", code)
+        cond_line = (f"\nУсловие: {html.escape(casino.check_cond_text(check['cond'], check['cond_n']))}"
+                     if check and check["cond"] else "")
         await message.answer(
-            f"🎁 <b>Чек на {amount} ⭐</b>\nАктиваций: {activations}\nКод: <code>{code}</code>\n\n{link}",
+            f"🎁 <b>Чек на {amount} ⭐</b>\nАктиваций: {activations}{cond_line}\nКод: <code>{code}</code>\n\n{link}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🎁 Получить {amount} ⭐", url=link)],
                 [InlineKeyboardButton(
@@ -242,7 +262,9 @@ def build_router(cfg: Config, casino: Casino, relayer: Relayer | None = None, on
         if not checks:
             await message.answer("Активных чеков нет.")
             return
-        lines = [f"<code>{c['code']}</code> — {c['amount']} ⭐, осталось {c['left']}/{c['total']}" for c in checks]
+        lines = [f"<code>{c['code']}</code> — {c['amount']} ⭐, осталось {c['left']}/{c['total']}"
+                 + (f" · {html.escape(casino.check_cond_text(c['cond'], c['cond_n']))}" if c.get("cond") else "")
+                 for c in checks]
         await message.answer("<b>Активные чеки</b>\n" + "\n".join(lines))
 
     @admin.message(Command("stats"))

@@ -388,10 +388,61 @@ class Casino:
 
     # ---------- чеки ----------
 
-    async def create_check(self, creator_id: int, amount: int, activations: int, paid: bool = False) -> str:
-        """Чек админа — бесплатный; чек игрока (paid) сразу списывает сумму × активации с его баланса."""
+    # Условия активации чеков админа: (описание для игрока, число по умолчанию)
+    CHECK_CONDS = {
+        "ref": ("пригласить по своей ссылке друзей, которые забрали квест дня: {n}", 1),
+        "dep": ("пополнить баланс одним платежом от {n} ⭐ после выпуска чека", 50),
+        "bet": ("поставить в играх {n} ⭐ после выпуска чека", 100),
+        "quest": ("забрать сегодняшний квест дня (подписка на канал)", 0),
+        "new": ("быть новым игроком — зайти в бота после выпуска чека", 0),
+    }
+
+    @classmethod
+    def check_cond_text(cls, cond: str | None, n: int) -> str:
+        return cls.CHECK_CONDS[cond][0].format(n=n) if cond in cls.CHECK_CONDS else ""
+
+    async def _check_cond_left(self, c: aiosqlite.Connection, check: Any, user_id: int) -> str | None:
+        """Чего не хватает для активации чека с условием (None — условие выполнено)."""
+        cond, n, since = check["cond"], check["cond_n"], check["created_at"]
+        if not cond:
+            return None
+
+        async def one(sql: str, *args: Any) -> Any:
+            async with c.execute(sql, args) as q:
+                return (await q.fetchone())[0]
+        if cond == "ref":
+            done = await one("SELECT COUNT(*) FROM users WHERE referrer_id=? AND quest_at > 0 AND created_at > ?",
+                             user_id, since)
+            return None if done >= n else (f"пригласите по своей ссылке (раздел «Друзья») друзей, которые заберут "
+                                           f"квест дня: готово {done} из {n}")
+        if cond == "dep":
+            ok = await one("SELECT COUNT(*) FROM payments WHERE user_id=? AND ts > ? AND amount >= ? "
+                           "AND COALESCE(cur, 'stars')='stars'", user_id, since, n)
+            return None if ok else f"пополните баланс одним платежом от {n} ⭐"
+        if cond == "bet":
+            done = await one("SELECT COALESCE(SUM(bet), 0) FROM bets WHERE user_id=? AND ts > ? AND cur='stars'",
+                             user_id, since)
+            return None if done >= n else f"поставьте в играх ещё {n - done} ⭐"
+        if cond == "quest":
+            at = await one("SELECT quest_at FROM users WHERE id=?", user_id) or 0
+            return None if time.time() - at < g.QUEST_EVERY else "заберите квест дня в мини-приложении"
+        if cond == "new":
+            at = await one("SELECT created_at FROM users WHERE id=?", user_id) or 0
+            return None if at > since else "этот чек — только для новых игроков"
+        return None
+
+    async def create_check(self, creator_id: int, amount: int, activations: int, paid: bool = False,
+                           cond: str | None = None, cond_n: int | None = None) -> str:
+        """Чек админа — бесплатный, может быть с условием активации; чек игрока (paid) сразу списывает
+        сумму × активации с его баланса."""
         if not isinstance(amount, int) or not isinstance(activations, int):
             raise GameError("Некорректный чек")
+        if cond is not None:
+            if paid or cond not in self.CHECK_CONDS:
+                raise GameError("Условия активации — только у чеков админа: " + ", ".join(self.CHECK_CONDS))
+            cond_n = self.CHECK_CONDS[cond][1] if not cond_n else cond_n
+            if not 0 <= cond_n <= 1_000_000:
+                raise GameError("Неверное число в условии")
         if paid:
             if amount < USER_CHECK_MIN or amount > 100_000:
                 raise GameError(f"Сумма чека — от {USER_CHECK_MIN} до 100 000 ⭐")
@@ -410,8 +461,9 @@ class Casino:
                 except InsufficientFunds:
                     raise GameError(f"Недостаточно звёзд: чек стоит {amount * activations} ⭐") from None
             await c.execute(
-                "INSERT INTO checks(code, amount, total, left, created_by, created_at, paid) VALUES (?,?,?,?,?,?,?)",
-                (code, amount, activations, activations, creator_id, time.time(), int(paid)),
+                "INSERT INTO checks(code, amount, total, left, created_by, created_at, paid, cond, cond_n) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (code, amount, activations, activations, creator_id, time.time(), int(paid), cond, cond_n or 0),
             )
         return code
 
@@ -433,6 +485,12 @@ class Casino:
                 raise GameError("Чек уже полностью активирован")
             if check["paid"] and check["created_by"] == user_id:
                 raise GameError("Свой чек активировать нельзя — отправьте его другу")
+            async with c.execute("SELECT 1 FROM check_uses WHERE code=? AND user_id=?", (code, user_id)) as q:
+                if await q.fetchone():
+                    raise GameError("Вы уже активировали этот чек")
+            need = await self._check_cond_left(c, check, user_id)
+            if need:
+                raise GameError(f"Чтобы забрать чек на {check['amount']} ⭐, {need}. Потом откройте чек снова.")
             cur = await c.execute(
                 "INSERT OR IGNORE INTO check_uses(code, user_id, ts) VALUES (?,?,?)", (code, user_id, time.time())
             )
