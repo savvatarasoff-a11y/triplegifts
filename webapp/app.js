@@ -3993,7 +3993,24 @@ function hockeyDraw(players, layout, o) {
 }
 
 function hockeyPuck(ctx, ps, zones, puck, s) {
-  const { x, y, trail, aim } = puck;
+  const { x, y, trail, aim, spin = 0, squash, ripples } = puck;
+  const R = 2.7;
+  // волны от ударов о борт
+  (ripples || []).forEach((rp) => {
+    ctx.strokeStyle = `rgba(255,255,255,${0.55 * (1 - rp.age)})`;
+    ctx.lineWidth = 0.5 * (1 - rp.age) + 0.15;
+    ctx.beginPath(); ctx.arc(rp.x, rp.y, 2 + rp.age * 11, 0, 7); ctx.stroke();
+  });
+  // след: сужающийся шлейф за шайбой
+  if (trail && trail.length > 1) {
+    ctx.lineCap = "round";
+    for (let k = 1; k < trail.length; k++) {
+      const f = k / trail.length;
+      ctx.strokeStyle = `rgba(255,255,255,${0.32 * f})`;
+      ctx.lineWidth = R * 1.6 * f;
+      ctx.beginPath(); ctx.moveTo(trail[k - 1][0], trail[k - 1][1]); ctx.lineTo(trail[k][0], trail[k][1]); ctx.stroke();
+    }
+  }
   if (aim !== undefined) {                       // прицел: стрелка ходит вокруг шайбы перед ударом
     ctx.save();
     ctx.translate(x, y);
@@ -4004,22 +4021,56 @@ function hockeyPuck(ctx, ps, zones, puck, s) {
     ctx.beginPath(); ctx.moveTo(7.6, 0); ctx.lineTo(4.2, -2.4); ctx.lineTo(4.2, 2.4); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
-  (trail || []).forEach((p, i) => {
-    ctx.globalAlpha = (i + 1) / trail.length * 0.35;
-    ctx.fillStyle = "#FFFFFF";
-    ctx.beginPath(); ctx.arc(p[0], p[1], 2.4 * (i + 1) / trail.length, 0, 7); ctx.fill();
-  });
-  ctx.globalAlpha = 1;
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,.45)";
-  ctx.shadowBlur = 2 * s;
-  ctx.shadowOffsetY = 0.5 * s;
-  ctx.fillStyle = "#F4F4F6";
-  ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 7); ctx.fill();
+  ctx.translate(x, y);
+  if (squash) {                                  // удар о борт: шайбу на миг сплющивает вдоль нормали
+    ctx.rotate(squash.angle);
+    ctx.scale(1 - 0.28 * squash.k, 1 + 0.16 * squash.k);
+    ctx.rotate(-squash.angle);
+  }
+  // тень на льду
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,.5)";
+  ctx.shadowBlur = 2.2 * s;
+  ctx.shadowOffsetY = 0.9 * s;
+  ctx.fillStyle = "rgba(0,0,0,.35)";
+  ctx.beginPath(); ctx.ellipse(0.3, 0.9, R, R * 0.92, 0, 0, 7); ctx.fill();
   ctx.restore();
-  ctx.strokeStyle = "rgba(0,0,0,.12)";
+  // боковина (толщина шайбы)
+  ctx.fillStyle = "#A9AEB8";
+  ctx.beginPath(); ctx.arc(0, 0.75, R, 0, 7); ctx.fill();
+  // верх: объёмный градиент
+  const top = ctx.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.1, 0, 0, R * 1.05);
+  top.addColorStop(0, "#FFFFFF");
+  top.addColorStop(0.7, "#ECEEF2");
+  top.addColorStop(1, "#C9CDD5");
+  ctx.fillStyle = top;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, 7); ctx.fill();
+  // кант и насечки — по ним видно вращение
+  ctx.strokeStyle = "rgba(60,64,74,.35)";
+  ctx.lineWidth = 0.3;
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.8, 0, 7); ctx.stroke();
+  ctx.strokeStyle = "rgba(60,64,74,.45)";
   ctx.lineWidth = 0.35;
-  ctx.beginPath(); ctx.arc(x, y, 1.7, 0, 7); ctx.stroke();
+  for (let k = 0; k < 6; k++) {
+    const a = spin + k * Math.PI / 3;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * R * 0.82, Math.sin(a) * R * 0.82);
+    ctx.lineTo(Math.cos(a) * R * 0.98, Math.sin(a) * R * 0.98);
+    ctx.stroke();
+  }
+  // золотая метка в центре
+  ctx.fillStyle = COLOR.accent;
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const a = spin - Math.PI / 2 + k * Math.PI / 5, r = k % 2 ? 0.45 : 1.05;
+    k ? ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  ctx.closePath(); ctx.fill();
+  // блик
+  ctx.fillStyle = "rgba(255,255,255,.75)";
+  ctx.beginPath(); ctx.ellipse(-R * 0.38, -R * 0.45, R * 0.36, R * 0.18, -0.6, 0, 7); ctx.fill();
+  ctx.restore();
   // ярлык: чья зона под шайбой (пока целится — не мешает стрелке)
   if (aim !== undefined) return;
   const i = zones.findIndex((z, n) => n < ps.length && hockeyInside(z, x, y));
@@ -4079,31 +4130,66 @@ async function hockeyAnimate(last) {
     requestAnimationFrame(frame);
   });
   await sleep(250);
-  const duration = 9000;
+  // Физика: трение о лёд — постоянное замедление, на каждом отскоке шайба теряет часть скорости.
+  // Скорости считаем с конца (в точке остановки — 0), поэтому шайба точно приходит в точку с сервера,
+  // а замедление подбираем так, чтобы полёт длился около 8.5 с.
+  const RESTITUTION = 0.8, FLIGHT = 8500;
+  const n = seg.length, vS = [], vE = [];
+  let v = 0, T1 = 0;
+  for (let k = n - 1; k >= 0; k--) {
+    vE[k] = v;
+    vS[k] = Math.sqrt(v * v + 2 * seg[k][1]);
+    T1 += vS[k] - vE[k];
+    v = vS[k] / RESTITUTION;
+  }
+  const q = T1 / FLIGHT;                          // √замедления: скорости × q, время ÷ q
+  const acc = q * q;
+  const tl = [];
+  let tAcc = 0;
+  for (let k = 0; k < n; k++) {
+    const dt = (vS[k] - vE[k]) / q;
+    tl.push({ t0: tAcc, dt, vs: vS[k] * q });
+    tAcc += dt;
+  }
+  const v0 = vS[0] * q;
   const start = performance.now();
-  const trail = [];
-  let lastSeg = 0, x = pts[0][0], y = pts[0][1], cam = { x, y, z: 1 };
+  const trail = [], ripples = [];
+  let lastSeg = 0, x = pts[0][0], y = pts[0][1], cam = { x, y, z: 1 }, spin = 0, spinDir = 1, travelled = 0;
+  let squashAt = -1e9, squashAngle = 0;
   await new Promise((resolve) => {
     const frame = (now) => {
-      const t = Math.min(1, (now - start) / duration);
-      const dist = total * (1 - Math.pow(1 - t, 2.6));
-      let i = seg.findIndex(([s0, len]) => dist <= s0 + len);
-      if (i < 0) i = seg.length - 1;
-      const [s0, len] = seg[i];
-      const f = len ? (dist - s0) / len : 1;
-      x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f;
-      y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f;
-      cam = { x, y, z: 1 + 1.1 * smooth(0.5, 0.85, t) };
-      if (i !== lastSeg) {  // отскок от борта
-        lastSeg = i;
+      const el = Math.min(tAcc, now - start);
+      let k = tl.findIndex((e) => el < e.t0 + e.dt);
+      if (k < 0) k = n - 1;
+      const e = tl[k];
+      const tau = Math.min(e.dt, el - e.t0);
+      const dist = Math.min(seg[k][1], e.vs * tau - acc * tau * tau / 2);
+      const f = seg[k][1] ? dist / seg[k][1] : 1;
+      x = pts[k][0] + (pts[k + 1][0] - pts[k][0]) * f;
+      y = pts[k][1] + (pts[k + 1][1] - pts[k][1]) * f;
+      const speed = Math.max(0, e.vs - acc * tau);
+      cam = { x, y, z: 1 + 1.1 * smooth(0.55, 0.9, el / tAcc) };
+      if (k !== lastSeg) {  // отскок от борта: всплеск, волна, сплющивание, вращение в другую сторону
+        lastSeg = k;
+        const [bx, by] = pts[k];
         haptic();
-        const [sx, sy] = hockeyScreen(pts[i][0], pts[i][1], cam);
-        fxBurst(sx, sy, { count: 8, speed: 3, gravity: 0 });
+        const [sx, sy] = hockeyScreen(bx, by, cam);
+        fxBurst(sx, sy, { count: 10, speed: 2 + 4 * speed / v0, gravity: 0 });
+        ripples.push({ x: bx, y: by, at: now });
+        squashAt = now;
+        squashAngle = (bx < 0.5 || bx > FIELD[0] - 0.5) ? 0 : Math.PI / 2;
+        spinDir = -spinDir;
       }
+      spin += spinDir * (seg[k][0] + dist - travelled) / 2.4;
+      travelled = seg[k][0] + dist;
       trail.push([x, y]);
-      if (trail.length > 12) trail.shift();
-      hockeyDraw(players, layout, { puck: { x, y, trail }, cam });
-      t < 1 ? requestAnimationFrame(frame) : resolve();
+      const keep = 4 + Math.round(14 * speed / v0);   // чем быстрее — тем длиннее шлейф
+      while (trail.length > keep) trail.shift();
+      const sq = Math.max(0, 1 - (now - squashAt) / 180);
+      const live = ripples.filter((rp) => now - rp.at < 450).map((rp) => ({ x: rp.x, y: rp.y, age: (now - rp.at) / 450 }));
+      hockeyDraw(players, layout, { puck: { x, y, trail, spin, ripples: live,
+        squash: sq > 0 ? { angle: squashAngle, k: Math.sin(sq * Math.PI) } : null }, cam });
+      el < tAcc ? requestAnimationFrame(frame) : resolve();
     };
     requestAnimationFrame(frame);
   });
@@ -4113,7 +4199,7 @@ async function hockeyAnimate(last) {
   await new Promise((resolve) => {
     const frame = (now) => {
       const t = Math.min(1, (now - t0) / 900);
-      hockeyDraw(players, layout, { puck: { x, y }, cam: { x, y, z: 1 + 1.1 * (1 - smooth(0.3, 1, t)) },
+      hockeyDraw(players, layout, { puck: { x, y, spin }, cam: { x, y, z: 1 + 1.1 * (1 - smooth(0.3, 1, t)) },
         highlight: winnerIdx, dim: smooth(0, 0.5, t) });
       t < 1 ? requestAnimationFrame(frame) : resolve();
     };
